@@ -388,7 +388,7 @@ async function turn(
   channel: Channel,
   extraInstruction?: string,
   fallback?: string,
-  opts: { forceEnd?: boolean; move?: Move } = {},
+  opts: { forceEnd?: boolean; move?: Move; avoid?: RegExp } = {},
 ): Promise<TurnResult> {
   const resendOk = /\b(resend|send (it|the link) again|another link|new link|lost the link)\b/i.test(lastUserText(s));
   const ctx: Ctx = { s, channel, actions: [], newMessages: [], resendOk, move: opts.move };
@@ -412,6 +412,8 @@ async function turn(
     // On a call, "i'll text you instead" means actually hanging up (with that line as the goodbye).
     if (failed && channel === "voice" && (s.llmFailures ?? 0) > 1 && !ctx.actions.some((a) => a.type === "end_call")) ctx.actions.push({ type: "end_call" });
   }
+  // Some things must never be said in this moment (e.g. "got cut off" after we hung up ourselves).
+  if (opts.avoid && fallback && opts.avoid.test(text)) text = fallback;
   if (opts.forceEnd && !ctx.actions.some((a) => a.type === "end_call")) ctx.actions.push({ type: "end_call" });
   // Placing a call: the text is just the heads up; the talking happens on the call.
   if (channel === "text" && ctx.actions.some((a) => a.type === "start_call")) {
@@ -652,7 +654,10 @@ async function handleEventInner(s: Session, e: SessionEvent): Promise<TurnResult
           : e.reason === "user_hangup"
             ? "They hung up (maybe on purpose, maybe not)."
             : "The line dropped on our side.";
-      return turn(s, "text", `${RECAP_INSTRUCTION} ${how} Call lasted ${secs}s.`, recapFallback(s, e.reason), { move: EVENT_MOVES.recap });
+      return turn(s, "text", `${RECAP_INSTRUCTION} ${how} Call lasted ${secs}s.`, recapFallback(s, e.reason), {
+        move: EVENT_MOVES.recap,
+        avoid: e.reason === "agent_ended" ? /(cut off|dropped|lost you|got disconnected)/i : undefined,
+      });
     }
     case "silence": {
       if (!s.call.active) return idle();
