@@ -74,6 +74,9 @@ export default function Home() {
   const revealRef = useRef<Promise<void>>(Promise.resolve());
   const [revealing, setRevealing] = useState(false);
   const [showWhy, setShowWhy] = useState(true);
+  // Read receipts for your own texts: sent (one check), delivered (two), seen (two, filled).
+  const [receipts, setReceipts] = useState<Record<string, Receipt>>({});
+  const setReceipt = (id: string, r: Receipt) => setReceipts((prev) => ({ ...prev, [id]: r }));
   const apply = useCallback(
     (r: TurnResult, sentAt?: number) => {
       if (idRef.current && r.session.id !== idRef.current) return; // stale reply from another session
@@ -237,13 +240,20 @@ export default function Home() {
     // Your own message lands right away, like any messaging app.
     const clientId = nanoid(10);
     upsert([{ id: clientId, role: "user", channel: "text", text, ts: now(), ...(atts.length ? { attachments: atts } : {}) }]);
+    setReceipt(clientId, "sent");
+    // The request is on the server within a beat; if it fails, the message comes back out.
+    const deliveredTimer = setTimeout(() => setReceipt(clientId, "delivered"), 350);
     // They "read" it first; the typing dots only show after a beat.
     const typingTimer = setTimeout(() => setTyping(true), 500);
     const sentAt = now();
     try {
-      apply(await post<TurnResult>("/api/chat", { sessionId: idRef.current, channel: "text", text, attachments: atts, clientId }), sentAt);
+      const reply = await post<TurnResult>("/api/chat", { sessionId: idRef.current, channel: "text", text, attachments: atts, clientId });
+      clearTimeout(deliveredTimer);
+      setReceipt(clientId, "seen"); // the agent has read it; its reply follows at a human pace
+      apply(reply, sentAt);
       setError(null);
     } catch {
+      clearTimeout(deliveredTimer);
       setMessages((prev) => prev.filter((m) => m.id !== clientId));
       setDraft(text);
       setPending(atts);
@@ -358,7 +368,8 @@ export default function Home() {
                   m={m}
                   first={showTime || side(prev) !== m.role}
                   last={side(next) !== m.role}
-                  reaction={typing && m.id === lastUserId ? "👀" : undefined}
+                  reaction={(typing || revealing) && m.id === lastUserId && m.text.length > 90 ? "👀" : undefined}
+                  receipt={m.role === "user" && m.id === lastUserId ? (receipts[m.id] ?? "seen") : undefined}
                   onConnect={connectGmail}
                   connected={session?.slots.gmail.status === "filled"}
                   contactSaved={!!session?.contactSaved}
@@ -526,6 +537,7 @@ function Bubble({
   first,
   last,
   reaction,
+  receipt,
   onConnect,
   connected,
   contactSaved,
@@ -535,6 +547,7 @@ function Bubble({
   first: boolean;
   last: boolean;
   reaction?: string;
+  receipt?: Receipt;
   onConnect: () => void;
   connected: boolean;
   contactSaved: boolean;
@@ -562,6 +575,13 @@ function Bubble({
             <div className="text-[11px] text-neutral-400 mt-0.5">app.yourpersona.com</div>
           </button>
         </div>
+      </div>
+    );
+  if (m.kind === "gif")
+    return (
+      <div data-role="agent" className={`${gap} flex justify-start`}>
+        {/* eslint-disable-next-line @next/next/no-img-element */}
+        <img src={m.text} alt="gif" className="rounded-2xl max-w-[60%] max-h-48 object-cover bg-[#26272c]" loading="lazy" />
       </div>
     );
   if (m.kind === "link_preview")
@@ -603,7 +623,7 @@ function Bubble({
     ? `rounded-3xl ${first ? "" : "rounded-tr-md"} ${last ? "" : "rounded-br-md"}`
     : `rounded-3xl ${first ? "" : "rounded-tl-md"} ${last ? "" : "rounded-bl-md"}`;
   return (
-    <div className={`${gap} flex ${mine ? "justify-end" : "justify-start"}`}>
+    <div data-role={m.role} className={`${gap} flex ${mine ? "justify-end" : "justify-start"}`}>
       <div className={`relative max-w-[78%] px-4 py-2.5 whitespace-pre-wrap text-[15px] leading-snug ${corners} ${mine ? "bg-[#3b4a6b]" : "bg-[#26272c]"}`}>
         {m.channel === "voice" && (
           <span className="flex items-center gap-1 text-[10px] uppercase tracking-wide text-neutral-400 mb-0.5">
@@ -625,7 +645,26 @@ function Bubble({
           </span>
         )}
       </div>
+      {receipt && <ReceiptMark state={receipt} />}
     </div>
+  );
+}
+
+type Receipt = "sent" | "delivered" | "seen";
+
+// Bottom right of your latest text: one check sent, two delivered, two filled in when seen.
+function ReceiptMark({ state }: { state: Receipt }) {
+  const color = state === "seen" ? "#8ab4f8" : "#8b8d94";
+  const one = <path d="M1.5 8.5 5 12l7.5-8" fill="none" stroke={color} strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" />;
+  const two = <path d="M7 12l7.5-8" fill="none" stroke={color} strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" />;
+  return (
+    <span className="self-end ml-1 mb-0.5 flex items-center" aria-label={state} title={state}>
+      <svg width="17" height="14" viewBox="0 0 17 14">
+        {state === "seen" && <circle cx="8.5" cy="7" r="7" fill="#8ab4f8" opacity="0.18" />}
+        {one}
+        {state !== "sent" && two}
+      </svg>
+    </span>
   );
 }
 
@@ -708,7 +747,11 @@ function CallScreen(p: {
         </div>
         {p.status === "active" && (
           <div className="mt-8 px-8 space-y-3 text-sm">
-            {p.said && <div className="text-neutral-200">{p.said}</div>}
+            {p.said && (
+              <div data-caption="agent" className="text-neutral-200">
+                {p.said}
+              </div>
+            )}
             {p.heard && <div className="text-neutral-400 italic">you: {p.heard}</div>}
           </div>
         )}

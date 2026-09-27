@@ -6,6 +6,7 @@ import { mockReply } from "./mock";
 import { provider, quick, runToolLoop, type Part, type ToolDef, type Turn } from "./llm";
 import { DEMO_INBOX, recordOutcome, triageInbox } from "./triage";
 import { EVENT_MOVES, chooseMove, markUsed } from "./moves";
+import { GIF_MIN_GAP, GIF_MOODS, GIFS, gifUrl, type GifMood } from "./gifs";
 import type { Move } from "./types";
 
 const MAX_TOOL_ROUNDS = 3;
@@ -46,6 +47,17 @@ const TOOLS: ToolDef[] = [
   { name: "send_gmail_link", description: "Drop a secure 'Connect Gmail' link into the text thread. Works during a call.", schema: NO_ARGS },
   { name: "end_call", description: "Hang up after saying goodbye on the call.", schema: NO_ARGS },
   {
+    name: "send_gif",
+    description:
+      "Rarely, over text only: send a GIF instead of a short reply, when your whole answer would just be okay / yes / no / nice / haha / on it. Don't add text that says the same thing.",
+    schema: {
+      type: "object",
+      properties: { mood: { type: "string", enum: [...GIF_MOODS] } },
+      required: ["mood"],
+      additionalProperties: false,
+    },
+  },
+  {
     name: "graduate",
     description:
       "End setup and become the full assistant. Only when the user asked to skip or stop setup, or nothing is left to gather. Knowing their need is not enough. Remaining items get deferred.",
@@ -73,7 +85,7 @@ function toTurns(s: Session): Turn[] {
   convo.forEach((m, i) => {
     const role = m.role === "user" ? "user" : "assistant";
     const prefix = m.channel === "voice" && m.role === "user" ? "(on call) " : "";
-    let text = m.kind === "gmail_link" ? "[sent the Connect Gmail link]" : prefix + m.text;
+    let text = m.kind === "gmail_link" ? "[sent the Connect Gmail link]" : m.kind === "gif" ? "[sent a gif]" : prefix + m.text;
     if (m.attachments?.length) text += "\n" + m.attachments.map(attachmentText).join("\n");
     const parts: Part[] = [];
     // Only the latest user message carries actual image pixels; older ones use the summary.
@@ -120,6 +132,7 @@ export interface Ctx {
   resendOk?: boolean;
   newCard?: Msg;
   move?: Move;
+  pending?: Promise<void>[];
 }
 
 const WANTS_OUT = /\b(skip|not now|later|no more questions|stop asking|just (help|do|get)|let'?s (just )?(start|go)|that'?s (it|all)|i'?m good|enough setup)\b/i;
@@ -142,10 +155,15 @@ async function runTool(ctx: Ctx, name: string, input: Record<string, unknown>): 
       const renamed = slot === "agentName" && s.slots.agentName.value && s.slots.agentName.value !== value;
       s.slots[slot] = { ...s.slots[slot], value, status: "filled", source: ctx.channel, updatedAt: Date.now() };
       if (slot === "agentName") {
-        const style = await classifyVoice(value);
-        // Keep one voice per call: a rename mid-call applies from the next call.
-        if (s.call.active) s.pendingVoice = style;
-        else s.voice = style;
+        // Picking the voice runs alongside the reply instead of in front of it.
+        const onCall = s.call.active;
+        (ctx.pending ??= []).push(
+          classifyVoice(value).then((style) => {
+            // Keep one voice per call: a rename mid-call applies from the next call.
+            if (onCall) s.pendingVoice = style;
+            else s.voice = style;
+          }),
+        );
         // One contact card per session, updated in place (client upserts by id): no duplicates on rename.
         const card = s.transcript.find((m) => m.kind === "contact_card");
         if (card) {
@@ -153,7 +171,7 @@ async function runTool(ctx: Ctx, name: string, input: Record<string, unknown>): 
           ctx.newMessages.push(card);
         } else ctx.newCard = msg("agent", "text", value, { kind: "contact_card" }); // sent after the text, like persona
 
-        return `saved. voice set to ${s.voice}.${renamed ? " contact card updated in place." : ""}`;
+        return `saved.${renamed ? " contact card updated in place." : ""}`;
       }
       return "saved";
     }
@@ -195,6 +213,20 @@ async function runTool(ctx: Ctx, name: string, input: Record<string, unknown>): 
       // They're off doing a task: silence is expected, don't nag with check-ins.
       if (s.call.active) ctx.actions.push({ type: "patience", ms: 30000 });
       return "link sent to their texts";
+    }
+    case "send_gif": {
+      if (ctx.channel !== "text") return "error: gifs only over text";
+      const agentMsgs = s.transcript.filter((m) => m.role === "agent");
+      const lastGif = agentMsgs.map((m) => m.kind).lastIndexOf("gif");
+      if (agentMsgs.length < 5 || (lastGif >= 0 && agentMsgs.length - lastGif < GIF_MIN_GAP)) return "error: not now, too soon for another gif. reply in words";
+      const mood = String(input.mood) as GifMood;
+      const pool = GIFS[mood];
+      if (!pool) return "error: unknown mood";
+      const id = pool[agentMsgs.length % pool.length];
+      const gif = msg("agent", "text", gifUrl(id), { kind: "gif" });
+      ctx.newMessages.push(gif);
+      s.transcript.push(gif);
+      return "gif sent. that's your whole reply unless you have something new to add";
     }
     case "end_call":
       if (!s.call.active) return "not on a call";
@@ -308,16 +340,20 @@ async function turn(
     // Provider down or overloaded: fall through to the scripted line rather than go quiet.
     console.error("llm turn failed", err);
   }
-  if (!text.trim() && fallback) text = fallback;
+  if (!text.trim() && fallback && !ctx.newMessages.some((m) => m.kind === "gif")) text = fallback;
   if (opts.forceEnd && !ctx.actions.some((a) => a.type === "end_call")) ctx.actions.push({ type: "end_call" });
   // Placing a call: the text is just the heads up; the talking happens on the call.
-  if (channel === "text" && ctx.actions.some((a) => a.type === "start_call")) text = "calling you now.";
+  if (channel === "text" && ctx.actions.some((a) => a.type === "start_call")) {
+    text = "calling you now.";
+    ctx.move = EVENT_MOVES.callNow;
+  }
   if (channel === "voice" && ctx.actions.some((a) => a.type === "end_call") && !GOODBYE.test(text)) {
     text = `${text.trim()} ${goodbyeLine(s)}`.trim();
   }
   const after = computeDirective(s, channel);
   recordAsk(s, text.includes("?") && after.mayAsk ? after.nextSlot : null);
   emitAgentText(ctx, text);
+  await Promise.all(ctx.pending ?? []);
   if (ctx.newCard) {
     s.transcript.push(ctx.newCard);
     ctx.newMessages.push(ctx.newCard);
@@ -329,14 +365,14 @@ async function turn(
 const NOT_A_NAME = /^(no|nah|nope|idk|i don'?t know|you pick|whatever|skip|why|what|hi|hey|hello|yes|yeah|ok|okay|sure)\b/i;
 
 // Right after the agent asks for its name, a short reply like "Julia" or "call you Max" is the name.
-async function captureAgentName(s: Session, channel: Channel, text: string): Promise<Msg | undefined> {
+async function captureAgentName(s: Session, channel: Channel, text: string): Promise<{ card?: Msg; pending: Promise<void>[] } | undefined> {
   if (channel !== "text" || s.slots.agentName.status !== "missing" || s.lastAskedSlot !== "agentName") return;
   const m = text.trim().match(/^(?:(?:i'?ll |let'?s |i wanna |i want to )?call (?:you|yourself) |how about |go with |name(?: you)?(?: is)? )?([\p{L}][\p{L}'-]{0,19}(?: [\p{L}][\p{L}'-]{0,19})?)[.!]?$/iu);
   if (!m || NOT_A_NAME.test(m[1])) return;
   const value = m[1].replace(/\b\p{L}/gu, (c) => c.toUpperCase());
   const ctx: Ctx = { s, channel, actions: [], newMessages: [] };
   await runTool(ctx, "set_slot", { slot: "agentName", value });
-  return ctx.newCard;
+  return { card: ctx.newCard, pending: ctx.pending ?? [] };
 }
 
 export async function handleUserMessage(
@@ -365,11 +401,13 @@ export async function handleUserMessage(
     channel === "voice" ? "sorry, say that one more time?" : "ha, fair. what's going on?",
   );
   r.newMessages.unshift(userMsg);
-  if (named && !r.newMessages.includes(named)) {
+  const card = named?.card;
+  if (card && !r.newMessages.includes(card)) {
     // Card goes after the text, like persona's.
-    if (!s.transcript.includes(named)) s.transcript.push(named);
-    r.newMessages.push(named);
+    if (!s.transcript.includes(card)) s.transcript.push(card);
+    r.newMessages.push(card);
   }
+  await Promise.all(named?.pending ?? []);
   return r;
 }
 
@@ -391,6 +429,16 @@ function eventMsg(s: Session, text: string): Msg {
 }
 
 export async function handleEvent(s: Session, e: SessionEvent): Promise<TurnResult> {
+  const start = s.transcript.length;
+  const r = await handleEventInner(s, e);
+  // Anything the event added to the transcript (e.g. "Call ended (12s)") goes out with the reply, in order.
+  const added = s.transcript.slice(start);
+  const updated = r.newMessages.filter((m) => !added.includes(m));
+  r.newMessages = [...updated, ...added.filter((m) => m.kind === "event" || r.newMessages.includes(m))];
+  return r;
+}
+
+async function handleEventInner(s: Session, e: SessionEvent): Promise<TurnResult> {
   const idle = (): TurnResult => ({ session: s, newMessages: [], chips: computeDirective(s, "text").chips, actions: [] });
   switch (e.type) {
     case "open": {

@@ -44,4 +44,5 @@ next-env.d.ts
 # local session store
 /.data
 /harness/runs
+/harness/e2e
 .dev.log

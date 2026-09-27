@@ -64,8 +64,10 @@ async function geminiCall(params: GenParams) {
 }
 
 // Gemini 3 takes a level; 2.5 takes a token budget (0 = off on flash models).
+// Chat replies use the lightest thinking by default: it's a conversation, and speed is part of feeling human.
+const AGENT_THINKING = process.env.GEMINI_AGENT_THINKING === "low" ? ThinkingLevel.LOW : ThinkingLevel.MINIMAL;
 function thinking(model: string, deep: boolean): ThinkingConfig {
-  if (model.startsWith("gemini-3")) return { thinkingLevel: deep ? ThinkingLevel.LOW : ThinkingLevel.MINIMAL };
+  if (model.startsWith("gemini-3")) return { thinkingLevel: deep ? AGENT_THINKING : ThinkingLevel.MINIMAL };
   return { thinkingBudget: deep ? 512 : 0 };
 }
 
@@ -114,7 +116,9 @@ export async function runToolLoop(o: LoopOpts, exec: (c: ToolCall) => Promise<st
   if (gemini) {
     const model = MODELS.gemini.agent;
     const contents = geminiContents(o.turns);
+    const t0 = Date.now();
     for (let round = 0; round < o.maxRounds; round++) {
+      if (process.env.ALLOW_TEST_EVENTS === "1") console.log(`[llm] round ${round} at ${Date.now() - t0}ms`);
       const res = await geminiCall({
         model,
         contents,

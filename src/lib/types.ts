@@ -31,7 +31,7 @@ export interface Attachment {
   dataUrl?: string; // images only, kept small
 }
 
-export type MsgKind = "text" | "gmail_link" | "contact_card" | "event" | "link_preview";
+export type MsgKind = "text" | "gmail_link" | "contact_card" | "event" | "link_preview" | "gif";
 
 export interface Msg {
   id: string;

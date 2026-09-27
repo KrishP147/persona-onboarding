@@ -85,6 +85,12 @@ export const MOVES = {
     source: "hulick, the elements of user onboarding (2014); guidara, unreasonable hospitality (2022)",
     instruction: "Setup is done or skipped. Just help with what they want, warmly and concretely.",
   },
+  answer: {
+    id: "answer",
+    label: "just answer; no question this turn",
+    source: "grice (1975): quantity; fitzpatrick (2013): talk less, listen more",
+    instruction: "Answer what they said, briefly and warmly, and stop. No question this turn: you asked something recently, so let the conversation breathe.",
+  },
   graduate: {
     id: "graduate",
     label: "they know what they need: let them in",
@@ -100,6 +106,7 @@ export const EVENT_MOVES = {
   declined: { id: "declined", label: "a no is fine, stay easy", source: "brown & levinson (1987); pink (2012): buoyancy" },
   interrupt: { id: "interrupt", label: "interrupt only if waiting costs them", source: "praxic-style triage with evidence (journal 07)" },
   intro: { id: "intro", label: "a small first yes: name me", source: "cialdini (1984): commitment; eyal, hooked (2014): investment" },
+  callNow: { id: "call-now", label: "they said yes: do it right away", source: "dixon et al. (2013): low effort" },
   greet: { id: "greet", label: "pick up where the texts left off", source: "dixon et al. (2013): never make them repeat themselves" },
 } satisfies Record<string, Move>;
 
@@ -110,7 +117,7 @@ export function chooseMove(s: Session, channel: Channel, opts: { callFirst: bool
   if (opts.callFirst && channel === "text") return MOVES.askCall;
   // On the call, the name comes first and naturally (the greeting asks it).
   if (channel === "voice" && s.slots.userName.status === "missing" && !used(s, "ask-name")) return MOVES.askName;
-  if (OFF_TOPIC.test(text) && text.length > 3 && !/\b(call|gmail|email|link)\b/i.test(text)) return MOVES.bridge;
+  if (OFF_TOPIC.test(text) && text.length > 3 && !/\b(call|gmail|email|link)\b/i.test(text)) return opts.mayAsk ? MOVES.bridge : MOVES.answer;
   if (need.status === "missing") {
     if (/\b(skip|just|already know|i need you to|can you)\b/i.test(text) && text.split(/\s+/).length > 4) return MOVES.graduate;
     if (!opts.mayAsk) return MOVES.giveFirst;
