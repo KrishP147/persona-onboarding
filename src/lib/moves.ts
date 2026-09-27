@@ -173,7 +173,8 @@ export function chooseMove(s: Session, channel: Channel, opts: { callFirst: bool
   if (STALL.test(text)) return MOVES.offramp;
   if (!opts.mayAsk) return MOVES.giveFirst;
   if (s.slots.userName.status === "missing") return MOVES.askName;
-  if (s.slots.gmail.status === "missing") return MOVES.askGmail;
+  // Once per conversation, and never while the link is already in their texts.
+  if (s.slots.gmail.status === "missing" && !used(s, "ask-gmail") && !linkOut(s)) return MOVES.askGmail;
   return MOVES.help;
 }
 

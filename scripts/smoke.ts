@@ -90,6 +90,17 @@ async function main() {
   check("\"lol\" is not a name for the assistant", filler.slots.agentName.status === "missing");
   await handleUserMessage(filler, "text", "can you write an email for me");
   const cmd = await handleUserMessage(filler, "text", "send");
+  const nocalls = newSession();
+  await handleEvent(nocalls, { type: "open" });
+  await handleUserMessage(nocalls, "text", "hey im dana. no calls lol i hate phone calls. need cheap flights");
+  const named2 = await handleUserMessage(nocalls, "text", "finder");
+  const offered = said(named2).toLowerCase().includes("call") && /\?/.test(said(named2));
+  check("'no calls' said upfront: never offers or rings", nocalls.callDeclinedAt !== undefined && !offered && !named2.actions.some((a) => a.type === "start_call"), said(named2));
+  const nameNotRing = newSession();
+  await handleEvent(nameNotRing, { type: "open" });
+  await handleUserMessage(nameNotRing, "text", "julia");
+  const cm = await handleUserMessage(nameNotRing, "text", "you can call me krish");
+  check("'you can call me krish' is a name, not a ring", !cm.actions.some((a) => a.type === "start_call"), said(cm));
   const terms = newSession();
   await handleEvent(terms, { type: "open" });
   const tr = await handleUserMessage(terms, "text", "can you text me the terms link again?");

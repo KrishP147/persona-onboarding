@@ -853,7 +853,10 @@ export async function handleUserMessage(
   if (clean.trim().split(/\s+/).length >= 5) s.consecutiveAsks = 0;
   // "no, text is fine" right after we offered a call: same as declining the ring.
   const prevAgent = [...s.transcript].slice(0, -1).reverse().find((m) => m.role === "agent" && (!m.kind || m.kind === "text"));
-  if (channel === "text" && !s.call.active && prevAgent && OFFERED_CALL.test(prevAgent.text) && CALL_NO.test(clean) && !/\b(sure|yes|yeah|ok)\b/i.test(clean)) {
+  // "no calls lol i hate phone calls", said anytime (not just after an offer): never ring or offer one
+  // again unless they ask for a call themselves later.
+  const refusesCalls = NO_CALLS.test(clean) && !/\b(you can|now you can|ok(ay)? (you can )?call|call me (now|back))\b/i.test(clean);
+  if (channel === "text" && !s.call.active && (refusesCalls || (prevAgent && OFFERED_CALL.test(prevAgent.text) && CALL_NO.test(clean) && !/\b(sure|yes|yeah|ok)\b/i.test(clean)))) {
     s.callOffers = MAX_CALL_OFFERS;
     s.callDeclinedAt = s.transcript.length;
     s.call = { ...s.call, endedReason: "declined" };
@@ -909,7 +912,7 @@ export async function handleUserMessage(
   const prevText = [...s.transcript].slice(0, -1).reverse().find((m) => m.role === "agent" && (!m.kind || m.kind === "text"));
   // Asking for a call is the answer; no need to confirm it back ("could we call?" -> ring).
   const asksForCall =
-    /\b(call me|(can|could|should|shall) (we|you) (call|hop on a call|do a call)|let'?s (call|hop on a call|do a call)|give me a (call|ring)|ring me|phone me|hop on a (quick )?call)\b/i.test(clean) &&
+    /\b(call me(?=\s*($|[.!?,]|(now|back|please|pls|plz|asap|right now|real quick|quick|when|whenever|anytime|later|today|tomorrow|so|and|if|then)\b))|(can|could|should|shall) (we|you) (call|hop on a call|do a call)|let'?s (call|hop on a call|do a call)|give me a (call|ring)|ring me|phone me|hop on a (quick )?call)\b/i.test(clean) &&
     !NEGATED_CALL.test(clean);
   const saidYesToOffer = !!prevText && OFFERED_CALL.test(prevText.text) && YES.test(clean);
   if (channel === "text" && !s.call.active && s.slots.agentName.status !== "missing" && (asksForCall || saidYesToOffer) && !CALL_NO.test(clean)) {
@@ -1418,3 +1421,6 @@ export function linkPending(s: Session) {
   const lastFail = s.transcript.findLastIndex((m) => m.kind === "event" && /^Gmail connection/.test(m.text));
   return lastLink >= 0 && lastLink > lastFail;
 }
+
+// A standing "no calls" ("i hate phone calls", "text only"), whenever it's said.
+const NO_CALLS = /\b(don'?t|do not|dont|pls don'?t|please don'?t|never) (call|ring|phone)( me)?\b|\bno (phone )?calls?\b|\bhate (phone )?calls\b|\b(text|texting) only\b|\bonly text\b|\bnot a phone person\b|\brather (just )?text\b/i;
