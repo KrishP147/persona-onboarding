@@ -47,7 +47,7 @@ export async function exchangeCode(req: Request, code: string) {
     }),
   });
   if (!res.ok) throw new Error(`token exchange ${res.status}`);
-  const tok = (await res.json()) as { access_token: string; scope?: string };
+  const tok = (await res.json()) as { access_token: string; scope?: string; expires_in?: number };
   return tok;
 }
 
@@ -68,7 +68,19 @@ export async function fetchIdentity(accessToken: string) {
 }
 
 async function fetchUnreadHeaders(auth: { headers: Record<string, string> }): Promise<InboxItem[]> {
-  const list = await fetch("https://gmail.googleapis.com/gmail/v1/users/me/messages?maxResults=20&q=" + encodeURIComponent("is:unread in:inbox newer_than:14d"), auth);
+  return fetchMessages(auth, "is:unread in:inbox newer_than:14d", 20);
+}
+
+// Latest messages matching a Gmail search (headers + Gmail's short preview; bodies are never fetched).
+export async function readInbox(accessToken: string, query = "in:inbox", max = 5): Promise<InboxItem[] | null> {
+  const auth = { headers: { Authorization: `Bearer ${accessToken}` } };
+  const probe = await fetch("https://gmail.googleapis.com/gmail/v1/users/me/profile", auth);
+  if (probe.status === 401) return null; // token expired: they need to reconnect
+  return fetchMessages(auth, query, Math.min(Math.max(max, 1), 10));
+}
+
+async function fetchMessages(auth: { headers: Record<string, string> }, query: string, max: number): Promise<InboxItem[]> {
+  const list = await fetch(`https://gmail.googleapis.com/gmail/v1/users/me/messages?maxResults=${max}&q=` + encodeURIComponent(query), auth);
   if (!list.ok) return [];
   const ids = (((await list.json()) as { messages?: { id: string }[] }).messages ?? []).map((m) => m.id);
   const got = await Promise.all(

@@ -5,6 +5,8 @@ import { RECAP_INSTRUCTION, SYSTEM_PROMPT } from "./prompt";
 import { mockReply } from "./mock";
 import { provider, quick, runToolLoop, type Part, type ToolDef, type Turn } from "./llm";
 import { DEMO_INBOX, recordOutcome, triageInbox } from "./triage";
+import { readInbox } from "./google";
+import { getSecret } from "./store";
 import { EVENT_MOVES, chooseMove, markUsed } from "./moves";
 import { GIF_MIN_GAP, GIF_MOODS, GIFS, gifUrl, type GifMood } from "./gifs";
 import { applyExtracted, extract } from "./extract";
@@ -47,6 +49,20 @@ const TOOLS: ToolDef[] = [
   { name: "start_call", description: "Ring the user now. Only after they agreed to a call.", schema: NO_ARGS },
   { name: "send_gmail_link", description: "Drop a secure 'Connect Gmail' link into the text thread. Works during a call.", schema: NO_ARGS },
   { name: "end_call", description: "Hang up after saying goodbye on the call.", schema: NO_ARGS },
+  {
+    name: "read_inbox",
+    description:
+      "Read their Gmail (only after it's connected): returns the latest messages matching a Gmail search, with sender, subject, date and a short preview. Use it whenever they ask about their email; never guess what's in there.",
+    schema: {
+      type: "object",
+      properties: {
+        query: { type: "string", description: "Gmail search, e.g. 'in:inbox', 'is:unread in:inbox', 'from:recruiter', 'subject:interview'" },
+        count: { type: "integer", description: "How many (1-10), default 5" },
+      },
+      required: ["query", "count"],
+      additionalProperties: false,
+    },
+  },
   {
     name: "text_them",
     description:
@@ -130,6 +146,11 @@ function outageLine(s: Session, channel: Channel) {
   return `sorry${name ? ` ${name}` : ""}, i'm running slow on my end right now.${need && need.length <= 60 ? ` i haven't forgotten about ${need}.` : ""} give me a few minutes and text me again?`;
 }
 
+function heardThemThisCall(s: Session) {
+  const started = s.transcript.findLastIndex((m) => m.kind === "event" && m.text === "Call started");
+  return s.transcript.slice(started + 1).some((m) => m.role === "user" && m.channel === "voice");
+}
+
 const HOLD = /\b(hold on|hang on|one sec(ond)?|give me a (sec|second|minute|moment)|wait a (sec|second|minute|moment)|just a (sec|second|moment|minute)|brb|be right back)\b/i;
 
 // Offline guess for common names, used when the model can't be reached (so "julia" still sounds like julia).
@@ -197,7 +218,7 @@ export interface Ctx {
 
 const WANTS_OUT = /\b(skip|not now|later|no more questions|stop asking|just (help|do|get)|let'?s (just )?(start|go)|that'?s (it|all)|i'?m good|i'?m done|enough setup|just let me (use|try)|stop)\b/i;
 // They're wrapping up: only then does the agent hang up on its own.
-const USER_BYE = /\b(bye|goodbye|gotta go|got to go|have to go|need to go|talk (to you )?(soon|later)|that'?s (all|it)|i'?m (done|good|all set)|see (you|ya)|later|hang up|nothing else)\b/i;
+const USER_BYE = /\b(end (the |this )?call|hang up|you can go|let'?s end|that'?s enough|bye|goodbye|gotta go|got to go|have to go|need to go|talk (to you )?(soon|later)|that'?s (all|it)|i'?m (done|good|all set)|see (you|ya)|later|hang up|nothing else)\b/i;
 function userWrappingUp(s: Session) {
   return USER_BYE.test(lastUserText(s));
 }
@@ -331,6 +352,20 @@ async function runTool(ctx: Ctx, name: string, input: Record<string, unknown>): 
       s.transcript.push(gif);
       return "gif sent. that's your whole reply unless you have something new to add";
     }
+    case "read_inbox": {
+      if (s.slots.gmail.status !== "filled") return "error: gmail isn't connected, so you can't see their inbox. offer to send the link";
+      const count = Math.min(Math.max(Number(input.count ?? 5) || 5, 1), 10);
+      const query = String(input.query ?? "in:inbox").slice(0, 120) || "in:inbox";
+      const token = await getSecret(`gtoken:${s.id}`).catch(() => null);
+      let items = token ? await readInbox(token, query, count).catch(() => null) : null;
+      // Demo / test connections have no real token: use the sample inbox they were shown.
+      if (!token && (s.gmailEmail === "demo.user@gmail.com" || process.env.ALLOW_TEST_EVENTS === "1")) items = DEMO_INBOX.slice(0, count);
+      if (!items) return "error: your access to their inbox has expired. tell them honestly and offer to send the link again to reconnect. don't guess what's in there";
+      if (!items.length) return `no messages match "${query}".`;
+      return items
+        .map((m, i) => `${i + 1}. from ${m.fromName} | ${m.subject || "(no subject)"} | ${new Date(m.date).toLocaleDateString("en-US", { month: "short", day: "numeric" })} | ${m.snippet.slice(0, 140)}`)
+        .join("\n");
+    }
     case "text_them": {
       const body = String(input.text ?? "").trim().slice(0, 2000);
       if (!body) return "error: nothing to post";
@@ -408,6 +443,7 @@ const STAGE_BRACKETS = /\s*\[[^\]\n]{1,160}\]\s*/g;
 // "send it" / "email them" ... and a reply that says it went out.
 const SEND_REQUEST = /\b(send|sned|sewnd|email|forward|reply to)\b/i;
 const CLAIMS_SENT = /^\s*(sent|done|all set)\b|\b(i('?ve| have)? (just )?sent|it'?s (been )?sent|email (is )?sent|sending (it|that|now)|on its way)\b/i;
+const EMPTY_PROMISE = /\b(give me (a|one) (sec|second|moment|minute)|one sec(ond)?|let me (pull|look|check|grab|find)|pulling (those|that|it|them) up|checking (now|on that))\b/i;
 const META = /\b(i'?m waiting for|i should (stay|wait|remain|let|keep)|since (they|he|she|the user)|the user|i'?ll (stay quiet|wait (silently|quietly))|let them (check|speak|respond)|stay quiet|respond when ready|they haven'?t said)\b/i;
 
 // Talking ABOUT them instead of TO them ("I'll text Paul a quick message... letting him know...").
@@ -424,7 +460,7 @@ function cleanModelText(t: string, userName?: string | null) {
   const cleaned = t.replace(TOOL_NAMES, " ").replace(STAGE_BRACKETS, " ").replace(/^\s*\[|\]\s*$/gm, "").replace(/[ \t]{2,}/g, " ").trim();
   return cleaned
     .split(/\n\s*\n/)
-    .map((b) => b.split(/(?<=[.!?])\s+/).filter((x) => !META.test(x) && !narratesAbout(x, userName)).join(" "))
+    .map((b) => b.split(/(?<=[.!?])\s+/).filter((x) => !META.test(x) && !EMPTY_PROMISE.test(x) && !narratesAbout(x, userName)).join(" "))
     .filter((b) => b.trim())
     .join("\n\n")
     .trim();
@@ -644,11 +680,10 @@ export async function handleUserMessage(
     }
     s.call.holding = false;
     // They said bye: say it back (always, and audibly), then hang up. No model, nothing to go wrong.
-    if (/\b(bye|goodbye|gotta go|got to go|talk (to you )?(soon|later)|see (you|ya)|that'?s all|that'?s it)\b/i.test(clean) && clean.split(/\s+/).length <= 12 && s.call.active) {
+    if (/\b(end (the |this )?call|hang up|you can go|let'?s end|bye|goodbye|gotta go|got to go|talk (to you )?(soon|later)|see (you|ya)|that'?s all|that'?s it)\b/i.test(clean) && !/\b(don'?t|do not|not)\b[^.!?]{0,10}\b(hang up|end)/i.test(clean) && clean.split(/\s+/).length <= 12 && s.call.active) {
       const name = s.slots.userName.value;
-      const need = shortNeed(s);
       const ctx: Ctx = { s, channel, actions: [], newMessages: [], move: EVENT_MOVES.recap };
-      emitAgentText(ctx, `bye${name ? ` ${name}` : ""}!${need ? ` i'll get going on ${need}.` : ""} i'll text you a quick recap.`);
+      emitAgentText(ctx, `okay, bye${name ? ` ${name}` : ""}! i'll text you a quick recap.`);
       ctx.actions.push({ type: "end_call", final: true });
       return { session: s, newMessages: [userMsg, ...ctx.newMessages], chips: computeDirective(s, channel).chips, actions: ctx.actions };
     }
@@ -886,7 +921,9 @@ async function handleEventInner(s: Session, e: SessionEvent): Promise<TurnResult
           : s.call.silenceStrikes === 1
           ? lastSaid.endsWith("?")
             ? "take your time. want me to say that again?"
-            : "hello? can you hear me okay?"
+            : heardThemThisCall(s)
+              ? "anything else you want me to do with that?"
+              : "hello? can you hear me okay?"
           : "no pressure. if now's not great, i can just text you instead.";
       const ctx: Ctx = { s, channel: "voice", actions: [], newMessages: [], move: EVENT_MOVES.silence };
       emitAgentText(ctx, line);

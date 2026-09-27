@@ -1,6 +1,6 @@
 import { cookies } from "next/headers";
 import { exchangeCode, fetchIdentity } from "@/lib/google";
-import { withSession } from "@/lib/store";
+import { setSecret, withSession } from "@/lib/store";
 import { popupPage } from "../popup";
 
 export async function GET(req: Request) {
@@ -24,6 +24,8 @@ export async function GET(req: Request) {
       return popupPage({ title: "Almost", body: "<p>Gmail access wasn't granted, so it isn't connected. That's okay.</p>", result: { ok: false, error: "scope_not_granted" }, sessionId });
     }
     const who = await fetchIdentity(tok.access_token);
+    // Kept server side only (never in the session the browser receives), for reading their inbox on request.
+    await setSecret(`gtoken:${sessionId}`, tok.access_token, (tok.expires_in ?? 3600) - 60).catch(() => {});
     await withSession(sessionId, async (s) => {
       s.gmailVerified = { email: who.email, unread: who.unread, inbox: who.inbox };
     });

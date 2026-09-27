@@ -17,6 +17,8 @@ interface Backend {
   incrDaily(name: string): Promise<number>;
   incrTotal(name: string): Promise<number>;
   addFloat(name: string, amount: number): Promise<number>;
+  setSecret(key: string, value: string, ttlSeconds: number): Promise<void>;
+  getSecret(key: string): Promise<string | null>;
   getFloat(name: string): Promise<number>;
   get(id: string): Promise<string | null>;
   set(id: string, value: string): Promise<void>;
@@ -56,7 +58,16 @@ const memLocks = new Map<string, Promise<unknown>>();
 
 const memCounters = new Map<string, number>();
 
+const memSecrets = new Map<string, { value: string; until: number }>();
+
 const fileBackend: Backend = {
+  async setSecret(key, value, ttl) {
+    memSecrets.set(key, { value, until: Date.now() + ttl * 1000 });
+  },
+  async getSecret(key) {
+    const v = memSecrets.get(key);
+    return v && v.until > Date.now() ? v.value : null;
+  },
   async addFloat(name, amount) {
     const n = (memCounters.get(`f:${name}`) ?? 0) + amount;
     memCounters.set(`f:${name}`, n);
@@ -114,6 +125,10 @@ function upstash(url: string, token: string): Backend {
   }
   return {
     incrTotal: (name) => cmd<number>("INCR", `count:${name}:total`),
+    setSecret: async (key, value, ttl) => {
+      await cmd("SET", `secret:${key}`, value, "EX", Math.max(60, Math.floor(ttl)));
+    },
+    getSecret: (key) => cmd<string | null>("GET", `secret:${key}`),
     addFloat: async (name, amount) => Number(await cmd<string>("INCRBYFLOAT", `float:${name}`, amount)),
     getFloat: async (name) => Number((await cmd<string | null>("GET", `float:${name}`)) ?? 0),
     async incrDaily(name) {
@@ -154,6 +169,9 @@ export const incrDaily = (name: string) => backend.incrDaily(name);
 export const incrTotal = (name: string) => backend.incrTotal(name);
 export const addFloat = (name: string, amount: number) => backend.addFloat(name, amount);
 export const getFloat = (name: string) => backend.getFloat(name);
+// Secrets (like a short-lived Gmail access token) live outside the session, so they never reach the browser.
+export const setSecret = (key: string, value: string, ttlSeconds: number) => backend.setSecret(key, value, ttlSeconds);
+export const getSecret = (key: string) => backend.getSecret(key);
 
 export async function loadSession(id: string): Promise<Session | null> {
   const raw = await backend.get(safeId(id));
