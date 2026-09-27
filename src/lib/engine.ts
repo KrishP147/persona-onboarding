@@ -594,6 +594,15 @@ export async function handleUserMessage(
       return { session: s, newMessages: [userMsg, ...ctx.newMessages], chips: computeDirective(s, channel).chips, actions: ctx.actions };
     }
     s.call.holding = false;
+    // They said bye: say it back (always, and audibly), then hang up. No model, nothing to go wrong.
+    if (/\b(bye|goodbye|gotta go|got to go|talk (to you )?(soon|later)|see (you|ya)|that'?s all|that'?s it)\b/i.test(clean) && clean.split(/\s+/).length <= 12 && s.call.active) {
+      const name = s.slots.userName.value;
+      const need = shortNeed(s);
+      const ctx: Ctx = { s, channel, actions: [], newMessages: [], move: EVENT_MOVES.recap };
+      emitAgentText(ctx, `bye${name ? ` ${name}` : ""}!${need ? ` i'll get going on ${need}.` : ""} i'll text you a quick recap.`);
+      ctx.actions.push({ type: "end_call", final: true });
+      return { session: s, newMessages: [userMsg, ...ctx.newMessages], chips: computeDirective(s, channel).chips, actions: ctx.actions };
+    }
   }
   // Name reply safety net: models sometimes say "julia it is" without saving it.
   const named = await captureAgentName(s, channel, clean);

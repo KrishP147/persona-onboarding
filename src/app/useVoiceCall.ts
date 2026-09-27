@@ -445,6 +445,8 @@ export function useVoiceCall(opts: {
     const onHeard: Heard = (finals, interim, speechFinal) => {
       const latest = (finals || interim).trim();
       if (!latest) return;
+      // A final goodbye is already on its way: let it finish; nothing said now changes the ending.
+      if (finalEndRef.current && pendingEndRef.current) return;
       // While the agent talks, ignore its own voice coming back through the mic.
       if (queueRef.current > 0 && looksLikeEcho(latest, speakingTextRef.current)) return;
       // Real speech over the agent: stop talking and listen (barge-in).
@@ -453,11 +455,6 @@ export function useVoiceCall(opts: {
       if (queueRef.current > 0 && (heardWords.length >= 2 || STOP_WORDS.test(heardWords[0] ?? ""))) {
         stopAudio();
         queueRef.current = 0;
-        if (finalEndRef.current) {
-          // They talked over a goodbye we can't take back: hang up now rather than loop.
-          setTimeout(() => hangUp("agent_ended"), 300);
-          return;
-        }
         pendingEndRef.current = false;
         speakingTextRef.current = "";
         setSpeaking(false);
