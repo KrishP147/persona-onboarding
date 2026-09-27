@@ -384,13 +384,26 @@ const STAGE_BRACKETS = /\s*\[[^\]\n]{1,160}\]\s*/g;
 // Whatever the model wrapped its words in, keep only what a person would actually say.
 // The model sometimes narrates its own reasoning ("I'm waiting for Krish to respond. Since they're
 // still on the call..."). That is never something to say to them.
+// "send it" / "email them" ... and a reply that says it went out.
+const SEND_REQUEST = /\b(send|sned|sewnd|email|forward|reply to)\b/i;
+const CLAIMS_SENT = /^\s*(sent|done|all set)\b|\b(i('?ve| have)? (just )?sent|it'?s (been )?sent|email (is )?sent|sending (it|that|now)|on its way)\b/i;
 const META = /\b(i'?m waiting for|i should (stay|wait|remain|let|keep)|since (they|he|she|the user)|the user|i'?ll (stay quiet|wait (silently|quietly))|let them (check|speak|respond)|stay quiet|respond when ready|they haven'?t said)\b/i;
 
-function cleanModelText(t: string) {
+// Talking ABOUT them instead of TO them ("I'll text Paul a quick message... letting him know...").
+const THIRD_PERSON = /\b(letting (him|her|them) know|acknowledging the|a quick message (to|for)|(text|message|ping|remind) (him|her)\b)/i;
+function narratesAbout(x: string, userName?: string | null) {
+  if (THIRD_PERSON.test(x)) return true;
+  if (!userName) return false;
+  const n = userName.replace(/[.*+?^${}()|[\]\\]/g, "");
+  // "I'll text Paul", "Paul hasn't replied", "Paul is still on the call": their name as a third person.
+  return new RegExp(`\\b(text|message|tell|remind|let|ping|call) ${n}\\b|\\b${n} (is|was|has|hasn'?t|isn'?t|said|seems|wants)\\b`, "i").test(x);
+}
+
+function cleanModelText(t: string, userName?: string | null) {
   const cleaned = t.replace(TOOL_NAMES, " ").replace(STAGE_BRACKETS, " ").replace(/^\s*\[|\]\s*$/gm, "").replace(/[ \t]{2,}/g, " ").trim();
   return cleaned
     .split(/\n\s*\n/)
-    .map((b) => b.split(/(?<=[.!?])\s+/).filter((x) => !META.test(x)).join(" "))
+    .map((b) => b.split(/(?<=[.!?])\s+/).filter((x) => !META.test(x) && !narratesAbout(x, userName)).join(" "))
     .filter((b) => b.trim())
     .join("\n\n")
     .trim();
@@ -462,7 +475,7 @@ async function turn(
   let text = "";
   let failed = false;
   try {
-    text = cleanModelText(await generate(ctx, extraInstruction));
+    text = cleanModelText(await generate(ctx, extraInstruction), s.slots.userName.value);
   } catch (err) {
     // Provider down or overloaded: fall through to the scripted line rather than go quiet.
     console.error("llm turn failed", err);
@@ -505,6 +518,10 @@ async function turn(
     const help = text.split(/(?<=[.!?])\s+/).filter((x) => !GMAIL_PITCH.test(x)).join(" ").trim();
     if (ctx.move?.id === "ask-gmail") text = `${help}${help ? "\n\n" : ""}${gmailAsk(s)}`.trim();
     else if (!raisedIt && help) text = help;
+  }
+  // It can't send email (gmail access is read only, and setup can't act for them yet). Never claim it did.
+  if (SEND_REQUEST.test(lastUserText(s)) && CLAIMS_SENT.test(text)) {
+    text = "i can't send it for you yet, i only have read access during setup. copy the draft above and send it from your email, it'll take a sec.";
   }
   const sentences = text.split(/(?<=[.!?])\s+|\n+/);
   // An offer to call made in words counts as an offer (so it isn't repeated next turn).
