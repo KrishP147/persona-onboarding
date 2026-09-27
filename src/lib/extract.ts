@@ -27,7 +27,7 @@ export async function extract(s: Session, userText: string): Promise<Extracted> 
       fast: true,
       system:
         "You read one message from a user who is setting up a new personal assistant, and pull out only what they clearly stated. Never guess. " +
-        "agentName = a name they give the ASSISTANT (e.g. answering \"what do you want to call me?\", or \"call yourself Max\", \"actually call you Luna\"). " +
+        "agentName = a name they give the ASSISTANT (e.g. answering \"what do you want to call me?\", or \"call yourself Max\", \"actually call you Luna\"). Texting shorthand counts: \"ill call ujulia\" or \"call u julia\" means \"call you Julia\", so agentName is Julia. " +
         "userName = what the USER wants to be called (\"i'm Priya\", \"call me CJ\", \"actually it's Chris\"). A correction replaces the old one. " +
         "helpNeed = a concrete thing they want help with, as a short phrase (\"rescheduling a dentist appointment\"); null for vague answers like \"stuff\". " +
         "declined = setup items they clearly refused (\"no calls\" is not one of these; \"i won't give my name\" is userName; \"skip the gmail thing\" / \"not connecting my email\" is gmail). " +

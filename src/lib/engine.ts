@@ -488,6 +488,9 @@ async function generate(ctx: Ctx, extraInstruction?: string): Promise<string> {
   // The directive is computed once per turn; tool effects show up in the next turn's STATE.
   const d = computeDirective(s, channel);
   let state = directiveText(s, d, channel, !extraInstruction);
+  if (s.draft && !s.draft.sent) {
+    state += `\nUNSENT DRAFT in the chat: to ${s.draft.to || "(no address yet)"}, "${s.draft.subject}". ${s.slots.gmail.status === "filled" ? "They can send it with a clear yes (send_email)." : "Gmail isn't connected, so it can't be sent until they connect."} Never say it was sent unless send_email succeeded.`;
+  }
   if (extraInstruction) state += `\n\nINSTRUCTION: ${extraInstruction}`;
   else {
     // One research-backed move per turn, chosen in code, so the principles actually get applied.
@@ -532,7 +535,7 @@ const STAGE_VERB = /^\s*\*?\s*(sends?|sending|sent|calling|calls?|dials?|dialing
 // still on the call..."). That is never something to say to them.
 // "send it" / "email them" ... and a reply that says it went out.
 const SEND_REQUEST = /\b(send|sned|sewnd|email|forward|reply to)\b/i;
-const CLAIMS_SENT = /^\s*(sent|done|all set)\b|\b(i('?ve| have)? (just )?sent|it'?s (been )?sent|email (is )?sent|sending (it|that|now)|on its way)\b/i;
+const CLAIMS_SENT = /^\s*(sent|done|all set)\b|\b(i('?ve| have)? (just )?sent|it'?s (been )?sent|email (is )?sent|sending (it|that|now)|on its way|(ready|good) to go|went out|it'?s out)\b/i;
 const EMPTY_PROMISE = /\b(give me (a|one) (sec|second|moment|minute)|one sec(ond)?|let me (pull|look|check|grab|find)|pulling (those|that|it|them) up|checking (now|on that))\b/i;
 const META = /\b(i'?m waiting for|i should (stay|wait|remain|let|keep)|since (they|he|she|the user)|the user|i'?ll (stay quiet|wait (silently|quietly))|let them (check|speak|respond)|stay quiet|respond when ready|they haven'?t said)\b/i;
 
@@ -602,7 +605,14 @@ function emitAgentText(ctx: Ctx, raw: string) {
   const text = stopAtRepeat(raw.replace(TOOL_NAMES, " ").replace(STAGE_BRACKETS, keepFillIns)).replace(/\s*[—]\s*/g, ", ").replace(/\((on call|said on the call|texted in the chat|posted in the chat)\)\s*/gi, "").replace(/^\s*\*?\([^)]*\)\*?\s*$/gm, "").trim();
   // On a call, three sentences is already a lot to listen to; trim anything longer.
   const spoken = ctx.channel === "voice" ? capSentences(text.replace(/\n+/g, " ").trim(), 3) : text;
-  const bubbles = ctx.channel === "voice" ? [spoken] : text.split(/\n\s*\n/).map((b) => b.trim());
+  // An email typed out in the reply stays one bubble (split per paragraph it read like several texts).
+  const isEmail = /^\s*subject:/im.test(text);
+  const bubbles =
+    ctx.channel === "voice"
+      ? [spoken]
+      : isEmail
+        ? [text.replace(/^\s*-{3,}\s*$/gm, "").replace(/\n{3,}/g, "\n\n").trim()]
+        : text.split(/\n\s*\n/).map((b) => b.trim());
   for (const b of bubbles.filter(Boolean)) {
     const m = msg("agent", ctx.channel, b, ctx.move ? { move: ctx.move } : {});
     ctx.newMessages.push(m);
@@ -1051,7 +1061,9 @@ async function handleEventInner(s: Session, e: SessionEvent): Promise<TurnResult
       // Saving the card is them doing what we asked; if the call offer is still unanswered, pick it back up.
       const lastOffer = s.transcript.findLastIndex((m) => m.role === "agent" && (!m.kind || m.kind === "text") && OFFERED_CALL.test(m.text));
       const answered = lastOffer >= 0 && s.transcript.slice(lastOffer + 1).some((m) => m.role === "user");
-      if (lastOffer < 0 || answered || s.call.active || s.callDeclinedAt !== undefined || s.phase === "graduated") return idle();
+      const lastText = s.transcript.findLastIndex((m) => m.role === "agent" && (!m.kind || m.kind === "text"));
+      // The offer is still the last thing it said: it's right there, asking again is just noise.
+      if (lastOffer < 0 || lastOffer === lastText || answered || s.call.active || s.callDeclinedAt !== undefined || s.phase === "graduated") return idle();
       const ctx: Ctx = { s, channel: "text", actions: [], newMessages: [], move: EVENT_MOVES.named };
       emitAgentText(ctx, "saved, now you'll know it's me. want me to call now?");
       return { session: s, newMessages: ctx.newMessages, chips: computeDirective(s, "text").chips, actions: [] };
@@ -1145,21 +1157,24 @@ async function saveDraftTool(ctx: Ctx, input: Record<string, unknown>): Promise<
   const d = { to: String(input.to ?? "").trim().slice(0, 200), subject: String(input.subject ?? "").trim().slice(0, 200), body: String(input.body ?? "").trim().slice(0, 5000) };
   if (!d.body) return "error: the draft is empty";
   if (d.to && !EMAIL_RE.test(d.to)) return `error: "${d.to}" isn't an email address. ask them for it, or save with an empty "to"`;
-  const access = await gmailAccess(s);
-  if ("error" in access) return access.error;
-  const prevId = s.draft && !s.draft.sent ? s.draft.id : undefined;
+  // Connected or not, the draft always shows as one clean message in the chat.
+  const access: GmailAccess = s.slots.gmail.status === "filled" ? await gmailAccess(s) : { error: "" };
   let id: string | undefined;
+  let where: string;
   if ("token" in access) {
-    const r = await saveDraft(access.token, d, prevId);
-    if (!r.ok) return scopeError(r.reason, "save the draft");
-    id = r.value.id;
-  }
+    const r = await saveDraft(access.token, d, s.draft && !s.draft.sent ? s.draft.id : undefined);
+    if (r.ok) {
+      id = r.value.id;
+      where = "saved in their gmail drafts and shown in the chat";
+    } else where = `shown in the chat, but NOT saved in gmail: ${scopeError(r.reason, "save the draft").replace(/^error: /, "")}`;
+  } else if ("demo" in access) where = "shown in the chat (demo account, not a real gmail)";
+  else if (s.slots.gmail.status !== "filled") where = "shown in the chat only: gmail isn't connected, so it isn't saved there and can't be sent yet. if they want it sent, they need to connect gmail first (one tap on the connect card, or offer the link)";
+  else where = `shown in the chat only. ${access.error.replace(/^error: /, "")}`;
   const shown = msg("agent", "text", `to: ${d.to || "(who's it going to?)"}\nsubject: ${d.subject || "(no subject)"}\n\n${d.body}`);
   ctx.newMessages.push(shown);
   s.transcript.push(shown);
   s.draft = { id, ...d, shownAt: s.transcript.length };
-  const where = "token" in access ? "saved in their gmail drafts" : "saved (demo account, not a real gmail)";
-  return `${where} and shown in the chat. don't repeat the draft. ask if they want to send it${d.to ? "" : " (and who to)"} or change anything. never say it was sent`;
+  return `${where}. don't repeat the draft. ask if they want to send it${d.to ? "" : " (and who to)"} or change anything. never say it was sent`;
 }
 
 async function sendEmailTool(ctx: Ctx): Promise<string> {
@@ -1175,12 +1190,20 @@ async function sendEmailTool(ctx: Ctx): Promise<string> {
   if (lastUserIdx < d.shownAt || !SEND_OK.test(last) || SEND_HOLD.test(last) || !sayingSend) {
     return `error: they haven't clearly said to send this version (they said "${last.slice(0, 60)}"). ask "want me to send it to ${d.to}?" and wait`;
   }
+  if (s.slots.gmail.status !== "filled") {
+    return "error: NOT sent, gmail isn't connected yet. say plainly it hasn't been sent, and that as soon as they tap the \"connect your google account\" card you'll send it (offer the link if there's no card)";
+  }
   const access = await gmailAccess(s);
   if ("error" in access) return access.error;
   if ("demo" in access) {
     if (process.env.ALLOW_TEST_EVENTS !== "1") return "error: this is a demo account, so nothing can really be sent. tell them honestly; the draft is in the chat to copy";
   } else {
-    if (!d.id) return "error: the draft isn't saved in gmail yet. save_draft again first";
+    // Written before gmail was connected: save it there now, then send.
+    if (!d.id) {
+      const saved = await saveDraft(access.token, d);
+      if (!saved.ok) return scopeError(saved.reason, "send it");
+      d.id = saved.value.id;
+    }
     const r = await sendDraft(access.token, d.id);
     if (!r.ok) return scopeError(r.reason, "send it");
   }
