@@ -1,36 +1,57 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# Persona Onboarding
 
-## Getting Started
+Adaptive text + voice onboarding simulator for a Persona-style personal assistant. Collects an agent name (text), the user's name, a connected Gmail, and something they need help with, over a phone-style chat plus a simulated call, while staying conversational and robust to users who don't follow the script.
 
-First, run the development server:
+## Run
 
 ```bash
-npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
+pnpm install
+cp .env.example .env.local   # add ANTHROPIC_API_KEY (without it: mock mode)
+pnpm dev                      # http://localhost:3000
+pnpm harness                  # stress test (dev server running, needs key)
+pnpm harness hangup-early     # one persona
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+## Architecture
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+```
+browser (phone UI, call screen)
+   │  /api/chat   (user text / voice transcript)
+   │  /api/session (events: open, call_started, call_ended, silence, gmail_connected, …)
+   ▼
+engine ── policy (deterministic: next slot, nudge budget, call offers, graduation)
+   │   └─ LLM (Claude) writes the words + calls tools: set_slot, decline_slot,
+   │      offer_call, start_call, send_gmail_link, end_call, graduate
+   ▼
+session store (one record shared by text + voice)
+```
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+- **Server owns state, not the model.** Text and voice read/write the same session, so a dropped call continues in text with nothing lost.
+- **Events are code.** Hangups, silence, mic denial, and OAuth results arrive as events; the recap text after a hangup is guaranteed, not left to the model to remember.
+- **Nudge budget.** Max 2 asks per item, max 2 asks in a row before giving value; then the item is deferred.
+- **Graduation.** Once the user states a need, the agent helps with it and hands off; "Skip setup" is always one tap away.
 
-## Learn More
+## Edge cases (tracked)
 
-To learn more about Next.js, take a look at the following resources:
+| Case | Behavior |
+|---|---|
+| Hang up mid-call | Server gets `call_ended`; agent texts a recap + one missing item |
+| Duplicate hangup / tab closed mid-call | Idempotent; `pagehide` reports the hangup; reload marks call dropped |
+| Decline call | Continues over text, offers the call at most twice |
+| Silence on call | Check-ins, then "I'll text you" and hang up after 3 strikes |
+| Mic denied / unsupported browser | Falls back to text |
+| Everything in one message | All slots extracted; nothing re-asked |
+| Rename agent / user | Slot overwritten; contact card updated in place (no duplicate contact) |
+| Refuses name | Declined, never asked again |
+| Off-topic / injection | Brief answer, stays in character, never mentions internals |
+| Refresh / second tab | Session resumes from server; no duplicate greeting |
+| Rapid double-send | Per-session turn lock |
+| Gmail fails / cancelled | Reassure, optional, don't push |
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
+## Status
 
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
-
-## Deploy on Vercel
-
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
-
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+- [x] State machine, API, phone UI, interim browser voice (Web Speech), harness
+- [ ] Pipecat voice pipeline (Deepgram STT, Cartesia TTS, barge-in), voice matched to agent name
+- [ ] Google OAuth + Gmail read + sample-inbox fallback
+- [ ] Media parsing: voice notes (Groq Whisper), video (Gemini), images (Claude vision ✓)
+- [ ] Upstash store + deploy
