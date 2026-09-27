@@ -93,6 +93,13 @@ export default function Home() {
   const revealRef = useRef<Promise<void>>(Promise.resolve());
   const [revealing, setRevealing] = useState(false);
   const [showWhy, setShowWhy] = useState(true);
+  const [menuOpen, setMenuOpen] = useState(false); // phone: side menu with the reasoning + restart
+  const [seenAt, setSeenAt] = useState(0); // phone: last time the texts were on screen (for the call's unread badge)
+  // Bringing the call screen up: everything in the texts so far counts as seen.
+  const showCall = () => {
+    setSeenAt(Date.now());
+    setCallHidden(false);
+  };
   // Voice notes: record in the browser, transcribe on our server (deepgram), send the words.
   const [recording, setRecording] = useState<{ startedAt: number } | null>(null);
   const [transcribing, setTranscribing] = useState(false);
@@ -399,7 +406,7 @@ export default function Home() {
 
   // Mic is live: tell the server, or hang up if it can't hear us.
   const connectCall = async (byUser = false) => {
-    setCallHidden(false);
+    showCall();
     if (!(await call.accept())) return;
     if (await sendEvent({ type: "call_started", byUser })) call.greeted();
     else call.hangUp("error");
@@ -431,6 +438,9 @@ export default function Home() {
   };
   const onCall = call.status === "active" || call.status === "connecting";
   const thread = messages.filter((m) => m.channel !== "voice");
+  // Texts that arrived while the call screen covered them (a link, a draft): shown as a badge on the call.
+  const textsVisible = callHidden || !onCall;
+  const unread = textsVisible ? 0 : thread.filter((m) => m.role === "agent" && m.kind !== "event" && m.ts > seenAt).length;
 
   return (
     <main className="min-h-dvh bg-neutral-950 flex items-center justify-center gap-8 p-0 sm:p-6">
@@ -449,6 +459,15 @@ export default function Home() {
         </button>
       </div>
       {showWhy && <WhyPanel messages={messages} />}
+      {menuOpen && (
+        <SideMenu
+          messages={messages}
+          onClose={() => setMenuOpen(false)}
+          onRestart={() => {
+            if (window.confirm("Start over with a fresh conversation?")) restart();
+          }}
+        />
+      )}
       <div className="relative w-full sm:w-[390px] h-dvh sm:h-[800px] sm:rounded-[44px] sm:border-[10px] border-neutral-800 bg-[#16171b] text-neutral-100 overflow-hidden flex flex-col shadow-2xl">
         {/* status bar (desktop frame only) */}
         <div className="hidden sm:flex justify-between px-7 pt-2 text-[11px] text-neutral-300 bg-[#1e1f24]">
@@ -457,9 +476,21 @@ export default function Home() {
         </div>
         {/* header */}
         <header className="flex items-center gap-3 px-3 pt-3 pb-3 bg-[#1e1f24]">
-          <span className="text-neutral-300 text-xl px-1" aria-hidden>
+          <span className="hidden sm:inline text-neutral-300 text-xl px-1" aria-hidden>
             ←
           </span>
+          {/* On a phone the page is the phone: the reasoning and restart live in a side menu. */}
+          <button
+            aria-label="Menu"
+            onClick={() => setMenuOpen(true)}
+            className="sm:hidden w-9 h-10 -ml-1 rounded-full hover:bg-white/10 flex items-center justify-center text-neutral-200"
+          >
+            <svg width="18" height="14" viewBox="0 0 18 14" fill="currentColor" aria-hidden>
+              <rect y="0" width="18" height="2" rx="1" />
+              <rect y="6" width="18" height="2" rx="1" />
+              <rect y="12" width="18" height="2" rx="1" />
+            </svg>
+          </button>
           {saved ? (
             <PersonaLogo size={40} />
           ) : (
@@ -480,25 +511,11 @@ export default function Home() {
           >
             <PhoneIcon />
           </button>
-          {/* On a phone-sized screen the page is the phone, so restart lives in the menu. */}
-          <button
-            aria-label="Restart"
-            onClick={() => {
-              if (window.confirm("Start over with a fresh conversation?")) restart();
-            }}
-            className="sm:hidden w-8 h-10 rounded-full hover:bg-white/10 flex items-center justify-center text-neutral-300"
-          >
-            <svg width="4" height="16" viewBox="0 0 4 16" fill="currentColor" aria-hidden>
-              <circle cx="2" cy="2" r="1.8" />
-              <circle cx="2" cy="8" r="1.8" />
-              <circle cx="2" cy="14" r="1.8" />
-            </svg>
-          </button>
         </header>
 
         {/* small screens: the call is hidden behind the texts, tap to go back */}
         {callHidden && onCall && (
-          <button onClick={() => setCallHidden(false)} className="lg:hidden bg-emerald-600 text-white text-sm py-2 px-4 flex items-center justify-center gap-2">
+          <button onClick={() => showCall()} className="lg:hidden bg-emerald-600 text-white text-sm py-2 px-4 flex items-center justify-center gap-2">
             <PhoneIcon size={14} /> On a call · tap to return
           </button>
         )}
@@ -619,6 +636,7 @@ export default function Home() {
         <CallScreen
           said={call.caption}
           onHide={() => setCallHidden(true)}
+          unread={unread}
           saved={saved}
           name={agentName}
           status={call.status}
@@ -647,29 +665,82 @@ export default function Home() {
 
 // Off the phone: which research-backed move produced each agent message, and where it comes from.
 function WhyPanel({ messages }: { messages: Msg[] }) {
+  return (
+    <aside className="hidden xl:flex flex-col w-[320px] h-[800px] text-neutral-200">
+      <div className="text-sm font-medium mb-1">why it said that</div>
+      <div className="text-[11px] text-neutral-500 mb-3">each turn, code picks one move from the research; the model writes the words.</div>
+      <WhyList messages={messages} />
+    </aside>
+  );
+}
+
+// Which research-backed move produced each agent message, and where it comes from.
+function WhyList({ messages }: { messages: Msg[] }) {
   const rows = messages.filter((m) => m.role === "agent" && m.move).slice(-12);
   const endRef = useRef<HTMLDivElement>(null);
   useEffect(() => {
     endRef.current?.scrollIntoView({ block: "end" });
   }, [rows.length]);
   return (
-    <aside className="hidden xl:flex flex-col w-[320px] h-[800px] text-neutral-200">
-      <div className="text-sm font-medium mb-1">why it said that</div>
-      <div className="text-[11px] text-neutral-500 mb-3">each turn, code picks one move from the research; the model writes the words.</div>
-      <div className="flex-1 overflow-y-auto space-y-3 pr-1">
-        {rows.length === 0 && <div className="text-xs text-neutral-500">moves show up here as the agent talks.</div>}
-        {rows.map((m) => (
-          <div key={m.id} className="rounded-xl bg-white/5 border border-white/10 p-3">
-            <div className="text-[11px] text-neutral-400 line-clamp-2">
-              {m.channel === "voice" ? "📞 " : ""}&ldquo;{m.text}&rdquo;
-            </div>
-            <div className="text-sm mt-1.5 text-[#c4d3f5]">{m.move!.label}</div>
-            <div className="text-[11px] text-neutral-500 mt-0.5 italic">{m.move!.source}</div>
+    <div className="flex-1 overflow-y-auto space-y-3 pr-1">
+      {rows.length === 0 && <div className="text-xs text-neutral-500">moves show up here as the agent talks.</div>}
+      {rows.map((m) => (
+        <div key={m.id} className="rounded-xl bg-white/5 border border-white/10 p-3">
+          <div className="text-[11px] text-neutral-400 line-clamp-2">
+            {m.channel === "voice" ? "📞 " : ""}&ldquo;{m.text}&rdquo;
           </div>
-        ))}
-        <div ref={endRef} />
-      </div>
-    </aside>
+          <div className="text-sm mt-1.5 text-[#c4d3f5]">{m.move!.label}</div>
+          <div className="text-[11px] text-neutral-500 mt-0.5 italic">{m.move!.source}</div>
+        </div>
+      ))}
+      <div ref={endRef} />
+    </div>
+  );
+}
+
+// Phone only: a side menu (the ☰ in the chat header) with how the agent decides, the live
+// "why it said that" list, and restart. Wider screens show the panel beside the phone instead.
+const PIPELINE = [
+  ["you say something", "text or voice, same conversation"],
+  ["code reads it", "your name, what you need, your mood, whether you're steering"],
+  ["code picks one move", "from the research: listen, one question, give first, the gmail offer..."],
+  ["the model writes the words", "in its own voice, following that move"],
+  ["code checks the result", "no false claims, no repeated asks, a goodbye before any hangup"],
+];
+function SideMenu({ messages, onClose, onRestart }: { messages: Msg[]; onClose: () => void; onRestart: () => void }) {
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => e.key === "Escape" && onClose();
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [onClose]);
+  return (
+    <div className="sm:hidden fixed inset-0 z-40" role="dialog" aria-modal="true" aria-label="Menu">
+      <button aria-label="Close menu" onClick={onClose} className="absolute inset-0 bg-black/60" />
+      <nav className="absolute inset-y-0 left-0 w-[86%] max-w-[360px] bg-[#16171b] border-r border-white/10 text-neutral-200 flex flex-col px-4 pt-4 pb-5 shadow-2xl">
+        <div className="flex items-center justify-between mb-4">
+          <div className="text-base font-medium">how it works</div>
+          <button aria-label="Close menu" onClick={onClose} className="w-9 h-9 rounded-full hover:bg-white/10 text-xl leading-none">
+            ×
+          </button>
+        </div>
+        <ol className="space-y-2 mb-5">
+          {PIPELINE.map(([title, detail], i) => (
+            <li key={title} className="flex gap-3">
+              <span className="shrink-0 w-5 h-5 mt-0.5 rounded-full bg-[#c4d3f5]/15 text-[#c4d3f5] text-[11px] flex items-center justify-center">{i + 1}</span>
+              <div>
+                <div className="text-sm">{title}</div>
+                <div className="text-[11px] text-neutral-500">{detail}</div>
+              </div>
+            </li>
+          ))}
+        </ol>
+        <div className="text-sm font-medium mb-2">why it said that</div>
+        <WhyList messages={messages} />
+        <button onClick={onRestart} className="mt-4 w-full text-sm text-neutral-200 bg-white/10 hover:bg-white/15 rounded-full py-2.5">
+          Restart conversation
+        </button>
+      </nav>
+    </div>
   );
 }
 
@@ -974,6 +1045,7 @@ function CallScreen(p: {
   muted?: boolean;
   onMute?: () => void;
   onHide?: () => void;
+  unread?: number; // texts that arrived while the call screen was up
 }) {
   const [now, setNow] = useState(() => Date.now());
   useEffect(() => {
@@ -988,11 +1060,6 @@ function CallScreen(p: {
       role={p.status === "ringing" ? "alertdialog" : undefined}
       aria-label={p.status === "ringing" ? `Incoming call from ${p.name}` : "Call"}
     >
-      {p.onHide && p.status === "active" && (
-        <button onClick={p.onHide} className="lg:hidden absolute top-4 left-4 text-sm text-neutral-300 hover:text-white flex items-center gap-1">
-          ← Messages
-        </button>
-      )}
       <div className="text-center">
         {/* Saved contact: their photo, like any phone. Unsaved: a bare number and a generic avatar. */}
         <div className={`mx-auto w-24 h-24 rounded-full flex items-center justify-center ${p.speaking ? "ring-8 ring-white/20 animate-pulse" : ""}`}>
@@ -1026,7 +1093,23 @@ function CallScreen(p: {
           </button>
         </div>
       ) : (
-        <div className="flex items-center gap-10">
+        <div className="flex items-center gap-8">
+          {/* Like a real phone: jump to the texts without hanging up (small screens; wide ones show both). */}
+          {p.onHide && p.status === "active" && (
+            <button
+              onClick={p.onHide}
+              aria-label={p.unread ? `Messages, ${p.unread} new` : "Messages"}
+              className="lg:hidden relative w-16 h-16 rounded-full bg-white/15 text-white hover:bg-white/25 flex flex-col items-center justify-center text-[10px] gap-0.5"
+            >
+              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinejoin="round" aria-hidden>
+                <path d="M4 5h16v11H9l-5 4z" />
+              </svg>
+              messages
+              {!!p.unread && (
+                <span className="absolute -top-1 -right-1 min-w-5 h-5 px-1 rounded-full bg-emerald-500 text-[11px] font-medium flex items-center justify-center">{p.unread}</span>
+              )}
+            </button>
+          )}
           {p.onMute && p.status === "active" && (
             <button
               onClick={p.onMute}

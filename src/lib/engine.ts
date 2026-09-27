@@ -580,6 +580,10 @@ const STAGE_VERB = /^\s*\*?\s*(sends?|sending|sent|calling|calls?|dials?|dialing
 const SEND_REQUEST = /\b(send|sned|sewnd|email|forward|reply to)\b/i;
 const CLAIMS_SENT = /^\s*(sent|done|all set)\b|\b(i('?ve| have)? (just )?sent|it'?s (been )?sent|email (is )?sent|sending (it|that|now)|on its way|(ready|good) to go|went out|it'?s out)\b/i;
 const EMPTY_PROMISE = /\b(give me (a|one) (sec|second|moment|minute)|one sec(ond)?|i'?m (looking at|reading|going through) (it|this|that|them)( now)?|let me (pull|look|check|grab|find)|pulling (those|that|it|them) up|checking (now|on that))\b/i;
+// The model talking about its own setup instead of to the person ("the system is being strict about
+// the most recent message context..."). Only user-facing words ever go out; any sentence like this is dropped.
+const LEAK =
+  /\b(the system|system (prompt|message|note|instruction)s?|my (instructions|prompt|guidelines)|(the|my) instructions (say|tell|are)|instructed to|message context|most recent message|(is|was|has been|have been) already sent|already been sent|tool (call|result|output)s?|function call|the (assistant|model)\b|language model|conversation (history|log)|the transcript|recap instruction|(i'?m|i am) (not )?(allowed|supposed|permitted) to|as per (my|the) (rules|instructions)|onboarding (step|flow|item)s?)\b/i;
 const META = /\b(i'?m waiting for|i should (stay|wait|remain|let|keep)|since (they|he|she|the user)|the user|i'?ll (stay quiet|wait (silently|quietly))|let them (check|speak|respond)|stay quiet|respond when ready|they haven'?t said)\b/i;
 
 // Talking ABOUT them instead of TO them ("I'll text Paul a quick message... letting him know...").
@@ -592,12 +596,12 @@ function narratesAbout(x: string, userName?: string | null) {
   return new RegExp(`\\b(text|message|tell|remind|let|ping|call) ${n}\\b|\\b${n} (is|was|has|hasn'?t|isn'?t|said|seems|wants)\\b`, "i").test(x);
 }
 
-function cleanModelText(t: string, userName?: string | null) {
+export function cleanModelText(t: string, userName?: string | null) {
   // The chat shows plain text, like sms: markdown bold/headers would show as literal symbols.
   const cleaned = t.replace(/\*\*([^*\n]+)\*\*/g, "$1").replace(/^#{1,4}\s+/gm, "").replace(TOOL_NAMES, " ").replace(STAGE_BRACKETS, keepFillIns).replace(/^\s*\[|\]\s*$/gm, "").replace(/[ \t]{2,}/g, " ").trim();
   return cleaned
     .split(/\n\s*\n/)
-    .map((b) => b.split(/(?<=[.!?])\s+/).filter((x) => !META.test(x) && !EMPTY_PROMISE.test(x) && !narratesAbout(x, userName)).join(" "))
+    .map((b) => b.split(/(?<=[.!?])\s+/).filter((x) => !META.test(x) && !LEAK.test(x) && !/\bSTATE\b/.test(x) && !EMPTY_PROMISE.test(x) && !narratesAbout(x, userName)).join(" "))
     .filter((b) => b.trim())
     .join("\n\n")
     .trim();
@@ -1134,10 +1138,17 @@ async function handleEventInner(s: Session, e: SessionEvent): Promise<TurnResult
           : e.reason === "user_hangup"
             ? "They hung up (maybe on purpose, maybe not)."
             : "The line dropped on our side.";
-      return turn(s, "text", `${RECAP_INSTRUCTION} ${how} Call lasted ${secs}s.`, recapFallback(s, e.reason), {
+      const r = await turn(s, "text", `${RECAP_INSTRUCTION} ${how} Call lasted ${secs}s.`, recapFallback(s, e.reason), {
         move: EVENT_MOVES.recap,
         avoid: e.reason === "agent_ended" ? /\b(cut off|dropped|lost you|got disconnected)\b/i : undefined,
       });
+      // A text always follows a call. If the model's recap got filtered to nothing, the code-written one goes out.
+      if (!r.newMessages.some((m) => m.role === "agent" && m.channel === "text" && !m.kind)) {
+        const ctx: Ctx = { s, channel: "text", actions: [], newMessages: [], move: EVENT_MOVES.recap };
+        emitAgentText(ctx, recapFallback(s, e.reason));
+        r.newMessages.push(...ctx.newMessages);
+      }
+      return r;
     }
     case "silence": {
       if (!s.call.active) return idle();
