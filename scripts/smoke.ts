@@ -70,11 +70,40 @@ async function main() {
   await handleEvent(gs, { type: "open" });
   const early = await handleUserMessage(gs, "text", "haha");
   check("no gif in the first few messages", !early.newMessages.some((m) => m.kind === "gif"));
-  for (let i = 0; i < 3; i++) gs.transcript.push({ id: `pad${i}`, role: "agent", channel: "text", text: "sure", ts: Date.now() });
+  for (let i = 0; i < 3; i++) {
+    gs.transcript.push({ id: `upad${i}`, role: "user", channel: "text", text: "cool", ts: Date.now() });
+    gs.transcript.push({ id: `pad${i}`, role: "agent", channel: "text", text: "sure thing.", ts: Date.now() });
+  }
   const laugh = await handleUserMessage(gs, "text", "lol 😂😂");
   check("laughter gets a gif", laugh.newMessages.some((m) => m.kind === "gif"), said(laugh));
   const twice = await handleUserMessage(gs, "text", "haha");
   check("no two gifs close together", !twice.newMessages.some((m) => m.kind === "gif"));
+
+  // name question answered with their own name: it's theirs, not the assistant's
+  const own = newSession();
+  await handleEvent(own, { type: "open" });
+  await handleUserMessage(own, "text", "i'm dana");
+  check("\"i'm dana\" is the user's name", own.slots.userName.value === "Dana" && own.slots.agentName.status === "missing");
+  const filler = newSession();
+  await handleEvent(filler, { type: "open" });
+  await handleUserMessage(filler, "text", "lol");
+  check("\"lol\" is not a name for the assistant", filler.slots.agentName.status === "missing");
+
+  // "no, text is fine" after a call offer means no more calls
+  const nocall = newSession();
+  await handleEvent(nocall, { type: "open" });
+  await handleUserMessage(nocall, "text", "Julia");
+  await handleUserMessage(nocall, "text", "no, text is fine");
+  check("a spoken no to a call is remembered", nocall.callOffers >= 2 && nocall.callDeclinedAt !== undefined);
+
+  // a call after graduating doesn't undo it
+  const grad = newSession();
+  await handleEvent(grad, { type: "open" });
+  await handleUserMessage(grad, "text", "skip setup");
+  grad.phase = "graduated";
+  await handleEvent(grad, { type: "call_started" });
+  await handleEvent(grad, { type: "call_ended", reason: "user_hangup" });
+  check("calling after graduating keeps you graduated", grad.phase === "graduated");
 
   // triage rules: bulk mail never interrupts, payment trouble always does
   check("promo is not an interrupt", scoreItem(DEMO_INBOX[1]).category === null);

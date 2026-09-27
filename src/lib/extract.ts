@@ -53,6 +53,7 @@ export function applyExtracted(s: Session, e: Extracted, setName: (value: string
   const userName = clean(e.userName, 40);
   if (userName && userName.toLowerCase() !== s.slots.userName.value?.toLowerCase()) {
     s.slots.userName = { ...s.slots.userName, value: userName, status: "filled", updatedAt: now };
+    if (s.lastAskedSlot === "userName") s.lastAskedSlot = undefined;
   }
   const need = clean(e.helpNeed, 120);
   if (need && s.slots.helpNeed.status !== "filled") {

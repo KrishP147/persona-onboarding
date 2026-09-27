@@ -4,6 +4,12 @@ import { nanoid } from "nanoid";
 import type { Session, SlotKey, Slot } from "./types";
 import { SLOT_KEYS } from "./types";
 
+export class SessionBusyError extends Error {
+  constructor() {
+    super("session busy");
+  }
+}
+
 // Two backends behind one interface:
 // - local dev: one JSON file per session under .data/
 // - deployed: Upstash Redis over its REST API (serverless has no writable disk and many instances)
@@ -112,15 +118,16 @@ function upstash(url: string, token: string): Backend {
       // Per-session mutex across serverless instances. Expires on its own if a request dies.
       const key = `lock:${id}`;
       const owner = nanoid(8);
-      for (let i = 0; i < 100; i++) {
-        if ((await cmd<string | null>("SET", key, owner, "NX", "PX", 20000)) === "OK") {
+      // Long enough for the slowest turn (model chain + tools); a waiting request polls up to ~30s.
+      for (let i = 0; i < 200; i++) {
+        if ((await cmd<string | null>("SET", key, owner, "NX", "PX", 45000)) === "OK") {
           return async () => {
             if ((await cmd<string | null>("GET", key)) === owner) await cmd("DEL", key);
           };
         }
         await new Promise((r) => setTimeout(r, 150));
       }
-      throw new Error("session busy");
+      throw new SessionBusyError();
     },
   };
 }

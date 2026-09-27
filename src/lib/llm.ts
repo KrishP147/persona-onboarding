@@ -67,7 +67,11 @@ async function geminiCall(params: GenParams, opts: { chain: string[]; deep: bool
   for (const model of chain) {
     for (let attempt = 0; attempt < 2; attempt++) {
       try {
-        const res = await gemini!.models.generateContent({ ...params, model, config: { ...params.config, thinkingConfig: thinking(model, opts.deep) } });
+        const res = await gemini!.models.generateContent({
+          ...params,
+          model,
+          config: { ...params.config, thinkingConfig: thinking(model, opts.deep), httpOptions: { timeout: 15000 } },
+        });
         return { res, model };
       } catch (err) {
         last = err;
@@ -77,6 +81,7 @@ async function geminiCall(params: GenParams, opts: { chain: string[]; deep: bool
           coolUntil.set(model, Date.now() + (/PerDay/i.test(msg) ? 60 * 60e3 : 60e3));
           break; // next model
         }
+        if (status === 400) break; // e.g. a setting this model doesn't support: try the next one
         if (status !== 503 && status !== 500) throw err;
         if (attempt === 0) await new Promise((r) => setTimeout(r, 400));
       }
@@ -189,11 +194,17 @@ async function geminiLoop(o: LoopOpts, exec: Exec): Promise<LoopResult> {
     void geminiUsage(model, "agent", res.usageMetadata);
     if (res.promptFeedback?.blockReason) return { text: "", refused: true };
     const content = res.candidates?.[0]?.content;
-    out.add(joinParts((content?.parts ?? []).filter((p) => p.text && !p.thought).map((p) => p.text!)));
+    const roundText = joinParts((content?.parts ?? []).filter((p) => p.text && !p.thought).map((p) => p.text!));
     const calls = res.functionCalls ?? [];
-    if (!content || calls.length === 0) break;
+    if (!content || calls.length === 0) {
+      out.add(roundText);
+      break;
+    }
     const results = await Promise.all(calls.map((c) => exec({ name: c.name ?? "", input: (c.args ?? {}) as Record<string, unknown> })));
     const failed = results.some((x) => x.startsWith("error"));
+    // Words written alongside a tool that failed ("calling you now!" + a refused call) don't go out;
+    // the next round, which sees the error, writes the reply instead.
+    if (!failed) out.add(roundText);
     // Send the model's own content back untouched: it carries the thought signatures.
     contents.push(content, {
       role: "user",
@@ -214,7 +225,8 @@ async function anthropicLoop(client: Anthropic, o: LoopOpts, exec: Exec): Promis
     ),
   }));
   for (let round = 0; round < o.maxRounds; round++) {
-    const response = await client.messages.create({
+    const response = await client.messages.create(
+      {
       model,
       max_tokens: 4000,
       output_config: { effort: "low" },
@@ -224,18 +236,24 @@ async function anthropicLoop(client: Anthropic, o: LoopOpts, exec: Exec): Promis
       ],
       tools: o.tools.map((t) => ({ name: t.name, description: t.description, strict: true, input_schema: t.schema as Anthropic.Tool.InputSchema })),
       messages,
-    });
+      },
+      { timeout: 20000 },
+    );
     void anthropicUsage(model, "agent", response.usage);
     if (response.stop_reason === "refusal") return { text: "", refused: true };
-    out.add(response.content.filter((b): b is Anthropic.TextBlock => b.type === "text").map((b) => b.text).join("\n\n"));
+    const roundText = response.content.filter((b): b is Anthropic.TextBlock => b.type === "text").map((b) => b.text).join("\n\n");
     const uses = response.content.filter((b): b is Anthropic.ToolUseBlock => b.type === "tool_use");
-    if (response.stop_reason !== "tool_use" || uses.length === 0) break;
+    if (response.stop_reason !== "tool_use" || uses.length === 0) {
+      out.add(roundText);
+      break;
+    }
     messages.push({ role: "assistant", content: response.content });
     const results: Anthropic.ToolResultBlockParam[] = [];
     for (const u of uses) {
       const r = await exec({ name: u.name, input: (u.input ?? {}) as Record<string, unknown> });
       results.push({ type: "tool_result", tool_use_id: u.id, content: r, is_error: r.startsWith("error") });
     }
+    if (!results.some((r) => r.is_error)) out.add(roundText);
     if (out.get() && !results.some((r) => r.is_error)) break;
     messages.push({ role: "user", content: results });
   }

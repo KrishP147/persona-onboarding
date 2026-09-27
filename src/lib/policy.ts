@@ -25,7 +25,7 @@ const SLOT_LABEL: Record<SlotKey, string> = {
 
 // Preferred order per channel. Agent name is text-only (per the brief).
 const ORDER: Record<Channel, SlotKey[]> = {
-  text: ["agentName", "userName", "helpNeed", "gmail"],
+  text: ["agentName", "helpNeed", "userName", "gmail"],
   voice: ["userName", "helpNeed", "gmail"],
 };
 
@@ -139,20 +139,23 @@ function chipsFor(s: Session, channel: Channel, offerCall: boolean): string[] {
 }
 
 // Book-keeping after the agent's reply is known.
-export function recordAsk(s: Session, askedSlot: SlotKey | null) {
-  if (askedSlot) {
-    s.slots[askedSlot].asks += 1;
-    s.consecutiveAsks += 1;
-    s.lastAskedSlot = askedSlot;
-    if (s.slots[askedSlot].asks > MAX_ASKS_PER_SLOT && s.slots[askedSlot].status === "missing") {
-      s.slots[askedSlot].status = "deferred";
-    }
-  } else {
+// A question counts toward the "don't ask twice in a row" rule; only a question about a slot
+// counts toward that slot's ask budget (so "want me to call?" never uses up the name ask).
+export function recordAsk(s: Session, askedSlot: SlotKey | null, isQuestion = askedSlot !== null) {
+  if (!isQuestion) {
     s.consecutiveAsks = 0;
+    return;
+  }
+  s.consecutiveAsks += 1;
+  if (!askedSlot) return;
+  s.slots[askedSlot].asks += 1;
+  s.lastAskedSlot = askedSlot;
+  if (s.slots[askedSlot].asks > MAX_ASKS_PER_SLOT && s.slots[askedSlot].status === "missing") {
+    s.slots[askedSlot].status = "deferred";
   }
 }
 
-export function directiveText(s: Session, d: Directive, channel: Channel): string {
+export function directiveText(s: Session, d: Directive, channel: Channel, hasMove = false): string {
   const slotLines = (Object.keys(s.slots) as SlotKey[])
     .map((k) => {
       const sl = s.slots[k];
@@ -172,7 +175,8 @@ export function directiveText(s: Session, d: Directive, channel: Channel): strin
     `PHASE: ${s.phase}`,
     s.slots.agentName.status === "filled" ? `CONTACT CARD: ${s.contactSaved ? "saved by the user" : "sent, not saved yet (a call from you shows up as an unknown number)"}` : "",
     `SLOTS:\n${slotLines}`,
-    d.nextSlot && d.mayAsk ? `COULD ASK ABOUT (only if it flows naturally, fine to skip this turn): ${SLOT_LABEL[d.nextSlot]}` : "NEXT TO GATHER: nothing this turn",
+    // When a move is chosen it says what (if anything) to ask; a second "ask" line would mean two questions.
+    hasMove ? "" : d.nextSlot && d.mayAsk ? `COULD ASK ABOUT (only if it flows naturally, fine to skip this turn): ${SLOT_LABEL[d.nextSlot]}` : "NEXT TO GATHER: nothing this turn",
     d.offerCall ? "You may offer a quick call (call offer_call) if it fits naturally." : "",
     d.notes.length ? `NOTES:\n- ${d.notes.join("\n- ")}` : "",
   ]

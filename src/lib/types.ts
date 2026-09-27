@@ -76,7 +76,10 @@ export interface Session {
   gmailVerified?: { email: string; unread?: number; demo?: boolean; inbox?: InboxItem[] }; // set by the oauth callback, consumed by the gmail_connected event
   alerts?: Alert[];
   movesUsed?: string[]; // conversation moves already made (src/lib/moves.ts)
-  llmFailures?: number; // model unreachable this many turns in a row // interruptions shown, with outcomes (see src/lib/triage.ts)
+  llmFailures?: number; // model unreachable this many turns in a row
+  prePhase?: Phase; // phase before a call, restored after (a call never undoes graduation)
+  graduateAfterCall?: boolean; // they asked to skip setup mid-call: graduate once the call ends
+  callDeclinedAt?: number; // transcript length when they said no to a call (in words or by declining) // interruptions shown, with outcomes (see src/lib/triage.ts)
   graduatedReason?: string;
   transcript: Msg[];
 }

@@ -1,9 +1,9 @@
 import { z } from "zod";
-import { loadSession } from "@/lib/store";
+import { incrDaily, loadSession } from "@/lib/store";
 import { CARTESIA_MODEL, CARTESIA_VERSION, CARTESIA_VOICES } from "@/lib/voice";
 
 const Body = z.object({
-  sessionId: z.string().min(6).max(32),
+  sessionId: z.string().regex(/^[A-Za-z0-9_-]{6,32}$/),
   text: z.string().min(1).max(800),
   style: z.enum(["feminine", "masculine", "neutral"]),
 });
@@ -18,6 +18,10 @@ export async function POST(req: Request) {
   const { sessionId, text, style } = parsed.data;
   const s = await loadSession(sessionId).catch(() => null);
   if (!s?.call.active) return Response.json({ error: "no active call" }, { status: 403 });
+  // A call that "started" long ago and never ended isn't a call anymore.
+  if (s.call.startedAt && Date.now() - s.call.startedAt > 20 * 60 * 1000) return Response.json({ error: "call expired" }, { status: 403 });
+  // Plenty for real calls, not enough to use this as a free text to speech service.
+  if ((await incrDaily(`tts:${sessionId}`).catch(() => 0)) > 300) return Response.json({ error: "too many" }, { status: 429 });
 
   const res = await fetch("https://api.cartesia.ai/tts/bytes", {
     method: "POST",

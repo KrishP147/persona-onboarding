@@ -1,6 +1,6 @@
 import { nanoid } from "nanoid";
 import type { Attachment, Channel, ClientAction, Msg, Session, SlotKey, TurnResult, VoiceStyle } from "./types";
-import { computeDirective, directiveText, recordAsk, MAX_SILENCE_STRIKES } from "./policy";
+import { computeDirective, directiveText, recordAsk, MAX_CALL_OFFERS, MAX_SILENCE_STRIKES } from "./policy";
 import { RECAP_INSTRUCTION, SYSTEM_PROMPT } from "./prompt";
 import { mockReply } from "./mock";
 import { provider, quick, runToolLoop, type Part, type ToolDef, type Turn } from "./llm";
@@ -146,8 +146,13 @@ async function classifyVoice(name: string): Promise<VoiceStyle> {
 // GIFs stay rare: not in the first few messages, and never two close together.
 function gifAllowed(s: Session) {
   const agentMsgs = s.transcript.filter((m) => m.role === "agent");
+  const userMsgs = s.transcript.filter((m) => m.role === "user").length;
   const lastGif = agentMsgs.map((m) => m.kind).lastIndexOf("gif");
-  return agentMsgs.length >= 5 && (lastGif < 0 || agentMsgs.length - lastGif >= GIF_MIN_GAP);
+  const lastText = [...agentMsgs].reverse().find((m) => !m.kind || m.kind === "text");
+  if (userMsgs < 4) return false; // not in the first few exchanges
+  if (lastText?.text.trim().endsWith("?")) return false; // a gif is not an answer to their question
+  if ((s.alerts ?? []).some((a) => a.outcome === "pending")) return false; // they may be saying yes to it
+  return lastGif < 0 || agentMsgs.length - lastGif >= GIF_MIN_GAP;
 }
 
 function makeGif(s: Session, mood: GifMood) {
@@ -172,15 +177,28 @@ export interface Ctx {
   offeredCall?: boolean;
 }
 
-const WANTS_OUT = /\b(skip|not now|later|no more questions|stop asking|just (help|do|get)|let'?s (just )?(start|go)|that'?s (it|all)|i'?m good|enough setup)\b/i;
+const WANTS_OUT = /\b(skip|not now|later|no more questions|stop asking|just (help|do|get)|let'?s (just )?(start|go)|that'?s (it|all)|i'?m good|i'?m done|enough setup|just let me (use|try)|stop)\b/i;
+const SKIP_OFFER = /\b(skip|jump (right )?in|get (right )?started|start (on|with))\b/i;
+const YES = /^\s*(yes|yeah|yep|yup|sure|ok(ay)?|do it|please|go ahead|let'?s do it|sounds good|perfect)\b/i;
 
 function lastUserText(s: Session) {
   return [...s.transcript].reverse().find((m) => m.role === "user")?.text ?? "";
 }
 
 function userWantsOut(s: Session) {
-  return WANTS_OUT.test(lastUserText(s));
+  const text = lastUserText(s);
+  if (WANTS_OUT.test(text)) return true;
+  // "want to skip the rest and just start?" "yeah": that's them asking out too.
+  const users = s.transcript.map((m, i) => (m.role === "user" ? i : -1)).filter((i) => i >= 0);
+  const lastUser = users[users.length - 1] ?? -1;
+  const prevAgent = s.transcript.slice(0, lastUser).reverse().find((m) => m.role === "agent" && (!m.kind || m.kind === "text"));
+  return !!prevAgent && SKIP_OFFER.test(prevAgent.text) && prevAgent.text.includes("?") && YES.test(text);
 }
+
+// "no, text is fine" right after a call offer is a no, just like tapping decline.
+const CALL_NO = /\b(no|nah|nope|not now|text is fine|rather text|just text|don'?t call|no calls?|hate (phone )?calls)\b/i;
+const OFFERED_CALL = /\b(call|ring|phone)\b[^?]*\?/i;
+const NEGATED_CALL = /\b(don'?t|do not|no|not|never|stop)\b[^.!?]{0,15}\b(call|ring|phone)/i;
 
 async function runTool(ctx: Ctx, name: string, input: Record<string, unknown>): Promise<string> {
   const { s } = ctx;
@@ -191,6 +209,7 @@ async function runTool(ctx: Ctx, name: string, input: Record<string, unknown>): 
       if (!SETTABLE.includes(slot as (typeof SETTABLE)[number]) || !value) return "error: invalid slot or empty value";
       const renamed = slot === "agentName" && s.slots.agentName.value && s.slots.agentName.value !== value;
       s.slots[slot] = { ...s.slots[slot], value, status: "filled", source: ctx.channel, updatedAt: Date.now() };
+      if (s.lastAskedSlot === slot) s.lastAskedSlot = undefined;
       if (slot === "agentName") {
         // Picking the voice runs alongside the reply instead of in front of it.
         const onCall = s.call.active;
@@ -227,9 +246,10 @@ async function runTool(ctx: Ctx, name: string, input: Record<string, unknown>): 
     case "start_call": {
       if (s.call.active) return "already on a call";
       // They declined or hung up: never ring again unless they ask for a call afterwards.
-      const lastEnd = s.transcript.findLastIndex((m) => m.kind === "event" && /^Call (ended|declined)/.test(m.text));
-      const askedSince = s.transcript.slice(lastEnd + 1).some((m) => m.role === "user" && /\b(call|ring|phone)\b/i.test(m.text));
-      if (lastEnd >= 0 && s.call.endedReason !== "agent_ended" && !askedSince) return "error: they just declined or hung up. don't call again unless they ask; carry on over text";
+      const lastEnd = Math.max(s.transcript.findLastIndex((m) => m.kind === "event" && /^Call (ended|declined)/.test(m.text)), (s.callDeclinedAt ?? 0) - 1);
+      const askedSince = s.transcript.slice(lastEnd + 1).some((m) => m.role === "user" && /\b(call|ring|phone)\b/i.test(m.text) && !NEGATED_CALL.test(m.text));
+      const said_no = s.callDeclinedAt !== undefined || (lastEnd >= 0 && s.call.endedReason !== "agent_ended");
+      if (said_no && !askedSince) return "error: they said no to a call or just hung up. don't call again unless they ask; carry on over text";
       ctx.actions.push({ type: "start_call" });
       return "ringing the user";
     }
@@ -268,7 +288,10 @@ async function runTool(ctx: Ctx, name: string, input: Record<string, unknown>): 
       return "hanging up after this message";
     case "graduate": {
       const open = (Object.keys(s.slots) as SlotKey[]).filter((k) => s.slots[k].status === "missing");
-      if (s.call.active) return "error: say goodbye and end_call first; graduate after the call";
+      if (s.call.active) {
+        s.graduateAfterCall = true;
+        return "noted: say a short goodbye now and call end_call; setup will end when the call does";
+      }
       if (open.length && !userWantsOut(s)) return `error: still open (${open.join(", ")}) and they haven't asked to skip. keep helping and gather what's left gently`;
       s.phase = "graduated";
       s.graduatedReason = String(input.reason ?? "");
@@ -286,7 +309,7 @@ async function generate(ctx: Ctx, extraInstruction?: string): Promise<string> {
   if (!provider) return extraInstruction ? "" : mockReply(ctx, runTool);
   // The directive is computed once per turn; tool effects show up in the next turn's STATE.
   const d = computeDirective(s, channel);
-  let state = directiveText(s, d, channel);
+  let state = directiveText(s, d, channel, !extraInstruction);
   if (extraInstruction) state += `\n\nINSTRUCTION: ${extraInstruction}`;
   else {
     // One research-backed move per turn, chosen in code, so the principles actually get applied.
@@ -311,7 +334,7 @@ const INTRO_CAPABILITIES = [
   "By continuing to text or use Persona, you agree to our Terms of Service and SMS Terms, and acknowledge our Privacy Policy: yourpersona.com/legal",
 ].join("\n");
 
-const GOODBYE = /\b(bye|goodbye|talk (to you )?(soon|later)|take care|catch you|ciao|see ya|i'?ll let you go|call me (back )?(whenever|anytime)|good talking|have a good one|i'?ll text you instead)\b/i;
+const GOODBYE = /\b(bye|goodbye|talk (to you )?(soon|later)|take care|catch you|ciao|see ya|i'?ll let you go|call me (back )?(whenever|anytime)|good talking|have a (good|great|nice|lovely) (one|day|night|evening|weekend)|see (you|ya)|later!|i'?ll text you( instead)?)\b/i;
 // "i just sent you a link" said without actually sending one.
 const CLAIMS_LINK = /\b(sent|dropped|texted|shared|popped)\b[^.?!]{0,40}\blink\b|\blink\b[^.?!]{0,30}\b(your texts|our texts|the chat|the thread)\b/i;
 
@@ -379,7 +402,11 @@ async function turn(
     failed = true;
   }
   s.llmFailures = failed ? (s.llmFailures ?? 0) + 1 : 0;
-  if (!text.trim() && fallback && !ctx.newMessages.some((m) => m.kind === "gif")) {
+  // A turn that did something (sent the link, a gif, a card) doesn't need "say that again?" beside it.
+  const didSomething = ctx.newMessages.length > 0 || ctx.actions.length > 0;
+  let usedFallback = false;
+  if (!text.trim() && fallback && (failed || !didSomething)) {
+    usedFallback = true;
     // The same "say that again?" on repeat looks broken; after the first miss, be honest about it.
     text = failed && (s.llmFailures ?? 0) > 1 ? outageLine(s, channel) : fallback;
     // On a call, "i'll text you instead" means actually hanging up (with that line as the goodbye).
@@ -394,17 +421,27 @@ async function turn(
   if (channel === "voice" && ctx.actions.some((a) => a.type === "end_call") && !GOODBYE.test(text)) {
     text = `${text.trim()} ${goodbyeLine(s)}`.trim();
   }
+  // Said goodbye on a call but didn't hang up: hang up (a silence prompt after "bye" is the worst).
+  if (channel === "voice" && s.call.active && !failed && GOODBYE.test(text) && !ctx.actions.some((a) => a.type === "end_call")) {
+    ctx.actions.push({ type: "end_call" });
+  }
+  const sentences = text.split(/(?<=[.!?])\s+|\n+/);
   // An offer to call made in words counts as an offer (so it isn't repeated next turn).
-  if (channel === "text" && !s.call.active && /\b(quick call|give you a (quick )?(call|ring)|hop on a (quick )?call|mind if i call)\b/i.test(text) && !ctx.offeredCall) {
+  const offerSentence = sentences.some((x) => x.trim().endsWith("?") && /\b(quick call|give you a (quick )?(call|ring)|hop on a (quick )?call|mind if i call|want me to call)\b/i.test(x) && !/\b(skip|no worries)\b/i.test(x));
+  if (channel === "text" && !s.call.active && offerSentence && !ctx.offeredCall) {
     s.callOffers += 1;
     if (s.phase === "intro") s.phase = "call_offered";
   }
-  // Keep words and actions in sync: if it says the link is in their texts, it is.
-  if (CLAIMS_LINK.test(text) && s.slots.gmail.status === "missing" && !ctx.newMessages.some((m) => m.kind === "gmail_link")) {
+  // Keep words and actions in sync: if it SAYS the link is in their texts (not asks whether to send it), it is.
+  const claimsLink = sentences.some((x) => CLAIMS_LINK.test(x) && !x.trim().endsWith("?") && !/\b(want me to|should i|can i|shall i)\b/i.test(x));
+  if (claimsLink && s.slots.gmail.status === "missing" && !ctx.newMessages.some((m) => m.kind === "gmail_link")) {
     await runTool(ctx, "send_gmail_link", {});
   }
-  const after = computeDirective(s, channel);
-  recordAsk(s, text.includes("?") && after.mayAsk ? after.nextSlot : null);
+  // Ask bookkeeping: credit a question to the slot this turn's move was about (never the fallback line).
+  const isQuestion = !usedFallback && text.includes("?");
+  const MOVE_SLOT: Record<string, SlotKey> = { discover: "helpNeed", dig: "helpNeed", offramp: "helpNeed", "ask-name": "userName", "ask-gmail": "gmail" };
+  const moveSlot = ctx.move ? MOVE_SLOT[ctx.move.id] : undefined;
+  recordAsk(s, isQuestion && moveSlot && s.slots[moveSlot].status === "missing" ? moveSlot : null, isQuestion);
   emitAgentText(ctx, text);
   await Promise.all(ctx.pending ?? []);
   if (ctx.newCard) {
@@ -415,11 +452,21 @@ async function turn(
   return { session: s, newMessages: ctx.newMessages, chips: final.chips, actions: ctx.actions };
 }
 
-const NOT_A_NAME = /^(no|nah|nope|idk|i don'?t know|you pick|whatever|skip|why|what|hi|hey|hello|yes|yeah|ok|okay|sure)\b/i;
+const NOT_A_NAME =
+  /^(no|nah|nope|idk|i don'?t know|dunno|you pick|you choose|up to you|surprise me|anything|whatever|skip|why|what|whats|who|whos|hi|hey|hello|yes|yeah|yep|ok|okay|sure|cool|nice|thanks|thank you|ty|lol|haha|lmao|hmm+|um+|uh+|idc|nothing|none|me|you|it|this|that|i|im)\b/i;
+// Answering "what do you want to call me?" with their own name is common: that's THEIR name.
+const OWN_NAME = /^(?:(?:hi|hey|hello)[,! ]+)?(?:i'?m|i am|my name(?:'s| is)|it'?s|this is|call me)\s+([\p{L}][\p{L}'-]{0,19})[.!]?\s*(?:btw|lol)?[.!]?$/iu;
 
 // Right after the agent asks for its name, a short reply like "Julia" or "call you Max" is the name.
 async function captureAgentName(s: Session, channel: Channel, text: string): Promise<{ card?: Msg; pending: Promise<void>[] } | undefined> {
   if (channel !== "text" || s.slots.agentName.status !== "missing" || s.lastAskedSlot !== "agentName") return;
+  const own = text.trim().match(OWN_NAME);
+  if (own) {
+    if (s.slots.userName.status !== "filled") {
+      s.slots.userName = { ...s.slots.userName, value: own[1].replace(/^\p{L}/u, (c) => c.toUpperCase()), status: "filled", source: channel, updatedAt: Date.now() };
+    }
+    return; // the model re-asks what to call the assistant (prompt covers it)
+  }
   const m = text.trim().match(/^(?:(?:i'?ll |let'?s |i wanna |i want to )?call (?:you|yourself) |how about |go with |name(?: you)?(?: is)? )?([\p{L}][\p{L}'-]{0,19}(?: [\p{L}][\p{L}'-]{0,19})?)[.!]?$/iu);
   if (!m || NOT_A_NAME.test(m[1])) return;
   const value = m[1].replace(/\b\p{L}/gu, (c) => c.toUpperCase());
@@ -441,6 +488,14 @@ export async function handleUserMessage(
   const userMsg = msg("user", channel, clean, { ...(attachments?.length ? { attachments } : {}), ...(clientId ? { id: clientId } : {}) });
   s.transcript.push(userMsg);
   recordOutcome(s, clean); // did they act on the last interruption, or wave it off?
+  // "no, text is fine" right after we offered a call: same as declining the ring.
+  const prevAgent = [...s.transcript].slice(0, -1).reverse().find((m) => m.role === "agent" && (!m.kind || m.kind === "text"));
+  if (channel === "text" && !s.call.active && prevAgent && OFFERED_CALL.test(prevAgent.text) && CALL_NO.test(clean) && !/\b(sure|yes|yeah|ok)\b/i.test(clean)) {
+    s.callOffers = MAX_CALL_OFFERS;
+    s.callDeclinedAt = s.transcript.length;
+    s.call = { ...s.call, endedReason: "declined" };
+    if (s.phase === "call_offered") s.phase = "intro";
+  }
   if (channel === "voice") s.call.silenceStrikes = 0;
   // Name reply safety net: models sometimes say "julia it is" without saving it.
   const named = await captureAgentName(s, channel, clean);
@@ -467,7 +522,12 @@ export async function handleUserMessage(
   }
   const heard = extract(s, clean);
   if (/^\s*skip setup\s*$/i.test(clean) && s.phase !== "graduated") {
-    return turn(s, channel, "The user tapped 'Skip setup'. Respect it: call graduate, then ask what they want to get done first.");
+    const skip = s.call.active
+      ? await turn(s, channel, "They want to skip the rest of setup. Say a short goodbye, say you'll pick it up over text, and call end_call.", goodbyeLine(s), { forceEnd: true })
+      : await turn(s, channel, "The user asked to skip setup. Respect it: call graduate, then ask what they want to get done first.");
+    if (s.call.active) s.graduateAfterCall = true;
+    skip.newMessages.unshift(userMsg);
+    return skip;
   }
   const r = await turn(
     s,
@@ -476,6 +536,11 @@ export async function handleUserMessage(
     channel === "voice" ? "sorry, i missed that. say it one more time?" : "sorry, i lost my train of thought for a sec. can you say that again?",
   );
   r.newMessages.unshift(userMsg);
+  // Image bytes were for this one reply; storing them would bloat every later read and write.
+  if (userMsg.attachments?.some((a) => a.dataUrl)) {
+    const i = s.transcript.indexOf(userMsg);
+    if (i >= 0) s.transcript[i] = { ...userMsg, attachments: userMsg.attachments.map(({ dataUrl, ...a }) => ({ ...a, summary: a.summary ?? (dataUrl ? "a photo they sent" : undefined) })) };
+  }
   const card = named?.card;
   if (card && !r.newMessages.includes(card)) {
     // Card goes after the text, like persona's.
@@ -545,6 +610,7 @@ async function handleEventInner(s: Session, e: SessionEvent): Promise<TurnResult
     case "call_started":
       if (s.call.active) return idle();
       s.call = { active: true, startedAt: Date.now(), silenceStrikes: 0 };
+      s.prePhase = s.phase;
       s.phase = "on_call";
       eventMsg(s, "Call started");
       return turn(
@@ -573,7 +639,11 @@ async function handleEventInner(s: Session, e: SessionEvent): Promise<TurnResult
         s.voice = s.pendingVoice;
         s.pendingVoice = undefined;
       }
-      s.phase = s.phase === "graduated" ? "graduated" : "post_call";
+      s.phase = s.prePhase === "graduated" || s.graduateAfterCall ? "graduated" : "post_call";
+      if (s.graduateAfterCall) {
+        s.graduateAfterCall = false;
+        for (const k of Object.keys(s.slots) as SlotKey[]) if (s.slots[k].status === "missing") s.slots[k].status = "deferred";
+      }
       const secs = Math.round(((s.call.endedAt ?? 0) - (s.call.startedAt ?? 0)) / 1000);
       eventMsg(s, `Call ended (${secs}s)`);
       const how =
@@ -613,6 +683,7 @@ async function handleEventInner(s: Session, e: SessionEvent): Promise<TurnResult
       return idle();
     case "mic_denied":
       eventMsg(s, "Microphone unavailable");
+      s.callOffers = MAX_CALL_OFFERS; // no mic: don't keep offering calls
       s.call = { ...s.call, active: false, endedReason: "error" };
       if (s.phase === "on_call" || s.phase === "call_offered") s.phase = "intro";
       return turn(

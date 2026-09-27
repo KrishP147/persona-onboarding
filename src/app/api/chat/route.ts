@@ -1,9 +1,9 @@
 import { z } from "zod";
-import { withSession } from "@/lib/store";
+import { SessionBusyError, withSession } from "@/lib/store";
 import { handleUserMessage } from "@/lib/engine";
 
 const Body = z.object({
-  sessionId: z.string().min(6).max(32),
+  sessionId: z.string().regex(/^[A-Za-z0-9_-]{6,32}$/),
   channel: z.enum(["text", "voice"]),
   text: z.string().max(8000).default(""),
   interrupted: z.boolean().optional(),
@@ -15,7 +15,7 @@ const Body = z.object({
         name: z.string().max(200),
         mime: z.string().max(100),
         summary: z.string().max(4000).optional(),
-        dataUrl: z.string().max(6_000_000).optional(),
+        dataUrl: z.string().max(1_500_000).optional(), // client downsizes to ~150KB
       }),
     )
     .max(4)
@@ -31,6 +31,8 @@ export async function POST(req: Request) {
     const result = await withSession(sessionId, (s) => handleUserMessage(s, channel, text, attachments, interrupted, clientId));
     return Response.json(result);
   } catch (err) {
+    // Another turn on this session is still running: a retryable conflict, not a server error.
+    if (err instanceof SessionBusyError) return Response.json({ error: "busy" }, { status: 409 });
     console.error("chat turn failed", err);
     return Response.json({ error: "turn failed" }, { status: 500 });
   }
