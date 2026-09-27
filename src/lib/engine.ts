@@ -311,7 +311,7 @@ const INTRO_CAPABILITIES = [
   "By continuing to text or use Persona, you agree to our Terms of Service and SMS Terms, and acknowledge our Privacy Policy: yourpersona.com/legal",
 ].join("\n");
 
-const GOODBYE = /\b(bye|goodbye|talk (to you )?(soon|later)|take care|catch you|ciao|see ya|i'?ll let you go|call me (back )?(whenever|anytime)|good talking|have a good one)\b/i;
+const GOODBYE = /\b(bye|goodbye|talk (to you )?(soon|later)|take care|catch you|ciao|see ya|i'?ll let you go|call me (back )?(whenever|anytime)|good talking|have a good one|i'?ll text you instead)\b/i;
 // "i just sent you a link" said without actually sending one.
 const CLAIMS_LINK = /\b(sent|dropped|texted|shared|popped)\b[^.?!]{0,40}\blink\b|\blink\b[^.?!]{0,30}\b(your texts|our texts|the chat|the thread)\b/i;
 
