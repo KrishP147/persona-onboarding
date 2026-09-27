@@ -355,7 +355,7 @@ export default function Home() {
       <div className="fixed top-3 right-3 z-30 hidden sm:flex gap-2">
         <button
           onClick={() => setShowWhy((v) => !v)}
-          className="hidden 2xl:block text-xs text-neutral-300 bg-neutral-800/90 hover:bg-neutral-700 border border-white/10 rounded-full px-3 py-1.5"
+          className="hidden xl:block text-xs text-neutral-300 bg-neutral-800/90 hover:bg-neutral-700 border border-white/10 rounded-full px-3 py-1.5"
         >
           {showWhy ? "Hide reasoning" : "Show reasoning"}
         </button>
@@ -549,7 +549,7 @@ function WhyPanel({ messages }: { messages: Msg[] }) {
     endRef.current?.scrollIntoView({ block: "end" });
   }, [rows.length]);
   return (
-    <aside className="hidden 2xl:flex flex-col w-[320px] h-[800px] text-neutral-200">
+    <aside className="hidden xl:flex flex-col w-[320px] h-[800px] text-neutral-200">
       <div className="text-sm font-medium mb-1">why it said that</div>
       <div className="text-[11px] text-neutral-500 mb-3">each turn, code picks one move from the research; the model writes the words.</div>
       <div className="flex-1 overflow-y-auto space-y-3 pr-1">

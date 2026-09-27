@@ -107,8 +107,18 @@ function toTurns(s: Session): Turn[] {
   return out;
 }
 
+// Offline guess for common names, used when the model can't be reached (so "julia" still sounds like julia).
+const FEMININE = /^(julia|juliet|sarah|sara|emma|olivia|ava|mia|sophia|sofia|isabella|luna|nova|chloe|grace|lily|zoe|ella|anna|hannah|maya|aria|stella|ruby|ivy|iris|daisy|rose|alice|clara|nora|lucy|jane|kate|katie|amy|emily|jessica|jenny|samantha|siri|alexa|tessa|priya|dana|robin|sage)$/i;
+const MASCULINE = /^(max|jack|james|john|mike|michael|david|daniel|sam|leo|liam|noah|oliver|ethan|lucas|henry|oscar|theo|jarvis|alfred|bob|tom|ben|chris|mark|paul|peter|ryan|kevin|jake|luke|adam|alex|kai|finn|felix|hugo|arthur|george|harry|charlie|dave|steve|jeeves|hal)$/i;
+const guessVoice = (name: string): VoiceStyle => {
+  const first = name.trim().split(/\s+/)[0] ?? "";
+  // A few names are genuinely shared; lean on the lists but keep true unisex ones neutral.
+  if (/^(alex|sam|robin|sage|kai|charlie|dana)$/i.test(first)) return "neutral";
+  return FEMININE.test(first) ? "feminine" : MASCULINE.test(first) ? "masculine" : "neutral";
+};
+
 async function classifyVoice(name: string): Promise<VoiceStyle> {
-  if (!provider) return "neutral";
+  if (!provider) return guessVoice(name);
   try {
     const t = (
       await quick({
@@ -119,9 +129,9 @@ async function classifyVoice(name: string): Promise<VoiceStyle> {
         tag: "voice-classify",
       })
     ).toLowerCase();
-    return t.startsWith("fem") ? "feminine" : t.startsWith("masc") ? "masculine" : "neutral";
+    return t.startsWith("fem") ? "feminine" : t.startsWith("masc") ? "masculine" : t.startsWith("neu") ? "neutral" : guessVoice(name);
   } catch {
-    return "neutral";
+    return guessVoice(name);
   }
 }
 

@@ -13,6 +13,7 @@ if you only read one thing, read the journal. it's how my understanding of this 
 - [05. what the research changed](docs/journal/05-research.md)
 - [06. what stress testing found](docs/journal/06-stress-testing.md)
 - [07. deciding when to interrupt](docs/journal/07-interruptions.md)
+- [08. the long polish](docs/journal/08-polish.md)
 - [reading list](docs/reading-list.md)
 
 ## running it

@@ -26,7 +26,7 @@ export const provider: "gemini" | "anthropic" | null =
   process.env.LLM_PROVIDER === "anthropic" && hasAnthropic ? "anthropic" : hasGemini ? "gemini" : hasAnthropic ? "anthropic" : null;
 
 const MODELS = {
-  gemini: { agent: process.env.GEMINI_MODEL ?? "gemini-3.5-flash", fast: process.env.GEMINI_FAST_MODEL ?? "gemini-3.5-flash-lite" },
+  gemini: { agent: process.env.GEMINI_MODEL ?? "gemini-2.5-flash", fast: process.env.GEMINI_FAST_MODEL ?? "gemini-3.5-flash-lite" },
   anthropic: { agent: process.env.AGENT_MODEL ?? "claude-sonnet-5", fast: process.env.FAST_MODEL ?? "claude-haiku-4-5" },
 };
 export const models = () => (provider ? MODELS[provider] : MODELS.gemini);
@@ -46,33 +46,45 @@ const SAFETY: SafetySetting[] = [
   { category: HarmCategory.HARM_CATEGORY_DANGEROUS_CONTENT, threshold: HarmBlockThreshold.BLOCK_ONLY_HIGH },
 ];
 
-// Gemini sometimes answers 503 "high demand" or 429. Retry briefly, then drop to the lighter
-// model, so a busy moment never turns into silence for the user.
+// Free-tier quotas are per model (some only 20 requests a day), so the agent walks a chain of
+// models: fast ones first, slower ones as a last resort. A model that says it's out of quota is
+// skipped until it's likely back (a minute for per-minute limits, an hour for daily ones), so a
+// spent model never adds delay. 503 "high demand" gets one quick retry.
 type GenParams = Parameters<GoogleGenAI["models"]["generateContent"]>[0];
-async function geminiCall(params: GenParams) {
-  const models = [params.model, MODELS.gemini.fast].filter((m, i, a) => a.indexOf(m) === i);
-  let last: unknown;
-  for (const model of models) {
+const AGENT_CHAIN = (process.env.GEMINI_AGENT_CHAIN ?? "gemini-2.5-flash,gemini-3.5-flash-lite,gemini-flash-latest,gemini-3.5-flash").split(",");
+const FAST_CHAIN = (process.env.GEMINI_FAST_CHAIN ?? "gemini-3.5-flash-lite").split(",");
+const coolUntil = new Map<string, number>();
+
+async function geminiCall(params: GenParams, opts: { chain: string[]; deep: boolean }) {
+  const chain = opts.chain.filter((m) => (coolUntil.get(m) ?? 0) < Date.now());
+  let last: unknown = new Error("all gemini models are cooling down");
+  for (const model of chain) {
     for (let attempt = 0; attempt < 2; attempt++) {
       try {
-        return await gemini!.models.generateContent({ ...params, model });
+        const res = await gemini!.models.generateContent({ ...params, model, config: { ...params.config, thinkingConfig: thinking(model, opts.deep) } });
+        return { res, model };
       } catch (err) {
         last = err;
         const status = (err as { status?: number }).status;
-        if (status !== 503 && status !== 429 && status !== 500) throw err;
-        await new Promise((r) => setTimeout(r, 400 * (attempt + 1)));
+        const msg = String((err as Error).message ?? "");
+        if (status === 429) {
+          coolUntil.set(model, Date.now() + (/PerDay/i.test(msg) ? 60 * 60e3 : 60e3));
+          break; // next model
+        }
+        if (status !== 503 && status !== 500) throw err;
+        if (attempt === 0) await new Promise((r) => setTimeout(r, 400));
       }
     }
   }
   throw last;
 }
 
-// Gemini 3 takes a level; 2.5 takes a token budget (0 = off on flash models).
-// Chat replies use the lightest thinking by default: it's a conversation, and speed is part of feeling human.
-const AGENT_THINKING = process.env.GEMINI_AGENT_THINKING === "low" ? ThinkingLevel.LOW : ThinkingLevel.MINIMAL;
+// Thinking settings differ by model family: 2.5 takes a token budget (0 = off), 3.x takes a level,
+// and some 3.x models don't accept MINIMAL. Chat wants the lightest setting: speed is part of feeling human.
 function thinking(model: string, deep: boolean): ThinkingConfig {
-  if (model.startsWith("gemini-3")) return { thinkingLevel: deep ? AGENT_THINKING : ThinkingLevel.MINIMAL };
-  return { thinkingBudget: deep ? 512 : 0 };
+  if (model.startsWith("gemini-2")) return { thinkingBudget: 0 };
+  if (/latest|3\.8/.test(model)) return { thinkingLevel: ThinkingLevel.LOW };
+  return { thinkingLevel: deep && process.env.GEMINI_AGENT_THINKING === "low" ? ThinkingLevel.LOW : ThinkingLevel.MINIMAL };
 }
 
 function geminiContents(turns: Turn[]): Content[] {
@@ -129,6 +141,11 @@ export async function runToolLoop(o: LoopOpts, exec: Exec): Promise<LoopResult> 
   return { text: "" };
 }
 
+// Gemini can return a reply in several text parts; gluing them blindly gave "sage it is.since...".
+function joinParts(parts: string[]) {
+  return parts.reduce((acc, p) => (acc && /[.!?,]$/.test(acc) && /^\S/.test(p) ? `${acc} ${p}` : acc + p), "");
+}
+
 function collector() {
   let text = "";
   return {
@@ -141,25 +158,29 @@ function collector() {
 
 async function geminiLoop(o: LoopOpts, exec: Exec): Promise<LoopResult> {
   const out = collector();
-  const model = MODELS.gemini.agent;
   const contents = geminiContents(o.turns);
+  // Later rounds stay on whichever model answered first (tool results and signatures belong to it).
+  let chain = MODELS.gemini.agent === AGENT_CHAIN[0] ? AGENT_CHAIN : [MODELS.gemini.agent, ...AGENT_CHAIN];
   for (let round = 0; round < o.maxRounds; round++) {
-    const res = await geminiCall({
-      model,
-      contents,
-      config: {
-        systemInstruction: `${o.system}\n\nSTATE (from the system, not the user):\n${o.state}`,
-        tools: [{ functionDeclarations: o.tools.map((t) => ({ name: t.name, description: t.description, parametersJsonSchema: t.schema })) }],
-        thinkingConfig: thinking(model, true),
-        safetySettings: SAFETY,
-        // Replies are a few short bubbles; a low cap also bounds runaway repetition.
-        maxOutputTokens: 1200,
+    const { res, model } = await geminiCall(
+      {
+        model: chain[0],
+        contents,
+        config: {
+          systemInstruction: `${o.system}\n\nSTATE (from the system, not the user):\n${o.state}`,
+          tools: [{ functionDeclarations: o.tools.map((t) => ({ name: t.name, description: t.description, parametersJsonSchema: t.schema })) }],
+          safetySettings: SAFETY,
+          // Replies are a few short bubbles; a low cap also bounds runaway repetition.
+          maxOutputTokens: 1200,
+        },
       },
-    });
+      { chain, deep: true },
+    );
+    chain = [model, ...chain.filter((m) => m !== model)];
     void geminiUsage(model, "agent", res.usageMetadata);
     if (res.promptFeedback?.blockReason) return { text: "", refused: true };
     const content = res.candidates?.[0]?.content;
-    out.add((content?.parts ?? []).filter((p) => p.text && !p.thought).map((p) => p.text).join(""));
+    out.add(joinParts((content?.parts ?? []).filter((p) => p.text && !p.thought).map((p) => p.text!)));
     const calls = res.functionCalls ?? [];
     if (!content || calls.length === 0) break;
     const results = await Promise.all(calls.map((c) => exec({ name: c.name ?? "", input: (c.args ?? {}) as Record<string, unknown> })));
@@ -218,12 +239,8 @@ const claudeFor = (via: Via) => (via === "anthropic" ? anthropicClient : anthrop
 export async function quick(o: { system: string; user: string; maxTokens: number; tag: string; model?: string; via?: Via }): Promise<string> {
   const claude = claudeFor(o.via);
   if (gemini && !(o.via === "anthropic" && claude)) {
-    const model = o.model ?? MODELS.gemini.fast;
-    const res = await geminiCall({
-      model,
-      contents: o.user,
-      config: { systemInstruction: o.system, maxOutputTokens: o.maxTokens, thinkingConfig: thinking(model, false) },
-    });
+    const chain = o.model ? [o.model] : FAST_CHAIN;
+    const { res, model } = await geminiCall({ model: chain[0], contents: o.user, config: { systemInstruction: o.system, maxOutputTokens: o.maxTokens } }, { chain, deep: false });
     await geminiUsage(model, o.tag, res.usageMetadata);
     return (res.text ?? "").trim();
   }
@@ -240,12 +257,12 @@ export async function quick(o: { system: string; user: string; maxTokens: number
 export async function json<T>(o: { system: string; user: string; schema: Record<string, unknown>; tag: string; via?: Via; fast?: boolean }): Promise<T> {
   const claude = claudeFor(o.via);
   if (gemini && !(o.via === "anthropic" && claude)) {
-    const model = o.fast ? MODELS.gemini.fast : MODELS.gemini.agent;
-    const res = await geminiCall({
-      model,
-      contents: o.user,
-      config: { systemInstruction: o.system, responseMimeType: "application/json", responseJsonSchema: o.schema, thinkingConfig: thinking(model, !o.fast) },
-    });
+    // Background helpers (fast) only use the light model's quota, never the agent's.
+    const chain = o.fast ? FAST_CHAIN : AGENT_CHAIN;
+    const { res, model } = await geminiCall(
+      { model: chain[0], contents: o.user, config: { systemInstruction: o.system, responseMimeType: "application/json", responseJsonSchema: o.schema } },
+      { chain, deep: !o.fast },
+    );
     await geminiUsage(model, o.tag, res.usageMetadata);
     return JSON.parse(res.text ?? "{}") as T;
   }
