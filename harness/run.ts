@@ -6,6 +6,7 @@ import { promises as fs } from "fs";
 import path from "path";
 import { PERSONAS, type Persona, type ScriptEvent } from "./personas";
 import type { Msg, TurnResult, Session } from "../src/lib/types";
+import { recordUsage, spendSince } from "../src/lib/usage";
 
 config({ path: ".env.local" });
 const BASE = process.env.HARNESS_BASE_URL ?? "http://localhost:3000";
@@ -31,9 +32,10 @@ async function simulateUser(p: Persona, transcript: Msg[], onCall: boolean): Pro
   const r = await client.messages.create({
     model: SIM_MODEL,
     max_tokens: 200,
-    system: `You are role-playing a user testing a new AI assistant's onboarding over ${onCall ? "a PHONE CALL (speak casually, short)" : "text messages (short, casual, like real texts)"}. Persona: ${p.brief}\nReply with ONLY the user's next message, nothing else.`,
+    system: `You are role-playing a user testing a new AI assistant's onboarding over ${onCall ? "a PHONE CALL (speak casually, short)" : "text messages (short, casual, like real texts)"}. Persona: ${p.brief}\nStay consistent with the conversation: never claim you already said something unless it appears above, never write the assistant's part (no invented search results), and never describe actions like *accepts call*: calls, silence, hangups and link taps happen automatically. Reply with ONLY the user's next message, nothing else.`,
     messages: [{ role: "user", content: `Conversation so far:\n${convo || "(empty)"}\n\nYour next message:` }],
   });
+  await recordUsage(SIM_MODEL, "sim", r.usage);
   return (r.content.find((b) => b.type === "text")?.text ?? "ok").trim().replace(/^USER:\s*/i, "");
 }
 
@@ -73,12 +75,24 @@ async function runEvent(sessionId: string, e: ScriptEvent): Promise<TurnResult[]
   }
 }
 
+const CLICKED = /\b(connect(ed|ing)?|click(ed|ing)?|tap(ped|ping)?|did it|done|signed in|logged in|went through)\b/i;
+
+// Marks for things the transcript can't show (page reloads), keyed by transcript length.
+const marks = new Map<string, Map<number, string>>();
+
 async function runPersona(p: Persona) {
   const { session } = await api<{ session: Session }>("/api/session");
   const id = session.id;
   let s = (await api<TurnResult>("/api/session", { sessionId: id, event: { type: "open" } })).session;
-  for (let turn = 0; turn < p.maxTurns && s.phase !== "graduated"; turn++) {
-    for (const e of p.script?.filter((x) => x.atTurn === turn) ?? []) {
+  const pending = [...(p.script ?? [])];
+  for (let turn = 0; turn < p.maxTurns && !(s.phase === "graduated" && !s.call.active); turn++) {
+    // Call answers wait for a real offer (a user can't pick up a call nobody placed).
+    const ready = (x: ScriptEvent) =>
+      ["accept_call", "decline_call"].includes(x.event) ? s.callOffers > 0 && !s.call.active : ["silence", "hangup"].includes(x.event) ? s.call.active : true;
+    const due = pending.filter((x) => x.atTurn <= turn && ready(x));
+    for (const e of due) {
+      pending.splice(pending.indexOf(e), 1);
+      if (e.event === "reopen") marks.set(p.id, new Map([[s.transcript.length, "  -- (user reloaded the page and came back) --"]]));
       const rs = await runEvent(id, e);
       s = rs[rs.length - 1]?.session ?? s;
       // agent asked to end the call itself
@@ -89,8 +103,16 @@ async function runPersona(p: Persona) {
     const text = await simulateUser(p, s.transcript, s.call.active);
     const r = await api<TurnResult>("/api/chat", { sessionId: id, channel: s.call.active ? "voice" : "text", text });
     s = r.session;
-    if (r.actions.some((a) => a.type === "start_call") && !p.script?.some((x) => x.event === "decline_call" || x.event === "accept_call")) {
+    // A cooperative sim user who says they clicked the link gets a real connection event.
+    const gmailScripted = p.script?.some((x) => x.event === "connect_gmail" || x.event === "gmail_fail");
+    if (!gmailScripted && s.slots.gmail.status === "missing" && s.transcript.some((m) => m.kind === "gmail_link") && CLICKED.test(text)) {
+      s = (await api<TurnResult>("/api/session", { sessionId: id, event: { type: "gmail_connected", email: "test.user@gmail.com" } })).session;
+    }
+    const scriptedAnswer = p.script?.some((x) => x.event === "decline_call" || x.event === "accept_call");
+    if (r.actions.some((a) => a.type === "start_call") && (!scriptedAnswer || !pending.some((x) => x.event === "decline_call"))) {
       s = (await api<TurnResult>("/api/session", { sessionId: id, event: { type: "call_started" } })).session;
+      const i = pending.findIndex((x) => x.event === "accept_call");
+      if (i >= 0) pending.splice(i, 1);
     }
     if (r.actions.some((a) => a.type === "end_call") && s.call.active) {
       s = (await api<TurnResult>("/api/session", { sessionId: id, event: { type: "call_ended", reason: "agent_ended" } })).session;
@@ -100,7 +122,8 @@ async function runPersona(p: Persona) {
 }
 
 async function judge(p: Persona, s: Session) {
-  const transcript = s.transcript.map(render).join("\n");
+  const m = marks.get(p.id);
+  const transcript = s.transcript.flatMap((x, i) => (m?.has(i) ? [m.get(i)!, render(x)] : [render(x)])).join("\n");
   const slots = JSON.stringify(Object.fromEntries(Object.entries(s.slots).map(([k, v]) => [k, `${v.status}:${v.value ?? ""}`])));
   const r = await client.messages.create({
     model: JUDGE_MODEL,
@@ -124,7 +147,8 @@ async function judge(p: Persona, s: Session) {
         },
       },
     },
-    system: "You grade onboarding conversations for a personal-assistant product. Be strict and specific.",
+    system:
+      "You grade onboarding conversations for a personal-assistant product. Be strict and specific. USER lines come from a simulator: don't blame the agent for the simulated user's own inconsistencies, and only grade what the transcript shows. Setup items can stay open when the user never completed them; judge how the agent handled it.",
     messages: [
       {
         role: "user",
@@ -132,11 +156,13 @@ async function judge(p: Persona, s: Session) {
       },
     ],
   });
+  await recordUsage(JUDGE_MODEL, "judge", r.usage);
   const text = r.content.find((b) => b.type === "text")?.text ?? "{}";
   return JSON.parse(text) as { score: number; passed: string[]; failed: string[]; formLike: boolean; brokeCharacter: boolean; worstMoment: string };
 }
 
 async function main() {
+  const started = Date.now();
   const only = process.argv.slice(2);
   const personas = only.length ? PERSONAS.filter((p) => only.includes(p.id)) : PERSONAS;
   const outDir = path.join("harness", "runs", new Date().toISOString().replace(/[:.]/g, "-"));
@@ -160,7 +186,11 @@ async function main() {
       }
     }),
   );
-  const summary = `| persona | score | failed | form-like | broke char |\n|---|---|---|---|---|\n${rows.sort().join("\n")}\n`;
+  const spend = await spendSince(started);
+  const costLine = `cost: $${spend.total.toFixed(3)} over ${spend.calls} calls (${Object.entries(spend.byTag).map(([k, v]) => `${k} $${v.toFixed(3)}`).join(", ")})`;
+  const summary = `${costLine}
+
+| persona | score | failed | form-like | broke char |\n|---|---|---|---|---|\n${rows.sort().join("\n")}\n`;
   await fs.writeFile(path.join(outDir, "SUMMARY.md"), summary);
   console.log("\n" + summary + `\nsaved → ${outDir}`);
 }

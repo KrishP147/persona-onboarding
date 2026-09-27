@@ -9,6 +9,13 @@ export const MAX_CONSECUTIVE_ASKS = 2; // then give value before asking again
 export const MAX_CALL_OFFERS = 2;
 export const MAX_SILENCE_STRIKES = 3;
 
+const SLOT_NAME: Record<SlotKey, string> = {
+  agentName: "agentName (YOUR name, the assistant's)",
+  userName: "userName (THEIR name, the user's)",
+  gmail: "gmail",
+  helpNeed: "helpNeed",
+};
+
 const SLOT_LABEL: Record<SlotKey, string> = {
   agentName: "a name for you (the assistant)",
   userName: "what to call the user",
@@ -66,17 +73,20 @@ export function computeDirective(s: Session, channel: Channel): Directive {
     notes.push(`You already asked about ${SLOT_LABEL[nextSlot]} once; rephrase lightly, don't repeat verbatim.`);
   }
 
-  // Offer the call once the agent has a name (or the user dodged naming), text only.
+  // Offer the call once the agent has a name (or the user dodged naming): the call gathers the rest.
   const offerCall =
     channel === "text" &&
     !s.call.active &&
     s.phase !== "post_call" &&
+    s.call.endedReason !== "declined" &&
     s.callOffers < MAX_CALL_OFFERS &&
     s.slots.agentName.status !== "missing" &&
-    (isOpen(s, "userName") || isOpen(s, "helpNeed"));
+    (isOpen(s, "userName") || isOpen(s, "helpNeed") || isOpen(s, "gmail"));
+  const callFirst = offerCall && s.callOffers === 0;
 
-  const helpKnown = s.slots.helpNeed.status === "filled";
-  const canGraduate = helpKnown && s.slots.userName.status !== "missing";
+  // Early graduation is the user's call; otherwise finish once nothing is left to gather.
+  const canGraduate = missing.length === 0;
+  const rushed = readMood(s.transcript).mood === "rushed";
 
   if (channel === "voice" && isOpen(s, "agentName")) {
     notes.push("Don't ask for your own name on the call; that happens over text. If the user offers one, accept it.");
@@ -87,16 +97,28 @@ export function computeDirective(s: Session, channel: Channel): Directive {
   if (s.phase === "post_call") {
     notes.push("The call has ended. Continue over text without re-asking anything already collected.");
   }
-  if (readMood(s.transcript).mood === "rushed" && !canGraduate && s.phase !== "on_call") {
-    notes.push("They seem in a hurry: offer to skip the setup and just start with whatever they need.");
+  if (rushed && !canGraduate && s.phase !== "on_call") {
+    notes.push("They seem in a hurry: offer to skip the rest of setup and just start with whatever they need. Graduate only if they say yes.");
+  }
+  if (s.slots.helpNeed.status === "filled" && !canGraduate) {
+    notes.push(
+      "You know what they need: give a small concrete taste of help now, and tie whatever's left (especially Gmail) to that need. Don't graduate unless they ask to skip or stop setup.",
+    );
   }
   if (canGraduate) {
     notes.push(
-      "The user has told you what they need. Help with it now (a concrete mini-task), then call graduate. Leftover items get deferred.",
+      s.call.active
+        ? "Everything's gathered. Help with their need, then wrap up the call warmly (goodbye, you'll text a recap, end_call). Graduate after that."
+        : "Everything's gathered. Help with their need and call graduate.",
+    );
+  }
+  if (callFirst) {
+    notes.push(
+      "Right now, ask permission for a quick call (about a minute) to get set up, and call offer_call. Make texting instead an easy yes. Don't ask for anything else in this message.",
     );
   }
 
-  return { nextSlot, mayAsk, offerCall, canGraduate, missing, notes, chips: chipsFor(s, channel, offerCall) };
+  return { nextSlot, mayAsk: mayAsk && !callFirst, offerCall, canGraduate, missing, notes, chips: chipsFor(s, channel, offerCall) };
 }
 
 function chipsFor(s: Session, channel: Channel, offerCall: boolean): string[] {
@@ -130,7 +152,7 @@ export function directiveText(s: Session, d: Directive, channel: Channel): strin
   const slotLines = (Object.keys(s.slots) as SlotKey[])
     .map((k) => {
       const sl = s.slots[k];
-      return `- ${k}: ${sl.status}${sl.value ? ` = "${sl.value}"` : ""} (asked ${sl.asks}x)`;
+      return `- ${SLOT_NAME[k]}: ${sl.status}${sl.value ? ` = "${sl.value}"` : ""} (asked ${sl.asks}x)`;
     })
     .join("\n");
   const mood = readMood(s.transcript);

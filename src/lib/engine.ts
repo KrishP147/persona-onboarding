@@ -4,6 +4,7 @@ import type { Attachment, Channel, ClientAction, Msg, Session, SlotKey, TurnResu
 import { computeDirective, directiveText, recordAsk, MAX_SILENCE_STRIKES } from "./policy";
 import { RECAP_INSTRUCTION, SYSTEM_PROMPT } from "./prompt";
 import { mockReply } from "./mock";
+import { recordUsage } from "./usage";
 
 const MODEL = process.env.AGENT_MODEL ?? "claude-sonnet-5";
 const FAST_MODEL = process.env.FAST_MODEL ?? "claude-haiku-4-5";
@@ -67,7 +68,7 @@ const TOOLS: Anthropic.Tool[] = [
   },
   {
     name: "graduate",
-    description: "User is ready for the full assistant (they know what they need or asked to skip). Remaining items get deferred.",
+    description: "End setup and become the full assistant. Only when the user asked to skip or stop setup, or nothing is left to gather. Knowing their need is not enough. Remaining items get deferred.",
     strict: true,
     input_schema: {
       type: "object",
@@ -92,7 +93,7 @@ function toApiMessages(s: Session): Anthropic.MessageParam[] {
   const out: Anthropic.MessageParam[] = [];
   convo.forEach((m, i) => {
     const role = m.role === "user" ? "user" : "assistant";
-    const prefix = m.channel === "voice" ? "(on call) " : "";
+    const prefix = m.channel === "voice" && m.role === "user" ? "(on call) " : "";
     let text = m.kind === "gmail_link" ? "[sent the Connect Gmail link]" : prefix + m.text;
     if (m.attachments?.length) text += "\n" + m.attachments.map(attachmentText).join("\n");
     const blocks: Anthropic.ContentBlockParam[] = [];
@@ -123,6 +124,7 @@ async function classifyVoice(name: string): Promise<VoiceStyle> {
       system: "Classify how a name is most commonly perceived for picking a TTS voice. Answer with exactly one word: feminine, masculine, or neutral. Ambiguous, unisex, invented, or object names are neutral.",
       messages: [{ role: "user", content: name.slice(0, 60) }],
     });
+    void recordUsage(FAST_MODEL, "voice-classify", r.usage);
     const t = r.content.find((b) => b.type === "text")?.text.trim().toLowerCase() ?? "";
     return t.startsWith("fem") ? "feminine" : t.startsWith("masc") ? "masculine" : "neutral";
   } catch {
@@ -135,6 +137,17 @@ export interface Ctx {
   channel: Channel;
   actions: ClientAction[];
   newMessages: Msg[];
+  resendOk?: boolean;
+}
+
+const WANTS_OUT = /\b(skip|not now|later|no more questions|stop asking|just (help|do|get)|let'?s (just )?(start|go)|that'?s (it|all)|i'?m good|enough setup)\b/i;
+
+function lastUserText(s: Session) {
+  return [...s.transcript].reverse().find((m) => m.role === "user")?.text ?? "";
+}
+
+function userWantsOut(s: Session) {
+  return WANTS_OUT.test(lastUserText(s));
 }
 
 async function runTool(ctx: Ctx, name: string, input: Record<string, unknown>): Promise<string> {
@@ -180,6 +193,9 @@ async function runTool(ctx: Ctx, name: string, input: Record<string, unknown>): 
       return "ringing the user";
     case "send_gmail_link": {
       if (s.slots.gmail.status === "filled") return `already connected as ${s.gmailEmail}`;
+      const lastLink = s.transcript.map((m) => m.kind).lastIndexOf("gmail_link");
+      const lastFail = s.transcript.findLastIndex((m) => m.kind === "event" && /^Gmail connection/.test(m.text));
+      if (lastLink >= 0 && lastLink > lastFail && !ctx.resendOk) return "already sent; it's still in their texts. don't send another, just point to it";
       const link = msg("agent", "text", "Connect your Google account", { kind: "gmail_link" });
       ctx.newMessages.push(link);
       s.transcript.push(link);
@@ -191,12 +207,16 @@ async function runTool(ctx: Ctx, name: string, input: Record<string, unknown>): 
       if (!s.call.active) return "not on a call";
       ctx.actions.push({ type: "end_call" });
       return "hanging up after this message";
-    case "graduate":
+    case "graduate": {
+      const open = (Object.keys(s.slots) as SlotKey[]).filter((k) => s.slots[k].status === "missing");
+      if (s.call.active) return "error: say goodbye and end_call first; graduate after the call";
+      if (open.length && !userWantsOut(s)) return `error: still open (${open.join(", ")}) and they haven't asked to skip. keep helping and gather what's left gently`;
       s.phase = "graduated";
       s.graduatedReason = String(input.reason ?? "");
       for (const k of Object.keys(s.slots) as SlotKey[]) if (s.slots[k].status === "missing") s.slots[k].status = "deferred";
       ctx.actions.push({ type: "graduate" });
       return "graduated; you're now the full assistant";
+    }
     default:
       return `error: unknown tool ${name}`;
   }
@@ -222,6 +242,7 @@ async function generate(ctx: Ctx, extraInstruction?: string): Promise<string> {
       tools: TOOLS,
       messages,
     });
+    void recordUsage(MODEL, "agent", response.usage);
     if (response.stop_reason === "refusal") return "hmm, i can't help with that one. anything else on your mind?";
     const text = response.content.filter((b): b is Anthropic.TextBlock => b.type === "text").map((b) => b.text).join("\n\n");
     if (text.trim()) finalText += (finalText ? "\n\n" : "") + text.trim();
@@ -233,12 +254,14 @@ async function generate(ctx: Ctx, extraInstruction?: string): Promise<string> {
       const out = await runTool(ctx, t.name, (t.input ?? {}) as Record<string, unknown>);
       results.push({ type: "tool_result", tool_use_id: t.id, content: out, is_error: out.startsWith("error") });
     }
+    // Already replied this turn: another round only adds filler ("waiting on you..."), unless a tool failed.
+    if (finalText && !results.some((r) => r.is_error)) break;
     messages.push({ role: "user", content: results });
   }
   return finalText;
 }
 
-const GOODBYE = /\b(bye|goodbye|talk (soon|later)|take care|catch you|ciao|see ya)\b/i;
+const GOODBYE = /\b(bye|goodbye|talk (soon|later)|take care|catch you|ciao|see ya|i'?ll let you go|call me (back )?(whenever|anytime)|good talking)\b/i;
 
 function shortNeed(s: Session) {
   const n = s.slots.helpNeed.value;
@@ -269,7 +292,9 @@ export function recapFallback(s: Session, reason: string) {
   return [opener, got.length ? `so far: ${got.join(", ")}.` : "", open ? nudge[open] : "reply here anytime, or call me back."].filter(Boolean).join("\n\n");
 }
 
-function emitAgentText(ctx: Ctx, text: string) {
+function emitAgentText(ctx: Ctx, raw: string) {
+  // House style: no em dashes, no stage directions like "(waiting for reply)".
+  const text = raw.replace(/\s*[—]\s*/g, ", ").replace(/^\s*\(on call\)\s*/gim, "").replace(/^\s*\*?\([^)]*\)\*?\s*$/gm, "").trim();
   const bubbles = ctx.channel === "voice" ? [text.replace(/\n+/g, " ").trim()] : text.split(/\n\s*\n/).map((b) => b.trim());
   for (const b of bubbles.filter(Boolean)) {
     const m = msg("agent", ctx.channel, b);
@@ -286,7 +311,8 @@ async function turn(
   fallback?: string,
   opts: { forceEnd?: boolean } = {},
 ): Promise<TurnResult> {
-  const ctx: Ctx = { s, channel, actions: [], newMessages: [] };
+  const resendOk = /\b(resend|send (it|the link) again|another link|new link|lost the link)\b/i.test(lastUserText(s));
+  const ctx: Ctx = { s, channel, actions: [], newMessages: [], resendOk };
   let text = await generate(ctx, extraInstruction);
   if (!text.trim() && fallback) text = fallback;
   if (opts.forceEnd && !ctx.actions.some((a) => a.type === "end_call")) ctx.actions.push({ type: "end_call" });
@@ -382,7 +408,13 @@ export async function handleEvent(s: Session, e: SessionEvent): Promise<TurnResu
       s.phase = s.phase === "graduated" ? "graduated" : "post_call";
       const secs = Math.round(((s.call.endedAt ?? 0) - (s.call.startedAt ?? 0)) / 1000);
       eventMsg(s, `Call ended (${secs}s)`);
-      return turn(s, "text", `${RECAP_INSTRUCTION} Reason: ${e.reason}. Call lasted ${secs}s.`, recapFallback(s, e.reason));
+      const how =
+        e.reason === "agent_ended"
+          ? "You ended it after saying goodbye, so don't say you got cut off."
+          : e.reason === "user_hangup"
+            ? "They hung up (maybe on purpose, maybe not)."
+            : "The line dropped on our side.";
+      return turn(s, "text", `${RECAP_INSTRUCTION} ${how} Call lasted ${secs}s.`, recapFallback(s, e.reason));
     }
     case "silence": {
       if (!s.call.active) return idle();
