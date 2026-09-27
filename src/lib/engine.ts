@@ -96,8 +96,10 @@ function toTurns(s: Session): Turn[] {
   const out: Turn[] = [];
   convo.forEach((m, i) => {
     const role = m.role === "user" ? "user" : "assistant";
-    const prefix = m.channel === "voice" && m.role === "user" ? "(on call) " : "";
-    let text = m.kind === "gmail_link" ? "[sent the Connect Gmail link]" : m.kind === "gif" ? "[sent a gif]" : prefix + m.text;
+    // Two streams: what's said on the call, and what's in the text chat. Label both once a call exists.
+    const hadCall = s.call.active || s.transcript.some((x) => x.channel === "voice");
+    const prefix = !hadCall ? "" : m.role === "user" ? (m.channel === "voice" ? "(said on the call) " : "(texted in the chat) ") : m.channel === "text" ? "(posted in the chat) " : "";
+    let text = m.kind === "gmail_link" ? `${prefix}[the Connect Gmail link card]` : m.kind === "gif" ? `${prefix}[a gif]` : prefix + m.text;
     if (m.attachments?.length) text += "\n" + m.attachments.map(attachmentText).join("\n");
     const parts: Part[] = [];
     // Only the latest user message carries actual image pixels; older ones use the summary.
@@ -470,7 +472,7 @@ function capSentences(text: string, max: number) {
 
 function emitAgentText(ctx: Ctx, raw: string) {
   // House style: no em dashes, no stage directions like "(waiting for reply)".
-  const text = stopAtRepeat(raw.replace(TOOL_NAMES, " ").replace(STAGE_BRACKETS, " ")).replace(/\s*[—]\s*/g, ", ").replace(/^\s*\(on call\)\s*/gim, "").replace(/^\s*\*?\([^)]*\)\*?\s*$/gm, "").trim();
+  const text = stopAtRepeat(raw.replace(TOOL_NAMES, " ").replace(STAGE_BRACKETS, " ")).replace(/\s*[—]\s*/g, ", ").replace(/\((on call|said on the call|texted in the chat|posted in the chat)\)\s*/gi, "").replace(/^\s*\*?\([^)]*\)\*?\s*$/gm, "").trim();
   // On a call, three sentences is already a lot to listen to; trim anything longer.
   const spoken = ctx.channel === "voice" ? capSentences(text.replace(/\n+/g, " ").trim(), 3) : text;
   const bubbles = ctx.channel === "voice" ? [spoken] : text.split(/\n\s*\n/).map((b) => b.trim());
@@ -569,7 +571,7 @@ async function turn(
   }
   // On a call, if the link just went to their texts, say so (the written ask alone isn't enough).
   if (channel === "voice" && ctx.newMessages.some((m) => m.kind === "gmail_link") && !/\b(text|link)\b/i.test(text)) {
-    text = `${text.trim()} i just sent the link to your texts.`.trim();
+    text = `${text.trim()} i'm texting you the link right now. it's the card that says connect your google account, tap it whenever you're ready.`.trim();
   }
   // Ask bookkeeping: credit a question to the slot this turn's move was about (never the fallback line).
   const isQuestion = !usedFallback && text.includes("?");
@@ -700,7 +702,10 @@ export async function handleUserMessage(
     const out = await runTool(ctx, "send_gmail_link", {});
     if (!out.startsWith("error")) {
       linkSent = ctx.newMessages;
-      linkNote = "You just texted them the Gmail link (it's in their texts now). Say so in a few words, and that it takes a few seconds. Don't send another.";
+      linkNote =
+        channel === "voice"
+          ? "You just put the Gmail link in the text chat (a separate stream from this call). Say out loud that you're texting it right now, that it's the card that says 'connect your google account', and that signing in takes a few seconds. Don't send another."
+          : "You just sent the Gmail link card in the chat. Say it's right there (the card that says 'connect your google account') and that it takes a few seconds. Don't send another.";
     }
   } else if (s.slots.gmail.status === "missing" && lastLinkAsk?.text.includes(GMAIL_ASK_MARK) && /^\s*(no|nah|nope|not now|later|no thanks)\b/i.test(clean)) {
     s.slots.gmail.status = "declined";
@@ -714,11 +719,14 @@ export async function handleUserMessage(
     skip.newMessages.unshift(userMsg);
     return skip;
   }
+  // They typed in the chat while we're on the call: answer out loud, and say we saw their text.
+  const replyChannel: Channel = channel === "text" && s.call.active ? "voice" : channel;
+  const sawText = channel === "text" && s.call.active ? "They just TEXTED this in the chat while you're on the call. Answer out loud on the call and mention you saw their text." : undefined;
   const r = await turn(
     s,
-    channel,
-    linkNote ?? (interrupted ? "They talked over you mid-sentence. Drop what you were saying and respond to what they just said; don't repeat your cut-off line unless they ask." : undefined),
-    linkNote ? (channel === "voice" ? "sent it to our texts. it only takes a few seconds." : "sent! it only takes a few seconds.") : channel === "voice" ? "sorry, i missed that. say it one more time?" : "sorry, i lost my train of thought for a sec. can you say that again?",
+    replyChannel,
+    linkNote ?? sawText ?? (interrupted ? "They talked over you mid-sentence. Drop what you were saying and respond to what they just said; don't repeat your cut-off line unless they ask." : undefined),
+    linkNote ? (channel === "voice" ? "okay, i'm texting you the link right now. it's the card that says connect your google account, tap it whenever you're ready." : "here you go, it's the card right there. signing in takes a few seconds.") : channel === "voice" ? "sorry, i missed that. say it one more time?" : "sorry, i lost my train of thought for a sec. can you say that again?",
   );
   if (linkSent.length) {
     // The link sits right before the reply that mentions it.
