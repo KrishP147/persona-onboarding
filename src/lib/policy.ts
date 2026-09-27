@@ -176,7 +176,7 @@ export function directiveText(s: Session, d: Directive, channel: Channel, hasMov
     s.call.active
       ? "STREAMS: you're talking on the call, and there's a separate text chat. Whatever you put in the chat (a link, a draft, a list) happens there, not on the call: say out loud what you're sending and what it looks like, so they know where to look."
       : "",
-    "REMINDER: this is setup. You can't browse, check prices, call businesses, or read anything live yet. Never say \"one sec\", \"checking now\", \"calling them now\", \"it'll be ready in a minute\", or quote prices or availability. Say what you'll do once you're set up, or draft something right here in the message.",
+    "REMINDER: this is setup. You can't call businesses or book anything yet. For anything live (weather, hours, prices, news), look it up now with web_search and read_page, and only quote what you read. Never say \"one sec\", \"checking now\", \"calling them now\", or \"it'll be ready in a minute\"; do it in this turn or draft something right here in the message.",
     s.slots.gmail.status === "filled" ? "GMAIL: already connected. Never mention the link again." : s.slots.gmail.status === "declined" ? "GMAIL: they said no. Don't bring it up again unless they do." : "",
     `PHASE: ${s.phase}`,
     s.slots.agentName.status === "filled" ? `CONTACT CARD: ${s.contactSaved ? "saved by the user" : "sent, not saved yet (a call from you shows up as an unknown number)"}` : "",

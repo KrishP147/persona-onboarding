@@ -150,6 +150,9 @@ export interface LoopOpts {
   turns: Turn[];
   tools: ToolDef[];
   maxRounds: number;
+  // Tools whose results the model must see before replying: text written alongside them
+  // ("let me check") is dropped and the loop goes another round.
+  lookup?: Set<string>;
 }
 
 type LoopResult = { text: string; refused?: boolean };
@@ -232,7 +235,7 @@ async function cloudflareLoop(cf: { token: string; account: string }, o: LoopOpt
       }
       results.push(await exec({ name: c.function.name, input }));
     }
-    const failed = results.some((r) => r.startsWith("error"));
+    const failed = results.some((r) => r.startsWith("error")) || calls.some((c) => o.lookup?.has(c.function.name));
     if (!failed) out.add(roundText);
     messages.push({
       role: "assistant",
@@ -307,7 +310,7 @@ async function geminiLoop(o: LoopOpts, exec: Exec): Promise<LoopResult> {
       break;
     }
     const results = await Promise.all(calls.map((c) => exec({ name: c.name ?? "", input: (c.args ?? {}) as Record<string, unknown> })));
-    const failed = results.some((x) => x.startsWith("error"));
+    const failed = results.some((x) => x.startsWith("error")) || calls.some((c) => o.lookup?.has(c.name ?? ""));
     // Words written alongside a tool that failed ("calling you now!" + a refused call) don't go out;
     // the next round, which sees the error, writes the reply instead.
     if (!failed) out.add(roundText);
@@ -360,8 +363,9 @@ async function anthropicLoop(client: Anthropic, o: LoopOpts, exec: Exec): Promis
       const r = await exec({ name: u.name, input: (u.input ?? {}) as Record<string, unknown> });
       results.push({ type: "tool_result", tool_use_id: u.id, content: r, is_error: r.startsWith("error") });
     }
-    if (!results.some((r) => r.is_error)) out.add(roundText);
-    if (out.get() && !results.some((r) => r.is_error)) break;
+    const wait = results.some((r) => r.is_error) || uses.some((u) => o.lookup?.has(u.name));
+    if (!wait) out.add(roundText);
+    if (out.get() && !wait) break;
     messages.push({ role: "user", content: results });
   }
   return { text: out.get() };

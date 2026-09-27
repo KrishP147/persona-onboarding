@@ -10,10 +10,15 @@ import { getSecret } from "./store";
 import { EVENT_MOVES, chooseMove, markUsed } from "./moves";
 import { GIF_MIN_GAP, GIF_MOODS, GIFS, gifUrl, type GifMood } from "./gifs";
 import { applyExtracted, extract } from "./extract";
+import { readPage, webEnabled, webSearch } from "./web";
 import type { Move } from "./types";
 
-const MAX_TOOL_ROUNDS = 3;
+const MAX_TOOL_ROUNDS = 4; // search, read a page, then reply (plus room for a set_slot)
 const HISTORY_LIMIT = 16; // recent context is what matters; slots and STATE carry the rest (and it keeps each call small)
+
+const WEB_TOOLS = new Set(["web_search", "read_page"]);
+// Tools whose results the model has to read before it replies.
+const LOOKUP_TOOLS = new Set([...WEB_TOOLS, "read_inbox"]);
 
 export const usingMock = () => provider === null;
 
@@ -60,6 +65,30 @@ const TOOLS: ToolDef[] = [
         count: { type: "integer", description: "How many (1-10), default 5" },
       },
       required: ["query", "count"],
+      additionalProperties: false,
+    },
+  },
+  {
+    name: "web_search",
+    description:
+      "Search the web for anything live or that you'd otherwise guess: weather, news, hours, prices, places, events, facts. Returns titles and links only; then call read_page on the best link to get the facts. Use it instead of answering from memory whenever they need current info.",
+    schema: {
+      type: "object",
+      properties: {
+        query: { type: "string", description: "What to search, like you'd type it into Google" },
+        count: { type: "integer", description: "How many results (1-8), default 5" },
+      },
+      required: ["query", "count"],
+      additionalProperties: false,
+    },
+  },
+  {
+    name: "read_page",
+    description: "Open one web page (usually a link from web_search) and read its text.",
+    schema: {
+      type: "object",
+      properties: { url: { type: "string" } },
+      required: ["url"],
       additionalProperties: false,
     },
   },
@@ -368,6 +397,10 @@ async function runTool(ctx: Ctx, name: string, input: Record<string, unknown>): 
         .map((m, i) => `${i + 1}. from ${m.fromName} | ${m.subject || "(no subject)"} | ${new Date(m.date).toLocaleDateString("en-US", { month: "short", day: "numeric" })} | ${m.snippet.slice(0, 140)}`)
         .join("\n");
     }
+    case "web_search":
+      return webSearch(String(input.query ?? "").trim() || "news", Math.min(Math.max(Number(input.count ?? 5) || 5, 1), 8));
+    case "read_page":
+      return readPage(String(input.url ?? "").trim());
     case "text_them": {
       const body = String(input.text ?? "").trim().slice(0, 2000);
       if (!body) return "error: nothing to post";
@@ -417,7 +450,9 @@ async function generate(ctx: Ctx, extraInstruction?: string): Promise<string> {
       state += "\nNot this turn: don't bring up gmail or a link.";
     }
   }
-  const r = await runToolLoop({ system: SYSTEM_PROMPT, state, turns: toTurns(s), tools: TOOLS, maxRounds: MAX_TOOL_ROUNDS }, (c) => runTool(ctx, c.name, c.input));
+  if (!webEnabled()) state += "\nNo web access right now: help from memory and say so.";
+  const tools = webEnabled() ? TOOLS : TOOLS.filter((t) => !WEB_TOOLS.has(t.name));
+  const r = await runToolLoop({ system: SYSTEM_PROMPT, state, turns: toTurns(s), tools, maxRounds: MAX_TOOL_ROUNDS, lookup: LOOKUP_TOOLS }, (c) => runTool(ctx, c.name, c.input));
   if (r.refused) return "hmm, i can't help with that one. anything else on your mind?";
   return r.text;
 }
