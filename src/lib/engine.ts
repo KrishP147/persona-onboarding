@@ -117,6 +117,8 @@ function outageLine(s: Session, channel: Channel) {
   return `sorry${name ? ` ${name}` : ""}, i'm running slow on my end right now.${need && need.length <= 60 ? ` i haven't forgotten about ${need}.` : ""} give me a few minutes and text me again?`;
 }
 
+const HOLD = /\b(hold on|hang on|one sec(ond)?|give me a (sec|second|minute|moment)|wait a (sec|second|minute|moment)|just a (sec|second|moment|minute)|brb|be right back)\b/i;
+
 // Offline guess for common names, used when the model can't be reached (so "julia" still sounds like julia).
 const FEMININE = /^(julia|juliet|sarah|sara|emma|olivia|ava|mia|sophia|sofia|isabella|luna|nova|chloe|grace|lily|zoe|ella|anna|hannah|maya|aria|stella|ruby|ivy|iris|daisy|rose|alice|clara|nora|lucy|jane|kate|katie|amy|emily|jessica|jenny|samantha|siri|alexa|tessa|priya|dana|robin|sage)$/i;
 const MASCULINE = /^(max|jack|james|john|mike|michael|david|daniel|sam|leo|liam|noah|oliver|ethan|lucas|henry|oscar|theo|jarvis|alfred|bob|tom|ben|chris|mark|paul|peter|ryan|kevin|jake|luke|adam|alex|kai|finn|felix|hugo|arthur|george|harry|charlie|dave|steve|jeeves|hal)$/i;
@@ -380,8 +382,18 @@ const CLAIMS_LINK = /\b(sent|dropped|texted|shared|popped)\b[^.?!]{0,40}\b(link|
 const STAGE_BRACKETS = /\s*\[[^\]\n]{1,160}\]\s*/g;
 
 // Whatever the model wrapped its words in, keep only what a person would actually say.
+// The model sometimes narrates its own reasoning ("I'm waiting for Krish to respond. Since they're
+// still on the call..."). That is never something to say to them.
+const META = /\b(i'?m waiting for|i should (stay|wait|remain|let|keep)|since (they|he|she|the user)|the user|i'?ll (stay quiet|wait (silently|quietly))|let them (check|speak|respond)|stay quiet|respond when ready|they haven'?t said)\b/i;
+
 function cleanModelText(t: string) {
-  return t.replace(TOOL_NAMES, " ").replace(STAGE_BRACKETS, " ").replace(/^\s*\[|\]\s*$/gm, "").replace(/[ \t]{2,}/g, " ").trim();
+  const cleaned = t.replace(TOOL_NAMES, " ").replace(STAGE_BRACKETS, " ").replace(/^\s*\[|\]\s*$/gm, "").replace(/[ \t]{2,}/g, " ").trim();
+  return cleaned
+    .split(/\n\s*\n/)
+    .map((b) => b.split(/(?<=[.!?])\s+/).filter((x) => !META.test(x)).join(" "))
+    .filter((b) => b.trim())
+    .join("\n\n")
+    .trim();
 }
 // Tool names occasionally leak into the reply text ("[send_gmail_link] sent it..."): never say them.
 const TOOL_NAMES = /\s*\[?\b(set_slot|decline_slot|offer_call|start_call|send_gmail_link|end_call|graduate|send_gif)\b\]?\s*/gi;
@@ -508,6 +520,10 @@ async function turn(
     // Never say it's sent when it isn't: drop the claim instead of sending a link they didn't ask for.
     else text = sentences.filter((x) => !(CLAIMS_LINK.test(x) && !x.trim().endsWith("?"))).join(" ").trim() || text;
   }
+  // On a call, if the link just went to their texts, say so (the written ask alone isn't enough).
+  if (channel === "voice" && ctx.newMessages.some((m) => m.kind === "gmail_link") && !/\b(text|link)\b/i.test(text)) {
+    text = `${text.trim()} i just sent the link to your texts.`.trim();
+  }
   // Ask bookkeeping: credit a question to the slot this turn's move was about (never the fallback line).
   const isQuestion = !usedFallback && text.includes("?");
   const MOVE_SLOT: Record<string, SlotKey> = { discover: "helpNeed", dig: "helpNeed", offramp: "helpNeed", "ask-name": "userName", "ask-gmail": "gmail" };
@@ -568,7 +584,17 @@ export async function handleUserMessage(
     s.call = { ...s.call, endedReason: "declined" };
     if (s.phase === "call_offered") s.phase = "intro";
   }
-  if (channel === "voice") s.call.silenceStrikes = 0;
+  if (channel === "voice") {
+    s.call.silenceStrikes = 0;
+    // "hold on a sec": a person just says "sure" and waits; no questions, no check-ins for a while.
+    if (HOLD.test(clean) && clean.split(/\s+/).length <= 8) {
+      s.call.holding = true;
+      const ctx: Ctx = { s, channel, actions: [{ type: "patience", ms: 45000 }], newMessages: [], move: EVENT_MOVES.silence };
+      emitAgentText(ctx, "sure, take your time.");
+      return { session: s, newMessages: [userMsg, ...ctx.newMessages], chips: computeDirective(s, channel).chips, actions: ctx.actions };
+    }
+    s.call.holding = false;
+  }
   // Name reply safety net: models sometimes say "julia it is" without saving it.
   const named = await captureAgentName(s, channel, clean);
   // A second pass reads the message for names, needs and refusals while the reply is written.
@@ -791,7 +817,9 @@ async function handleEventInner(s: Session, e: SessionEvent): Promise<TurnResult
       // sense after a question; after a statement, silence more likely means the line dropped.
       const lastSaid = [...s.transcript].reverse().find((m) => m.role === "agent" && m.channel === "voice")?.text.trim() ?? "";
       const line =
-        s.call.silenceStrikes === 1
+        s.call.silenceStrikes === 1 && s.call.holding
+          ? "you still there?"
+          : s.call.silenceStrikes === 1
           ? lastSaid.endsWith("?")
             ? "take your time. want me to say that again?"
             : "hello? can you hear me okay?"
