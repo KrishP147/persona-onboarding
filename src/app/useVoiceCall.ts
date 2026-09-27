@@ -109,14 +109,26 @@ const STOP_WORDS = /^(wait|stop|hold|hang|sorry|no|nope|hey|actually|um|excuse)$
 const words = (t: string) => t.toLowerCase().replace(/[^a-z0-9' ]/g, " ").split(/\s+/).filter(Boolean);
 
 // Speakers without headphones feed the agent's voice back into the mic.
+// How alike two words are (0..1), so a mis-heard echo ("market" for "marka") still matches.
+function similar(a: string, b: string) {
+  if (a === b) return 1;
+  if (Math.min(a.length, b.length) < 3) return 0;
+  const d: number[][] = Array.from({ length: a.length + 1 }, (_, i) => [i, ...Array(b.length).fill(0)]);
+  for (let j = 1; j <= b.length; j++) d[0][j] = j;
+  for (let i = 1; i <= a.length; i++)
+    for (let j = 1; j <= b.length; j++) d[i][j] = Math.min(d[i - 1][j] + 1, d[i][j - 1] + 1, d[i - 1][j - 1] + (a[i - 1] === b[j - 1] ? 0 : 1));
+  return 1 - d[a.length][b.length] / Math.max(a.length, b.length);
+}
+
+// Speakers feed the agent's own voice back into the mic, often transcribed a little wrong.
+// It's echo when nearly every heard word matches (or nearly matches) something it just said.
 function looksLikeEcho(heard: string, speaking: string) {
   const h = words(heard);
   if (h.length === 0) return true;
   if (!speaking) return false;
-  const said = new Set(words(speaking));
-  const overlap = h.filter((w) => said.has(w)).length / h.length;
-  // Short fragments ("okay", "take your") are echo if every word was just said.
-  return h.length <= 3 ? overlap === 1 : overlap >= 0.6;
+  const said = words(speaking);
+  const matched = h.filter((w) => said.some((s) => similar(w, s) >= 0.6)).length;
+  return matched / h.length >= 0.75;
 }
 
 export type CallStatus = "idle" | "ringing" | "connecting" | "active" | "ended";
@@ -133,7 +145,8 @@ function sentences(text: string) {
   return out;
 }
 
-type Heard = (finals: string, interim: string, speechFinal?: boolean) => void;
+// span: when the heard audio happened (wall clock ms), from deepgram's timestamps.
+type Heard = (finals: string, interim: string, speechFinal?: boolean, span?: [number, number]) => void;
 
 // Deepgram live transcription straight from the browser. Resolves to a stop function, or null
 // if it can't start (no token, blocked socket): the caller falls back to Web Speech.
@@ -160,6 +173,7 @@ async function startDeepgram(sessionId: string, stream: MediaStream, onHeard: He
       if (e.data.size && ws.readyState === WebSocket.OPEN) ws.send(e.data);
     };
     rec.start(250);
+    const streamStart = Date.now(); // deepgram's timestamps count from here
     const keepAlive = setInterval(() => ws.readyState === WebSocket.OPEN && ws.send(JSON.stringify({ type: "KeepAlive" })), 8000);
     let stopped = false;
     ws.onmessage = (ev) => {
@@ -169,8 +183,10 @@ async function startDeepgram(sessionId: string, stream: MediaStream, onHeard: He
         if (m.type !== "Results") return;
         const t = String(m.channel?.alternatives?.[0]?.transcript ?? "");
         if (!t.trim()) return;
-        if (m.is_final) onHeard(t, "", !!m.speech_final);
-        else onHeard("", t);
+        const st = Number(m.start ?? 0);
+        const span: [number, number] = [streamStart + st * 1000, streamStart + (st + Number(m.duration ?? 0)) * 1000];
+        if (m.is_final) onHeard(t, "", !!m.speech_final, span);
+        else onHeard("", t, false, span);
       } catch {}
     };
     ws.onclose = () => {
@@ -219,6 +235,9 @@ export function useVoiceCall(opts: {
   const speakingTextRef = useRef(""); // what the agent is saying right now
   // What it said last and when it stopped: transcripts of its own voice arrive a beat late on speakers.
   const lastSpokenRef = useRef<{ text: string; endedAt: number }>({ text: "", endedAt: 0 });
+  const prevSpokenRef = useRef(""); // the line before that (echo can lag a whole turn)
+  // When each spoken sentence actually played, to tell its echo from the person by timing.
+  const playbackRef = useRef<{ start: number; end: number | null; text: string }[]>([]);
   const queueRef = useRef(0); // utterances queued or playing
   const bufferRef = useRef(""); // finalized user speech not yet sent
   const interruptedRef = useRef(false);
@@ -366,6 +385,7 @@ export function useVoiceCall(opts: {
       const done = () => {
         queueRef.current = Math.max(0, queueRef.current - 1);
         if (queueRef.current > 0) return;
+        prevSpokenRef.current = lastSpokenRef.current.text;
         lastSpokenRef.current = { text: speakingTextRef.current, endedAt: Date.now() };
         speakingTextRef.current = "";
         setSpeaking(false);
@@ -382,12 +402,17 @@ export function useVoiceCall(opts: {
             setSpeaking(true);
             const url = await clips[i];
             if (gen !== genRef.current || !activeRef.current) return;
-            const show = () => setCaption(parts[i]);
+            const show = () => {
+              setCaption(parts[i]);
+              playbackRef.current = [...playbackRef.current.slice(-6), { start: Date.now(), end: null, text: parts[i] }];
+            };
             const played = url ? await playUrl(url, show) : false;
             if (!played && gen === genRef.current && activeRef.current) {
               if (!url) cloudTtsRef.current = false;
               await speakBrowser(parts[i], voiceRef.current, show);
             }
+            const last = playbackRef.current[playbackRef.current.length - 1];
+            if (last && last.end === null) last.end = Date.now();
           }
         })
         .catch(() => {})
@@ -450,16 +475,23 @@ export function useVoiceCall(opts: {
     genRef.current += 1;
     if (window.speechSynthesis) voiceRef.current = await lockVoice(styleRef.current);
 
-    const onHeard: Heard = (finals, interim, speechFinal) => {
+    const onHeard: Heard = (finals, interim, speechFinal, span) => {
       const latest = (finals || interim).trim();
       if (!latest) return;
       // A final goodbye is already on its way: let it finish; nothing said now changes the ending.
       if (finalEndRef.current && pendingEndRef.current) return;
       // While the agent talks, ignore its own voice coming back through the mic.
-      if (queueRef.current > 0 && looksLikeEcho(latest, speakingTextRef.current)) return;
+      if (span) {
+        // Deepgram says when this audio happened. If it overlapped our own playback (plus a short
+        // room tail), it may be our voice: drop it if it sounds like what we said then. If it came
+        // after we stopped, it's them, whatever the words.
+        const now = Date.now();
+        const overlapping = playbackRef.current.filter((p) => span[0] < (p.end ?? now) + 600 && span[1] > p.start);
+        if (overlapping.length && looksLikeEcho(latest, overlapping.map((p) => p.text).join(" "))) return;
+      } else if (queueRef.current > 0 && looksLikeEcho(latest, speakingTextRef.current)) return;
       // ...and for a moment after it stops (speech-to-text lags), its own words still aren't them.
       const recent = lastSpokenRef.current;
-      if (queueRef.current === 0 && Date.now() - recent.endedAt < 2500 && looksLikeEcho(latest, recent.text)) return;
+      if (!span && queueRef.current === 0 && Date.now() - recent.endedAt < 3000 && looksLikeEcho(latest, `${recent.text} ${prevSpokenRef.current}`)) return;
       // Real speech over the agent: stop talking and listen (barge-in).
       // Two real words, or one clear "wait"/"stop", stops it (a single stray word from noise doesn't).
       const heardWords = words(latest);

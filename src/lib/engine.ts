@@ -502,7 +502,9 @@ async function turn(
   }
   s.llmFailures = failed ? (s.llmFailures ?? 0) + 1 : 0;
   // A turn that did something (sent the link, a gif, a card) doesn't need "say that again?" beside it.
-  const didSomething = ctx.newMessages.length > 0 || ctx.actions.length > 0;
+  // Only things they can see (a link, a gif, a posted message) or a call action count; re-saving a
+  // name re-sends the same contact card, which shows nothing new (that once swallowed a recap).
+  const didSomething = ctx.newMessages.some((m) => m.kind !== "contact_card") || ctx.actions.length > 0;
   let usedFallback = false;
   if (!text.trim() && fallback && (failed || !didSomething)) {
     usedFallback = true;
