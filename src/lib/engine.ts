@@ -655,7 +655,7 @@ function emitAgentText(ctx: Ctx, raw: string) {
       ? [spoken]
       : isEmail
         ? [text.replace(/^\s*-{3,}\s*$/gm, "").replace(/\n{3,}/g, "\n\n").trim()]
-        : text.split(/\n\s*\n/).map((b) => b.trim());
+        : capBubbles(text.split(/\n\s*\n/).map((b) => b.trim()).filter(Boolean), 3);
   for (const b of bubbles.filter(Boolean)) {
     const m = msg("agent", ctx.channel, b, ctx.move ? { move: ctx.move } : {});
     ctx.newMessages.push(m);
@@ -878,7 +878,7 @@ export async function handleUserMessage(
     const gif = makeGif(s, LAUGH.test(clean) ? "lol" : "ok");
     s.transcript.push(gif);
     recordAsk(s, null);
-    return { session: s, newMessages: [userMsg, gif], chips: computeDirective(s, channel).chips, actions: [] };
+    return { session: s, newMessages: [userMsg, ...(early?.msgs ?? []), gif], chips: computeDirective(s, channel).chips, actions: [] };
   }
   // They just named the assistant: answer the way persona does, instantly, no model needed.
   if (named?.card && channel === "text" && s.callOffers === 0 && !s.call.active) {
@@ -891,7 +891,7 @@ export async function handleUserMessage(
     s.transcript.push(named.card);
     ctx.newMessages.push(named.card);
     await Promise.all(named.pending);
-    return { session: s, newMessages: [userMsg, ...ctx.newMessages], chips: computeDirective(s, channel).chips, actions: [] };
+    return { session: s, newMessages: [userMsg, ...(early?.msgs ?? []), ...ctx.newMessages], chips: computeDirective(s, channel).chips, actions: [] };
   }
   // They said yes to our call offer: ring now, the way persona does ("calling you now."), no model needed.
   const prevText = [...s.transcript].slice(0, -1).reverse().find((m) => m.role === "agent" && (!m.kind || m.kind === "text"));
@@ -905,8 +905,13 @@ export async function handleUserMessage(
     const out = await runTool(ctx, "start_call", {});
     if (!out.startsWith("error")) {
       recordAsk(s, null);
-      emitAgentText(ctx, "calling you now.");
-      return { session: s, newMessages: [userMsg, ...ctx.newMessages], chips: computeDirective(s, channel).chips, actions: ctx.actions };
+      // "i'm krish, call me": take their name too, and say it, before ringing.
+      const e = await heard.catch(() => null);
+      const hadName = s.slots.userName.status === "filled";
+      if (e) await applyExtracted(s, { ...e, agentName: null }, async () => {});
+      const name = !hadName && s.slots.userName.status === "filled" ? s.slots.userName.value : null;
+      emitAgentText(ctx, name ? `nice to meet you ${name}! calling you now.` : "calling you now.");
+      return { session: s, newMessages: [userMsg, ...(early?.msgs ?? []), ...ctx.newMessages], chips: computeDirective(s, channel).chips, actions: ctx.actions };
     }
   }
   // "send" / "did you send it?" with a draft waiting: answered in code, so it's never vague about what happened.
@@ -914,7 +919,7 @@ export async function handleUserMessage(
   if (channel === "text" && s.draft?.sent && SENT_Q.test(clean)) {
     const ctx: Ctx = { s, channel, actions: [], newMessages: [], move: EVENT_MOVES.honest };
     emitAgentText(ctx, `yep, it went to ${s.draft.to}.`);
-    return { session: s, newMessages: [userMsg, ...ctx.newMessages], chips: computeDirective(s, channel).chips, actions: [] };
+    return { session: s, newMessages: [userMsg, ...(early?.msgs ?? []), ...ctx.newMessages], chips: computeDirective(s, channel).chips, actions: [] };
   }
   // "yes" right after "want me to send the draft to x?" counts too.
   const sendCmd = SEND_CMD.test(clean) || (YES.test(clean) && clean.split(/\s+/).length <= 4 && !!prevAgent && /\bsend\b[^?]*\?/i.test(prevAgent.text));
@@ -936,7 +941,7 @@ export async function handleUserMessage(
       emitAgentText(ctx, `no, not yet. want me to send it to ${pendingDraft.to || "them"}?`);
     }
     recordAsk(s, null);
-    return { session: s, newMessages: [userMsg, ...ctx.newMessages], chips: computeDirective(s, channel).chips, actions: ctx.actions };
+    return { session: s, newMessages: [userMsg, ...(early?.msgs ?? []), ...ctx.newMessages], chips: computeDirective(s, channel).chips, actions: ctx.actions };
   }
   // They said yes to the link: send it now (not left to the model), then let the reply mention it.
   let linkSent: Msg[] = [];
@@ -970,7 +975,7 @@ export async function handleUserMessage(
         : "They skipped setup, and setup is over: you're their full assistant now. Help with what they asked for in this same message, right now, in text. Don't offer a call, and don't ask for their name or Gmail.",
     );
     r.actions.push({ type: "graduate" });
-    r.newMessages.unshift(userMsg);
+    r.newMessages.unshift(userMsg, ...(early?.msgs ?? []));
     return r;
   }
   if (/^\s*skip setup\s*$/i.test(clean) && s.phase !== "graduated") {
@@ -978,7 +983,7 @@ export async function handleUserMessage(
       ? await turn(s, channel, "They want to skip the rest of setup. Say a short goodbye, say you'll pick it up over text, and call end_call.", goodbyeLine(s), { forceEnd: true })
       : await turn(s, channel, "The user asked to skip setup. Respect it: call graduate, then ask what they want to get done first.");
     if (s.call.active) s.graduateAfterCall = true;
-    skip.newMessages.unshift(userMsg);
+    skip.newMessages.unshift(userMsg, ...(early?.msgs ?? []));
     return skip;
   }
   // They typed in the chat while we're on the call: answer out loud, and say we saw their text.
@@ -1102,13 +1107,13 @@ async function handleEventInner(s: Session, e: SessionEvent): Promise<TurnResult
       s.callOffers = Math.max(s.callOffers, 1);
       if (s.phase === "call_offered") s.phase = "intro";
       eventMsg(s, "Call declined");
-      return turn(
-        s,
-        "text",
-        "The user declined the call. Totally fine: one short, easygoing text that you're happy to keep it to texting. No question this time.",
-        "no worries, texting works great.",
-        { move: EVENT_MOVES.declined },
-      );
+      {
+        // Written by code: the model once answered a decline with "i'll wait here for you to pick up".
+        const ctx: Ctx = { s, channel: "text", actions: [], newMessages: [], move: EVENT_MOVES.declined };
+        emitAgentText(ctx, "no worries, we can keep it to text. what's on your mind?");
+        recordAsk(s, null);
+        return { session: s, newMessages: ctx.newMessages, chips: computeDirective(s, "text").chips, actions: [] };
+      }
     case "call_ended": {
       if (!s.call.active) return idle(); // duplicate hangup events
       s.call = { ...s.call, active: false, endedAt: Date.now(), endedReason: e.reason };
@@ -1352,3 +1357,9 @@ const SENT_Q = /\b(did (u|you) (send|sent)|was it sent|is it sent|has it (been )
 
 // They're going off to do something and will come back ("i'll let you know once it's connected").
 const WAITING_ON_THEM = /\b(i'?ll (let you know|check (back )?(in )?with you|get back to you|tell you|be right back)|once (it'?s|that'?s|i'?m|i've) (connected|done|set up|signed in|finished)|as soon as (it'?s|that'?s|i'?m) (connected|done|set up))\b/i;
+
+// A reply is at most a few texts: a long list stays together in the last bubble instead of arriving
+// as a dozen separate messages.
+function capBubbles(bubbles: string[], max: number) {
+  return bubbles.length <= max ? bubbles : [...bubbles.slice(0, max - 1), bubbles.slice(max - 1).join("\n\n")];
+}

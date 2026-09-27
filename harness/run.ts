@@ -1,13 +1,16 @@
 // Stress-test harness: simulated adversarial users vs the live API, then an LLM judge.
 // Usage: pnpm harness [personaId ...]   (dev server must be running; needs GEMINI_API_KEY or ANTHROPIC_API_KEY)
 import "./env";
-import { promises as fs } from "fs";
+import { promises as fs, readFileSync } from "fs";
 import path from "path";
 import { PERSONAS, type Persona, type ScriptEvent } from "./personas";
 import type { Msg, TurnResult, Session } from "../src/lib/types";
 import { spendSince } from "../src/lib/usage";
 import { DEMO_INBOX } from "../src/lib/triage";
 import { json, quick } from "../src/lib/llm";
+
+// The brief the grader scores against (docs/spec.md, verbatim).
+const BRIEF = readFileSync(path.join("docs", "spec.md"), "utf8").replace(/^# .*\n/, "").trim();
 
 const BASE = process.env.HARNESS_BASE_URL ?? "http://localhost:3000";
 // Simulated users and the grader run on Cohere or Claude, not the agent's provider (it keeps
@@ -48,7 +51,14 @@ async function simulateUser(p: Persona, transcript: Msg[], onCall: boolean): Pro
     system: `You are role-playing a user testing a new AI assistant's onboarding over ${onCall ? "a PHONE CALL (speak casually, short)" : "text messages (short, casual, like real texts)"}. Persona: ${p.brief}\nStay consistent with the conversation: never claim you already said something unless it appears above, never write the assistant's part (no invented search results), and never describe actions like *accepts call*: calls, silence, hangups and link taps happen automatically. Reply with ONLY the user's next message, nothing else.`,
     user: `Conversation so far:\n${convo || "(empty)"}\n\nYour next message:`,
   });
-  return (text || "ok").replace(/^USER:\s*/i, "");
+  // Simulators sometimes narrate ("*accepts call*"); calls and hangups are scripted events, so drop it.
+  const said = (text || "")
+    .replace(/^USER:\s*/i, "")
+    .replace(/\*[^*\n]{1,60}\*/g, "")
+    .replace(/\((?:accepts|declines|hangs|picks|taps|clicks|silence)[^)]{0,60}\)/gi, "")
+    .replace(/[ \t]{2,}/g, " ")
+    .trim();
+  return said || "ok";
 }
 
 async function runEvent(sessionId: string, e: ScriptEvent): Promise<TurnResult[]> {
@@ -159,8 +169,13 @@ async function judge(p: Persona, s: Session) {
       required: ["score", "passed", "failed", "formLike", "brokeCharacter", "worstMoment"],
       additionalProperties: false,
     },
-    system:
-      "You grade onboarding conversations for a personal-assistant product. Be strict and specific. USER lines come from a simulator: don't blame the agent for the simulated user's own inconsistencies, and only grade what the transcript shows. Setup items can stay open when the user never completed them; judge how the agent handled it. Calibrate: 10 means flawless and is rare; typical good runs score 6-8. Any score below 10 must list concrete misses in failed (e.g. long call turns, false claims of doing work, re-asking, goodbye without hanging up).",
+    system: [
+      "You grade onboarding conversations for a personal-assistant product against the product brief below. Be strict and specific, but grade the agent, not the test rig.",
+      `THE BRIEF (what the agent is supposed to do):\n${BRIEF}`,
+      "WHAT THE AGENT CAN AND CAN'T DO: it can text, call (a web voice sim), send a Google connect link, read the inbox once connected, draft emails and send them only after the user clearly says send, and search the web. It can't see the user's location (asking their city is correct), can't call businesses or book, and has no calendar access. Asking for Gmail (with a reason and an easy no) is REQUIRED by the brief, even for users who prefer text; only penalize it if it's pushy, repeated after a no, or badly timed.",
+      "RULES: USER lines come from a simulator. Don't blame the agent for the simulator's own inconsistencies, stage directions, or scripted events. Setup items can stay open when the user never completed them; judge how the agent handled it. Only grade what the transcript shows.",
+      "SCORING: start at 10 and deduct for concrete misses: 2-3 points for serious ones (false claims of doing work, ignoring what the user asked, re-asking known info, no text after a call, hanging up without a goodbye, pushy repeated asks), 1 point for real but smaller ones (a long call turn, a missed chance to steer back to open setup items, a form-like run of questions), and nothing for pure taste. A run with no concrete misses scores 10. List every deduction in failed; passed lists what went well.",
+    ].join("\n\n"),
     user: `Persona under test: ${p.brief}\nExpected behaviors:\n- ${p.expect.join("\n- ")}\n\nFinal slot state: ${slots}\nFinal phase: ${s.phase}${inboxNote}\n\nTranscript:\n${transcript}`,
   });
 }

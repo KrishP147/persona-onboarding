@@ -36,7 +36,7 @@ export const PERSONAS: Persona[] = [
   },
   {
     id: "hangup-early",
-    brief: "You agree to a call, then hang up almost immediately. Afterwards, reply to texts normally. You're Sam; you want help with meal planning.",
+    brief: "Name the assistant Sage in your first message. When it offers a call, say yes; you'll hang up almost immediately. Afterwards, reply to texts normally. You're Sam; you want help with meal planning.",
     maxTurns: 8,
     script: [{ atTurn: 1, event: "accept_call" }, { atTurn: 2, event: "hangup" }],
     expect: ["texts a recap right after the hangup without being prompted", "doesn't re-ask collected info", "continues gracefully over text"],

@@ -73,6 +73,13 @@ export const MOVES = {
     instruction:
       "They're going along but not steering anywhere. Offer the next step as an easy yes question tied to what they told you, e.g. \"want to hear how i'd handle [their thing]?\" or \"want me to show you with [something of theirs]?\". One question, no pressure.",
   },
+  steerBack: {
+    id: "steer-back",
+    label: "help, then one light step back",
+    source: "pink, to sell is human (2012): offramps; hulick (2014): get to value, then finish setup",
+    instruction:
+      "Help with what they asked first, briefly. Then take ONE light step toward whatever the STATE shows is still missing (naming you, what to call them, the quick call, or gmail), tied to what they're doing right now, as an easy yes or no. Never a list of what's missing.",
+  },
   bridge: {
     id: "bridge",
     label: "answer, then bridge back",
@@ -125,6 +132,11 @@ export function chooseMove(s: Session, channel: Channel, opts: { callFirst: bool
   const need = s.slots.helpNeed;
   if (s.phase === "graduated") return MOVES.help;
   if (opts.callFirst && channel === "text") return MOVES.askCall;
+  // Two turns of pure help with setup still open: help again, then one light step back toward what's
+  // missing (a run went a whole meal plan without ever returning to the name or the call).
+  const lastTwo = (s.movesUsed ?? []).slice(-2);
+  const openSlots = (["agentName", "userName", "helpNeed", "gmail"] as const).some((k) => s.slots[k].status === "missing");
+  if (opts.mayAsk && openSlots && lastTwo.length === 2 && lastTwo.every((m) => PURE_HELP.has(m))) return MOVES.steerBack;
   // The user leads. When they say what they want ("i want to use you for email"), go there now:
   // for email that's the gmail offer (the setup step that unlocks it), otherwise just help. No more digging.
   if (USER_LEADS.test(text) || ASKS_FOR_HELP.test(text)) {
@@ -177,3 +189,6 @@ const ASKS_FOR_HELP = /\b(anything (you|u) (can|could) (do|offer)|what can (you|
 
 // They're steering: saying what they want, not answering our question.
 const USER_LEADS = /\b(i'?m (interested in|looking for|trying to)|i (want|need|would like|wanna) (you )?to|i'?d like (you )?to|(use|using) you (for|to)|let'?s (do|talk about|start|get)|help me (with|to)|can we (do|talk about|start))\b/i;
+
+// Turns that only helped, with no step toward setup.
+const PURE_HELP = new Set(["follow", "help", "answer", "give-first"]);
