@@ -47,7 +47,13 @@ i went through their onboarding myself first (journal 02). the gaps were all at 
 | it wouldn't call until you saved its contact | no gate. it asks permission, and no is an easy answer |
 | it said it could do things it couldn't | it only promises what its tools can do right now, and "sent" means actually sent |
 
-## 4. how i know it holds up (30s)
+## 4. persona calls persona (45s)
+
+- "the toughest tester i had was persona itself. i put your real voice agent on the line as the user and let the two talk." play 15 to 20 seconds of that call.
+- what held up: it followed the topic, reflected it ("that sounds rough"), offered something concrete, and when yours said "you can hang up" it said a real goodbye and sent the recap text, the part persona's own flow misses.
+- what it exposed, and what changed: six questions in a row (now never three), bringing up an old need on a call the user started (now hidden until they raise it), and filling silence with "mm, i'm here" (now quiet, one check-in, then a warning before it hangs up). journal 11.
+
+## 5. how i know it holds up (30s)
 
 - stress tested: people who won't give a name, hang up, go silent, change their minds, or just say "haha". fifteen simulated difficult users, graded by a strict model (`pnpm harness`), a real browser walkthrough with a fake mic (`pnpm e2e`), and 23 manual scripts.
-- the reasoning and the sources are in the journal (docs/journal, 01 to 10).
+- the reasoning and the sources are in the journal (docs/journal, 01 to 11).
