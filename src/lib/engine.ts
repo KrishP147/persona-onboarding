@@ -240,9 +240,22 @@ export function recapFallback(s: Session, reason: string) {
   return [opener, got.length ? `so far: ${got.join(", ")}.` : "", open ? nudge[open] : "reply here anytime, or call me back."].filter(Boolean).join("\n\n");
 }
 
+// Cut a reply at the first repeated sentence (models occasionally loop: "let's go. let's go...").
+export function stopAtRepeat(text: string) {
+  const seen = new Set<string>();
+  let out = "";
+  for (const piece of text.match(/[^.!?\n]+[.!?]*\s*|\n+/g) ?? []) {
+    const key = piece.trim().toLowerCase();
+    if (key.length > 3 && seen.has(key)) break;
+    if (key) seen.add(key);
+    out += piece;
+  }
+  return out.trim();
+}
+
 function emitAgentText(ctx: Ctx, raw: string) {
   // House style: no em dashes, no stage directions like "(waiting for reply)".
-  const text = raw.replace(/\s*[—]\s*/g, ", ").replace(/^\s*\(on call\)\s*/gim, "").replace(/^\s*\*?\([^)]*\)\*?\s*$/gm, "").trim();
+  const text = stopAtRepeat(raw).replace(/\s*[—]\s*/g, ", ").replace(/^\s*\(on call\)\s*/gim, "").replace(/^\s*\*?\([^)]*\)\*?\s*$/gm, "").trim();
   const bubbles = ctx.channel === "voice" ? [text.replace(/\n+/g, " ").trim()] : text.split(/\n\s*\n/).map((b) => b.trim());
   for (const b of bubbles.filter(Boolean)) {
     const m = msg("agent", ctx.channel, b);

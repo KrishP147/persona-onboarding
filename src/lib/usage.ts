@@ -4,13 +4,12 @@ import path from "path";
 
 export const USAGE_FILE = path.join(".data", "usage.jsonl");
 
-// $ per MTok: input, output. Cache writes 1.25x input; reads 0.1x (Anthropic) / 0.25x (Gemini).
+// $ per MTok: input, output. Cache writes 1.25x input; reads 0.1x input.
 const PRICES: Record<string, [number, number]> = {
   "claude-sonnet-5": [2, 10],
   "claude-haiku-4-5": [1, 5],
-  "gemini-2.5-flash": [0.3, 2.5],
-  "gemini-2.5-flash-lite": [0.1, 0.4],
-  "gemini-3-flash-preview": [0.5, 3],
+  "gemini-3.5-flash": [1.5, 9],
+  "gemini-3.5-flash-lite": [0.3, 2.5],
 };
 
 export interface Tokens {
@@ -29,8 +28,7 @@ export interface UsageRow {
 
 export function costOf(model: string, u: Tokens) {
   const [inP, outP] = PRICES[model] ?? [5, 25];
-  const readRate = model.startsWith("gemini") ? 0.25 : 0.1;
-  return (u.input * inP + (u.cacheWrite ?? 0) * inP * 1.25 + (u.cacheRead ?? 0) * inP * readRate + u.output * outP) / 1e6;
+  return (u.input * inP + (u.cacheWrite ?? 0) * inP * 1.25 + (u.cacheRead ?? 0) * inP * 0.1 + u.output * outP) / 1e6;
 }
 
 export async function recordUsage(model: string, tag: string, u: Tokens) {

@@ -25,7 +25,7 @@ export const provider: "gemini" | "anthropic" | null =
   process.env.LLM_PROVIDER === "anthropic" && hasAnthropic ? "anthropic" : hasGemini ? "gemini" : hasAnthropic ? "anthropic" : null;
 
 const MODELS = {
-  gemini: { agent: process.env.GEMINI_MODEL ?? "gemini-2.5-flash", fast: process.env.GEMINI_FAST_MODEL ?? "gemini-2.5-flash-lite" },
+  gemini: { agent: process.env.GEMINI_MODEL ?? "gemini-3.5-flash", fast: process.env.GEMINI_FAST_MODEL ?? "gemini-3.5-flash-lite" },
   anthropic: { agent: process.env.AGENT_MODEL ?? "claude-sonnet-5", fast: process.env.FAST_MODEL ?? "claude-haiku-4-5" },
 };
 export const models = () => (provider ? MODELS[provider] : MODELS.gemini);
@@ -92,7 +92,8 @@ export async function runToolLoop(o: LoopOpts, exec: (c: ToolCall) => Promise<st
           systemInstruction: `${o.system}\n\nSTATE (from the system, not the user):\n${o.state}`,
           tools: [{ functionDeclarations: o.tools.map((t) => ({ name: t.name, description: t.description, parametersJsonSchema: t.schema })) }],
           thinkingConfig: thinking(model, true),
-          maxOutputTokens: 4000,
+          // Replies are a few short bubbles; a low cap also bounds runaway repetition.
+          maxOutputTokens: 1200,
         },
       });
       void geminiUsage(model, "agent", res.usageMetadata);
