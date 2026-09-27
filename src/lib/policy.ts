@@ -162,7 +162,7 @@ export function directiveText(s: Session, d: Directive, channel: Channel): strin
       : `USER SEEMS (${mood.confidence} confidence guess${mood.intensity === "high" ? ", strong feeling" : ""}): ${mood.mood} (${mood.signals.join(", ")}). ${MOOD_GUIDANCE[mood.mood]} If their words say otherwise, trust the words.`;
   return [
     moodLine,
-    `CHANNEL: ${channel === "voice" ? "live phone call (speak; short sentences; no emoji, no lists)" : "text messages"}`,
+    `CHANNEL: ${channel === "voice" ? "live phone call (speak: 1-2 short sentences per turn, then let them talk; no emoji, no lists)" : "text messages"}`,
     `PHASE: ${s.phase}`,
     `SLOTS:\n${slotLines}`,
     d.nextSlot && d.mayAsk ? `NEXT TO GATHER (gently, woven in): ${SLOT_LABEL[d.nextSlot]}` : "NEXT TO GATHER: nothing this turn",

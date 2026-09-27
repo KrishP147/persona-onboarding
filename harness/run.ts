@@ -136,7 +136,7 @@ async function judge(p: Persona, s: Session) {
       additionalProperties: false,
     },
     system:
-      "You grade onboarding conversations for a personal-assistant product. Be strict and specific. USER lines come from a simulator: don't blame the agent for the simulated user's own inconsistencies, and only grade what the transcript shows. Setup items can stay open when the user never completed them; judge how the agent handled it.",
+      "You grade onboarding conversations for a personal-assistant product. Be strict and specific. USER lines come from a simulator: don't blame the agent for the simulated user's own inconsistencies, and only grade what the transcript shows. Setup items can stay open when the user never completed them; judge how the agent handled it. Calibrate: 10 means flawless and is rare; typical good runs score 6-8. Any score below 10 must list concrete misses in failed (e.g. long call turns, false claims of doing work, re-asking, goodbye without hanging up).",
     user: `Persona under test: ${p.brief}\nExpected behaviors:\n- ${p.expect.join("\n- ")}\n\nFinal slot state: ${slots}\nFinal phase: ${s.phase}\n\nTranscript:\n${transcript}`,
   });
 }
