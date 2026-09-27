@@ -1,15 +1,24 @@
 // Dev-only token ledger so harness runs can report real spend. Off in prod.
 import { promises as fs } from "fs";
 import path from "path";
-import type Anthropic from "@anthropic-ai/sdk";
 
 export const USAGE_FILE = path.join(".data", "usage.jsonl");
 
-// $ per MTok: input, output. Cache writes 1.25x input, reads 0.1x input.
+// $ per MTok: input, output. Cache writes 1.25x input; reads 0.1x (Anthropic) / 0.25x (Gemini).
 const PRICES: Record<string, [number, number]> = {
   "claude-sonnet-5": [2, 10],
   "claude-haiku-4-5": [1, 5],
+  "gemini-2.5-flash": [0.3, 2.5],
+  "gemini-2.5-flash-lite": [0.1, 0.4],
+  "gemini-3-flash-preview": [0.5, 3],
 };
+
+export interface Tokens {
+  input: number;
+  output: number;
+  cacheRead?: number;
+  cacheWrite?: number;
+}
 
 export interface UsageRow {
   ts: number;
@@ -18,14 +27,13 @@ export interface UsageRow {
   cost: number;
 }
 
-export function costOf(model: string, u: Anthropic.Usage) {
+export function costOf(model: string, u: Tokens) {
   const [inP, outP] = PRICES[model] ?? [5, 25];
-  const tokens =
-    u.input_tokens * inP + (u.cache_creation_input_tokens ?? 0) * inP * 1.25 + (u.cache_read_input_tokens ?? 0) * inP * 0.1 + u.output_tokens * outP;
-  return tokens / 1e6;
+  const readRate = model.startsWith("gemini") ? 0.25 : 0.1;
+  return (u.input * inP + (u.cacheWrite ?? 0) * inP * 1.25 + (u.cacheRead ?? 0) * inP * readRate + u.output * outP) / 1e6;
 }
 
-export async function recordUsage(model: string, tag: string, u: Anthropic.Usage) {
+export async function recordUsage(model: string, tag: string, u: Tokens) {
   if (process.env.ALLOW_TEST_EVENTS !== "1") return;
   const row: UsageRow = { ts: Date.now(), model, tag, cost: costOf(model, u) };
   try {

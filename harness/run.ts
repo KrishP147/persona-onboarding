@@ -1,18 +1,14 @@
 // Stress-test harness: simulated adversarial users vs the live API, then an LLM judge.
-// Usage: pnpm harness [personaId ...]   (dev server must be running; needs ANTHROPIC_API_KEY)
-import { config } from "dotenv";
-import Anthropic from "@anthropic-ai/sdk";
+// Usage: pnpm harness [personaId ...]   (dev server must be running; needs GEMINI_API_KEY or ANTHROPIC_API_KEY)
+import "./env";
 import { promises as fs } from "fs";
 import path from "path";
 import { PERSONAS, type Persona, type ScriptEvent } from "./personas";
 import type { Msg, TurnResult, Session } from "../src/lib/types";
-import { recordUsage, spendSince } from "../src/lib/usage";
+import { spendSince } from "../src/lib/usage";
+import { json, quick } from "../src/lib/llm";
 
-config({ path: ".env.local" });
 const BASE = process.env.HARNESS_BASE_URL ?? "http://localhost:3000";
-const SIM_MODEL = process.env.SIM_MODEL ?? "claude-haiku-4-5";
-const JUDGE_MODEL = process.env.JUDGE_MODEL ?? "claude-sonnet-5";
-const client = new Anthropic();
 
 async function api<T>(p: string, body?: unknown): Promise<T> {
   const res = await fetch(BASE + p, body ? { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) } : undefined);
@@ -29,14 +25,13 @@ function render(m: Msg) {
 
 async function simulateUser(p: Persona, transcript: Msg[], onCall: boolean): Promise<string> {
   const convo = transcript.filter((m) => m.kind !== "event").map(render).join("\n");
-  const r = await client.messages.create({
-    model: SIM_MODEL,
-    max_tokens: 200,
+  const text = await quick({
+    maxTokens: 200,
+    tag: "sim",
     system: `You are role-playing a user testing a new AI assistant's onboarding over ${onCall ? "a PHONE CALL (speak casually, short)" : "text messages (short, casual, like real texts)"}. Persona: ${p.brief}\nStay consistent with the conversation: never claim you already said something unless it appears above, never write the assistant's part (no invented search results), and never describe actions like *accepts call*: calls, silence, hangups and link taps happen automatically. Reply with ONLY the user's next message, nothing else.`,
-    messages: [{ role: "user", content: `Conversation so far:\n${convo || "(empty)"}\n\nYour next message:` }],
+    user: `Conversation so far:\n${convo || "(empty)"}\n\nYour next message:`,
   });
-  await recordUsage(SIM_MODEL, "sim", r.usage);
-  return (r.content.find((b) => b.type === "text")?.text ?? "ok").trim().replace(/^USER:\s*/i, "");
+  return (text || "ok").replace(/^USER:\s*/i, "");
 }
 
 async function runEvent(sessionId: string, e: ScriptEvent): Promise<TurnResult[]> {
@@ -125,40 +120,25 @@ async function judge(p: Persona, s: Session) {
   const m = marks.get(p.id);
   const transcript = s.transcript.flatMap((x, i) => (m?.has(i) ? [m.get(i)!, render(x)] : [render(x)])).join("\n");
   const slots = JSON.stringify(Object.fromEntries(Object.entries(s.slots).map(([k, v]) => [k, `${v.status}:${v.value ?? ""}`])));
-  const r = await client.messages.create({
-    model: JUDGE_MODEL,
-    max_tokens: 1500,
-    output_config: {
-      effort: "low",
-      format: {
-        type: "json_schema",
-        schema: {
-          type: "object",
-          properties: {
-            score: { type: "integer", description: "0-10 overall" },
-            passed: { type: "array", items: { type: "string" } },
-            failed: { type: "array", items: { type: "string" } },
-            formLike: { type: "boolean", description: "felt like a rigid form" },
-            brokeCharacter: { type: "boolean" },
-            worstMoment: { type: "string" },
-          },
-          required: ["score", "passed", "failed", "formLike", "brokeCharacter", "worstMoment"],
-          additionalProperties: false,
-        },
+  return json<{ score: number; passed: string[]; failed: string[]; formLike: boolean; brokeCharacter: boolean; worstMoment: string }>({
+    tag: "judge",
+    schema: {
+      type: "object",
+      properties: {
+        score: { type: "integer", description: "0-10 overall" },
+        passed: { type: "array", items: { type: "string" } },
+        failed: { type: "array", items: { type: "string" } },
+        formLike: { type: "boolean", description: "felt like a rigid form" },
+        brokeCharacter: { type: "boolean" },
+        worstMoment: { type: "string" },
       },
+      required: ["score", "passed", "failed", "formLike", "brokeCharacter", "worstMoment"],
+      additionalProperties: false,
     },
     system:
       "You grade onboarding conversations for a personal-assistant product. Be strict and specific. USER lines come from a simulator: don't blame the agent for the simulated user's own inconsistencies, and only grade what the transcript shows. Setup items can stay open when the user never completed them; judge how the agent handled it.",
-    messages: [
-      {
-        role: "user",
-        content: `Persona under test: ${p.brief}\nExpected behaviors:\n- ${p.expect.join("\n- ")}\n\nFinal slot state: ${slots}\nFinal phase: ${s.phase}\n\nTranscript:\n${transcript}`,
-      },
-    ],
+    user: `Persona under test: ${p.brief}\nExpected behaviors:\n- ${p.expect.join("\n- ")}\n\nFinal slot state: ${slots}\nFinal phase: ${s.phase}\n\nTranscript:\n${transcript}`,
   });
-  await recordUsage(JUDGE_MODEL, "judge", r.usage);
-  const text = r.content.find((b) => b.type === "text")?.text ?? "{}";
-  return JSON.parse(text) as { score: number; passed: string[]; failed: string[]; formLike: boolean; brokeCharacter: boolean; worstMoment: string };
 }
 
 async function main() {

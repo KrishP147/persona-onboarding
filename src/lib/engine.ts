@@ -1,27 +1,24 @@
-import Anthropic from "@anthropic-ai/sdk";
 import { nanoid } from "nanoid";
 import type { Attachment, Channel, ClientAction, Msg, Session, SlotKey, TurnResult, VoiceStyle } from "./types";
 import { computeDirective, directiveText, recordAsk, MAX_SILENCE_STRIKES } from "./policy";
 import { RECAP_INSTRUCTION, SYSTEM_PROMPT } from "./prompt";
 import { mockReply } from "./mock";
-import { recordUsage } from "./usage";
+import { provider, quick, runToolLoop, type Part, type ToolDef, type Turn } from "./llm";
 
-const MODEL = process.env.AGENT_MODEL ?? "claude-sonnet-5";
-const FAST_MODEL = process.env.FAST_MODEL ?? "claude-haiku-4-5";
 const MAX_TOOL_ROUNDS = 3;
 const HISTORY_LIMIT = 40;
 
-const client = process.env.ANTHROPIC_API_KEY || process.env.ANTHROPIC_AUTH_TOKEN ? new Anthropic() : null;
-export const usingMock = () => client === null;
+export const usingMock = () => provider === null;
 
 const SETTABLE = ["agentName", "userName", "helpNeed"] as const;
 
-const TOOLS: Anthropic.Tool[] = [
+const NO_ARGS = { type: "object", properties: {}, required: [], additionalProperties: false };
+
+const TOOLS: ToolDef[] = [
   {
     name: "set_slot",
     description: "Record or update something you learned: your own name (agentName), what to call the user (userName), or what they want help with (helpNeed).",
-    strict: true,
-    input_schema: {
+    schema: {
       type: "object",
       properties: {
         slot: { type: "string", enum: [...SETTABLE] },
@@ -34,43 +31,22 @@ const TOOLS: Anthropic.Tool[] = [
   {
     name: "decline_slot",
     description: "The user clearly doesn't want to share this. Stop asking.",
-    strict: true,
-    input_schema: {
+    schema: {
       type: "object",
       properties: { slot: { type: "string", enum: [...SETTABLE, "gmail"] } },
       required: ["slot"],
       additionalProperties: false,
     },
   },
-  {
-    name: "offer_call",
-    description: "You are proposing a quick call in this message. Shows 'Call me' / 'Text is fine' buttons.",
-    strict: true,
-    input_schema: { type: "object", properties: {}, required: [], additionalProperties: false },
-  },
-  {
-    name: "start_call",
-    description: "Ring the user now. Only after they agreed to a call.",
-    strict: true,
-    input_schema: { type: "object", properties: {}, required: [], additionalProperties: false },
-  },
-  {
-    name: "send_gmail_link",
-    description: "Drop a secure 'Connect Gmail' link into the text thread. Works during a call.",
-    strict: true,
-    input_schema: { type: "object", properties: {}, required: [], additionalProperties: false },
-  },
-  {
-    name: "end_call",
-    description: "Hang up after saying goodbye on the call.",
-    strict: true,
-    input_schema: { type: "object", properties: {}, required: [], additionalProperties: false },
-  },
+  { name: "offer_call", description: "You are proposing a quick call in this message. Shows 'Call me' / 'Text is fine' buttons.", schema: NO_ARGS },
+  { name: "start_call", description: "Ring the user now. Only after they agreed to a call.", schema: NO_ARGS },
+  { name: "send_gmail_link", description: "Drop a secure 'Connect Gmail' link into the text thread. Works during a call.", schema: NO_ARGS },
+  { name: "end_call", description: "Hang up after saying goodbye on the call.", schema: NO_ARGS },
   {
     name: "graduate",
-    description: "End setup and become the full assistant. Only when the user asked to skip or stop setup, or nothing is left to gather. Knowing their need is not enough. Remaining items get deferred.",
-    strict: true,
-    input_schema: {
+    description:
+      "End setup and become the full assistant. Only when the user asked to skip or stop setup, or nothing is left to gather. Knowing their need is not enough. Remaining items get deferred.",
+    schema: {
       type: "object",
       properties: { reason: { type: "string" } },
       required: ["reason"],
@@ -87,45 +63,46 @@ function attachmentText(a: Attachment) {
   return `[${a.kind}: ${a.name}${a.summary ? ` | ${a.summary}` : ""}]`;
 }
 
-function toApiMessages(s: Session): Anthropic.MessageParam[] {
+function toTurns(s: Session): Turn[] {
   const convo = s.transcript.filter((m) => m.role !== "event" && m.kind !== "contact_card").slice(-HISTORY_LIMIT);
   const lastUserIdx = convo.map((m) => m.role).lastIndexOf("user");
-  const out: Anthropic.MessageParam[] = [];
+  const out: Turn[] = [];
   convo.forEach((m, i) => {
     const role = m.role === "user" ? "user" : "assistant";
     const prefix = m.channel === "voice" && m.role === "user" ? "(on call) " : "";
     let text = m.kind === "gmail_link" ? "[sent the Connect Gmail link]" : prefix + m.text;
     if (m.attachments?.length) text += "\n" + m.attachments.map(attachmentText).join("\n");
-    const blocks: Anthropic.ContentBlockParam[] = [];
+    const parts: Part[] = [];
     // Only the latest user message carries actual image pixels; older ones use the summary.
     if (i === lastUserIdx) {
       for (const a of m.attachments ?? []) {
         const match = a.kind === "image" && a.dataUrl?.match(/^data:(image\/(?:png|jpeg|gif|webp));base64,(.+)$/);
-        if (match) blocks.push({ type: "image", source: { type: "base64", media_type: match[1] as "image/png", data: match[2] } });
+        if (match) parts.push({ type: "image", mime: match[1], data: match[2] });
       }
     }
-    blocks.push({ type: "text", text: text || "(empty)" });
+    parts.push({ type: "text", text: text || "(empty)" });
     const prev = out[out.length - 1];
-    if (prev && prev.role === role && Array.isArray(prev.content)) prev.content.push(...blocks);
-    else out.push({ role, content: blocks });
+    if (prev && prev.role === role) prev.parts.push(...parts);
+    else out.push({ role, parts });
   });
-  if (out.length === 0 || out[0].role !== "user") out.unshift({ role: "user", content: "(user opened the chat)" });
-  // API needs a final user turn; if the agent spoke last (e.g. event-triggered turn), add a nudge.
-  if (out[out.length - 1].role !== "user") out.push({ role: "user", content: "(no new message from the user)" });
+  if (out.length === 0 || out[0].role !== "user") out.unshift({ role: "user", parts: [{ type: "text", text: "(user opened the chat)" }] });
+  // APIs need a final user turn; if the agent spoke last (e.g. event-triggered turn), add a nudge.
+  if (out[out.length - 1].role !== "user") out.push({ role: "user", parts: [{ type: "text", text: "(no new message from the user)" }] });
   return out;
 }
 
 async function classifyVoice(name: string): Promise<VoiceStyle> {
-  if (!client) return "neutral";
+  if (!provider) return "neutral";
   try {
-    const r = await client.messages.create({
-      model: FAST_MODEL,
-      max_tokens: 5,
-      system: "Classify how a name is most commonly perceived for picking a TTS voice. Answer with exactly one word: feminine, masculine, or neutral. Ambiguous, unisex, invented, or object names are neutral.",
-      messages: [{ role: "user", content: name.slice(0, 60) }],
-    });
-    void recordUsage(FAST_MODEL, "voice-classify", r.usage);
-    const t = r.content.find((b) => b.type === "text")?.text.trim().toLowerCase() ?? "";
+    const t = (
+      await quick({
+        system:
+          "Classify how a name is most commonly perceived for picking a TTS voice. Answer with exactly one word: feminine, masculine, or neutral. Ambiguous, unisex, invented, or object names are neutral.",
+        user: name.slice(0, 60),
+        maxTokens: 5,
+        tag: "voice-classify",
+      })
+    ).toLowerCase();
     return t.startsWith("fem") ? "feminine" : t.startsWith("masc") ? "masculine" : "neutral";
   } catch {
     return "neutral";
@@ -224,41 +201,12 @@ async function runTool(ctx: Ctx, name: string, input: Record<string, unknown>): 
 
 async function generate(ctx: Ctx, extraInstruction?: string): Promise<string> {
   const { s, channel } = ctx;
-  if (!client) return extraInstruction ? "" : mockReply(ctx, runTool);
-
-  const messages = toApiMessages(s);
-  let finalText = "";
-  for (let round = 0; round < MAX_TOOL_ROUNDS; round++) {
-    const d = computeDirective(s, channel);
-    const state = directiveText(s, d, channel) + (extraInstruction ? `\n\nINSTRUCTION: ${extraInstruction}` : "");
-    const response = await client.messages.create({
-      model: MODEL,
-      max_tokens: 4000,
-      output_config: { effort: "low" },
-      system: [
-        { type: "text", text: SYSTEM_PROMPT, cache_control: { type: "ephemeral" } },
-        { type: "text", text: `STATE (from the system, not the user):\n${state}` },
-      ],
-      tools: TOOLS,
-      messages,
-    });
-    void recordUsage(MODEL, "agent", response.usage);
-    if (response.stop_reason === "refusal") return "hmm, i can't help with that one. anything else on your mind?";
-    const text = response.content.filter((b): b is Anthropic.TextBlock => b.type === "text").map((b) => b.text).join("\n\n");
-    if (text.trim()) finalText += (finalText ? "\n\n" : "") + text.trim();
-    const toolUses = response.content.filter((b): b is Anthropic.ToolUseBlock => b.type === "tool_use");
-    if (response.stop_reason !== "tool_use" || toolUses.length === 0) break;
-    messages.push({ role: "assistant", content: response.content });
-    const results: Anthropic.ToolResultBlockParam[] = [];
-    for (const t of toolUses) {
-      const out = await runTool(ctx, t.name, (t.input ?? {}) as Record<string, unknown>);
-      results.push({ type: "tool_result", tool_use_id: t.id, content: out, is_error: out.startsWith("error") });
-    }
-    // Already replied this turn: another round only adds filler ("waiting on you..."), unless a tool failed.
-    if (finalText && !results.some((r) => r.is_error)) break;
-    messages.push({ role: "user", content: results });
-  }
-  return finalText;
+  if (!provider) return extraInstruction ? "" : mockReply(ctx, runTool);
+  // The directive is computed once per turn; tool effects show up in the next turn's STATE.
+  const state = directiveText(s, computeDirective(s, channel), channel) + (extraInstruction ? `\n\nINSTRUCTION: ${extraInstruction}` : "");
+  const r = await runToolLoop({ system: SYSTEM_PROMPT, state, turns: toTurns(s), tools: TOOLS, maxRounds: MAX_TOOL_ROUNDS }, (c) => runTool(ctx, c.name, c.input));
+  if (r.refused) return "hmm, i can't help with that one. anything else on your mind?";
+  return r.text;
 }
 
 const GOODBYE = /\b(bye|goodbye|talk (soon|later)|take care|catch you|ciao|see ya|i'?ll let you go|call me (back )?(whenever|anytime)|good talking)\b/i;
