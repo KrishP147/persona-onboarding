@@ -75,7 +75,8 @@ export interface Session {
   gmailUnread?: number; // small value moment at connect time; tokens are never stored
   gmailVerified?: { email: string; unread?: number; demo?: boolean; inbox?: InboxItem[] }; // set by the oauth callback, consumed by the gmail_connected event
   alerts?: Alert[];
-  movesUsed?: string[]; // conversation moves already made (src/lib/moves.ts) // interruptions shown, with outcomes (see src/lib/triage.ts)
+  movesUsed?: string[]; // conversation moves already made (src/lib/moves.ts)
+  llmFailures?: number; // model unreachable this many turns in a row // interruptions shown, with outcomes (see src/lib/triage.ts)
   graduatedReason?: string;
   transcript: Msg[];
 }

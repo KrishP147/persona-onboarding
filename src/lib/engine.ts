@@ -107,6 +107,14 @@ function toTurns(s: Session): Turn[] {
   return out;
 }
 
+// When the model is unreachable more than once in a row: own it plainly, keep what we know, set an expectation.
+function outageLine(s: Session, channel: Channel) {
+  const name = s.slots.userName.value;
+  if (channel === "voice") return `sorry${name ? ` ${name}` : ""}, i'm having trouble on my end right now. i'll text you instead.`;
+  const need = s.slots.helpNeed.value;
+  return `sorry${name ? ` ${name}` : ""}, i'm running slow on my end right now.${need && need.length <= 60 ? ` i haven't forgotten about ${need}.` : ""} give me a few minutes and text me again?`;
+}
+
 // Offline guess for common names, used when the model can't be reached (so "julia" still sounds like julia).
 const FEMININE = /^(julia|juliet|sarah|sara|emma|olivia|ava|mia|sophia|sofia|isabella|luna|nova|chloe|grace|lily|zoe|ella|anna|hannah|maya|aria|stella|ruby|ivy|iris|daisy|rose|alice|clara|nora|lucy|jane|kate|katie|amy|emily|jessica|jenny|samantha|siri|alexa|tessa|priya|dana|robin|sage)$/i;
 const MASCULINE = /^(max|jack|james|john|mike|michael|david|daniel|sam|leo|liam|noah|oliver|ethan|lucas|henry|oscar|theo|jarvis|alfred|bob|tom|ben|chris|mark|paul|peter|ryan|kevin|jake|luke|adam|alex|kai|finn|felix|hugo|arthur|george|harry|charlie|dave|steve|jeeves|hal)$/i;
@@ -362,13 +370,21 @@ async function turn(
   const resendOk = /\b(resend|send (it|the link) again|another link|new link|lost the link)\b/i.test(lastUserText(s));
   const ctx: Ctx = { s, channel, actions: [], newMessages: [], resendOk, move: opts.move };
   let text = "";
+  let failed = false;
   try {
     text = await generate(ctx, extraInstruction);
   } catch (err) {
     // Provider down or overloaded: fall through to the scripted line rather than go quiet.
     console.error("llm turn failed", err);
+    failed = true;
   }
-  if (!text.trim() && fallback && !ctx.newMessages.some((m) => m.kind === "gif")) text = fallback;
+  s.llmFailures = failed ? (s.llmFailures ?? 0) + 1 : 0;
+  if (!text.trim() && fallback && !ctx.newMessages.some((m) => m.kind === "gif")) {
+    // The same "say that again?" on repeat looks broken; after the first miss, be honest about it.
+    text = failed && (s.llmFailures ?? 0) > 1 ? outageLine(s, channel) : fallback;
+    // On a call, "i'll text you instead" means actually hanging up (with that line as the goodbye).
+    if (failed && channel === "voice" && (s.llmFailures ?? 0) > 1 && !ctx.actions.some((a) => a.type === "end_call")) ctx.actions.push({ type: "end_call" });
+  }
   if (opts.forceEnd && !ctx.actions.some((a) => a.type === "end_call")) ctx.actions.push({ type: "end_call" });
   // Placing a call: the text is just the heads up; the talking happens on the call.
   if (channel === "text" && ctx.actions.some((a) => a.type === "start_call")) {
