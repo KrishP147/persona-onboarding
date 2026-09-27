@@ -452,7 +452,7 @@ export function useVoiceCall(opts: {
     const stillWaiting = () => waitingRef.current && queueRef.current === 0 && !mutedRef.current && activeRef.current;
     fillerTimer.current = setTimeout(() => {
       if (!stillWaiting()) return;
-      if (Math.random() < 0.7) void speak(pickFiller(SHORT_FILLERS, lastFillerRef), true);
+      if (Math.random() < 0.5) void speak(pickFiller(SHORT_FILLERS, lastFillerRef), true);
       fillerTimer.current = setTimeout(() => {
         if (stillWaiting()) void speak(pickFiller(LONG_FILLERS, lastFillerRef), true);
       }, 2000);
