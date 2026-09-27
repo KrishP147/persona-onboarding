@@ -4,7 +4,18 @@
 import Anthropic from "@anthropic-ai/sdk";
 import { GoogleGenAI, HarmBlockThreshold, HarmCategory, ThinkingLevel, type Content, type Part as GPart, type SafetySetting, type ThinkingConfig } from "@google/genai";
 import { recordUsage } from "./usage";
-import { incrDaily, incrTotal } from "./store";
+import { addFloat, getFloat, incrDaily, incrTotal } from "./store";
+import { costOf } from "./usage";
+
+// Hard dollar cap on Claude, shared across every server instance. When it's spent, calls stop
+// (the conversation falls back to its scripted lines) instead of running up a bill.
+const CLAUDE_BUDGET_USD = Number(process.env.CLAUDE_BUDGET_USD ?? 1.75);
+async function assertClaudeBudget() {
+  const spent = await getFloat("claude-spend").catch(() => 0);
+  if (spent >= CLAUDE_BUDGET_USD) throw new Error(`claude budget used ($${spent.toFixed(2)} of $${CLAUDE_BUDGET_USD})`);
+}
+// Haiku 4.5 doesn't take the effort setting; newer models do.
+const effortFor = (model: string) => (model.includes("haiku") ? {} : { effort: "low" as const });
 
 // Paid fallback budget: at most this many Claude turns per day, counted across all instances.
 const FALLBACK_DAILY_TURNS = Number(process.env.LLM_FALLBACK_DAILY_TURNS ?? 60);
@@ -123,6 +134,8 @@ async function geminiUsage(model: string, tag: string, u?: { promptTokenCount?: 
 }
 
 async function anthropicUsage(model: string, tag: string, u: Anthropic.Usage) {
+  const cost = costOf(model, { input: u.input_tokens, cacheRead: u.cache_read_input_tokens ?? 0, cacheWrite: u.cache_creation_input_tokens ?? 0, output: u.output_tokens });
+  await addFloat("claude-spend", cost).catch(() => {});
   await recordUsage(model, tag, {
     input: u.input_tokens,
     cacheRead: u.cache_read_input_tokens ?? 0,
@@ -318,11 +331,12 @@ async function anthropicLoop(client: Anthropic, o: LoopOpts, exec: Exec): Promis
     ),
   }));
   for (let round = 0; round < o.maxRounds; round++) {
+    await assertClaudeBudget();
     const response = await client.messages.create(
       {
       model,
       max_tokens: 4000,
-      output_config: { effort: "low" },
+      output_config: effortFor(model),
       system: [
         { type: "text", text: o.system, cache_control: { type: "ephemeral" } },
         { type: "text", text: `STATE (from the system, not the user):\n${o.state}` },
@@ -403,6 +417,7 @@ export async function quick(o: { system: string; user: string; maxTokens: number
   }
   if (claude) {
     const model = MODELS.anthropic.fast;
+    await assertClaudeBudget();
     const r = await claude.messages.create({ model, max_tokens: o.maxTokens, system: o.system, messages: [{ role: "user", content: o.user }] });
     await anthropicUsage(model, o.tag, r.usage);
     return (r.content.find((b) => b.type === "text")?.text ?? "").trim();
@@ -431,10 +446,11 @@ export async function json<T>(o: { system: string; user: string; schema: Record<
   }
   if (claude) {
     const model = o.fast ? MODELS.anthropic.fast : MODELS.anthropic.agent;
+    await assertClaudeBudget();
     const r = await claude.messages.create({
       model,
       max_tokens: 1500,
-      output_config: { effort: "low", format: { type: "json_schema", schema: o.schema } },
+      output_config: { ...effortFor(model), format: { type: "json_schema", schema: o.schema } },
       system: o.system,
       messages: [{ role: "user", content: o.user }],
     });
