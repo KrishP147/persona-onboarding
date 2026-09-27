@@ -172,6 +172,9 @@ async function judge(p: Persona, s: Session) {
     system: [
       "You grade onboarding conversations for a personal-assistant product against the product brief below. Be strict and specific, but grade the agent, not the test rig.",
       `THE BRIEF (what the agent is supposed to do):\n${BRIEF}`,
+      process.env.BROWSERBASE_API_KEY
+        ? "Web search is ON in this run."
+        : "Web search is OFF in this test run (no key), so saying it can't look things up live, and helping from memory instead, is CORRECT here. Don't penalize it.",
       "WHAT THE AGENT CAN AND CAN'T DO: it can text, call (a web voice sim), send a Google connect link, read the inbox once connected, draft emails and send them only after the user clearly says send, and search the web. It can't see the user's location (asking their city is correct), can't call businesses or book, and has no calendar access. Asking for Gmail (with a reason and an easy no) is REQUIRED by the brief, even for users who prefer text; only penalize it if it's pushy, repeated after a no, or badly timed.",
       "RULES: USER lines come from a simulator. Don't blame the agent for the simulator's own inconsistencies, stage directions, or scripted events. Setup items can stay open when the user never completed them; judge how the agent handled it. Only grade what the transcript shows.",
       "SCORING: start at 10 and deduct for concrete misses: 2-3 points for serious ones (false claims of doing work, ignoring what the user asked, re-asking known info, no text after a call, hanging up without a goodbye, pushy repeated asks), 1 point for real but smaller ones (a long call turn, a missed chance to steer back to open setup items, a form-like run of questions), and nothing for pure taste. A run with no concrete misses scores 10. List every deduction in failed; passed lists what went well.",
