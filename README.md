@@ -24,7 +24,8 @@ cp .env.example .env.local   # add GEMINI_API_KEY (or ANTHROPIC_API_KEY). with n
 pnpm dev                      # http://localhost:3000 (chrome or edge for the voice call)
 pnpm smoke                    # checks the safety nets, no key needed
 pnpm harness                  # 15 simulated difficult users vs the live bot, graded (dev server running, ALLOW_TEST_EVENTS=1). prints its cost
-pnpm e2e                      # real chrome walkthrough with a fake mic: 21 checks + screenshots in harness/e2e/
+pnpm e2e                      # real chrome walkthrough with a fake mic: 25 checks + screenshots in harness/e2e/
+# with a real mic: docs/manual-tests.md (18 voice + text scripts)
 ```
 
 ## how it fits together

@@ -10,9 +10,19 @@ import { DEMO_INBOX } from "../src/lib/triage";
 import { json, quick } from "../src/lib/llm";
 
 const BASE = process.env.HARNESS_BASE_URL ?? "http://localhost:3000";
-// Simulated users and the grader run on Claude when a key is present (stricter, and it keeps
+// Simulated users and the grader run on Cohere or Claude, not the agent's provider (it keeps
 // Gemini's free per-minute quota for the agent under test). One persona at a time, paced.
-const VIA = process.env.ANTHROPIC_API_KEY && process.env.HARNESS_VIA !== "gemini" ? ("anthropic" as const) : undefined;
+// Free Cohere first, then Claude; HARNESS_VIA=anthropic|cohere|gemini to force one.
+const VIA: "cohere" | "anthropic" | undefined =
+  process.env.HARNESS_VIA === "gemini"
+    ? undefined
+    : process.env.HARNESS_VIA === "anthropic" && process.env.ANTHROPIC_API_KEY
+      ? "anthropic"
+      : process.env.COHERE_API_KEY
+        ? "cohere"
+        : process.env.ANTHROPIC_API_KEY
+          ? "anthropic"
+          : undefined;
 const CONCURRENCY = Number(process.env.HARNESS_CONCURRENCY ?? 1);
 const TURN_GAP_MS = Number(process.env.HARNESS_TURN_GAP_MS ?? 6000);
 

@@ -41,7 +41,7 @@ const gemini = provider === "gemini" ? new GoogleGenAI({ apiKey: process.env.GEM
 const anthropicClient = hasAnthropic ? new Anthropic() : null;
 const anthropic = provider === "anthropic" ? anthropicClient : null;
 const fallback = process.env.LLM_FALLBACK === "anthropic" ? anthropicClient : null;
-type Via = "anthropic" | undefined;
+type Via = "anthropic" | "cohere" | undefined;
 
 // Default filters block ordinary swearing ("this is fucking annoying"), which left the user with
 // silence. Only block clearly severe content; the prompt handles tone.
@@ -262,8 +262,40 @@ async function anthropicLoop(client: Anthropic, o: LoopOpts, exec: Exec): Promis
 
 const claudeFor = (via: Via) => (via === "anthropic" ? anthropicClient : anthropic);
 
+// Cohere (free trial key): used for testing only, as the harness's simulated users and grader.
+// Trial keys are rate limited and not meant for production traffic, so the demo never uses it.
+const COHERE_MODEL = process.env.COHERE_MODEL ?? "command-a-03-2025";
+async function cohereChat(system: string, user: string, maxTokens: number, schema?: Record<string, unknown>): Promise<string> {
+  const body = {
+    model: COHERE_MODEL,
+    messages: [
+      { role: "system", content: system },
+      { role: "user", content: user },
+    ],
+    max_tokens: maxTokens,
+    ...(schema ? { response_format: { type: "json_object", json_schema: schema } } : {}),
+  };
+  for (let attempt = 0; attempt < 4; attempt++) {
+    const res = await fetch("https://api.cohere.com/v2/chat", {
+      method: "POST",
+      headers: { Authorization: `Bearer ${process.env.COHERE_API_KEY}`, "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+      signal: AbortSignal.timeout(30000),
+    });
+    if (res.status === 429) {
+      await new Promise((r) => setTimeout(r, 4000 * (attempt + 1))); // trial keys allow ~20 calls a minute
+      continue;
+    }
+    if (!res.ok) throw new Error(`cohere ${res.status}: ${(await res.text()).slice(0, 200)}`);
+    const data = (await res.json()) as { message?: { content?: { type: string; text?: string }[] } };
+    return (data.message?.content ?? []).filter((c) => c.type === "text").map((c) => c.text ?? "").join("").trim();
+  }
+  throw new Error("cohere rate limited");
+}
+
 // One-shot plain text (classifiers, simulated users).
 export async function quick(o: { system: string; user: string; maxTokens: number; tag: string; model?: string; via?: Via }): Promise<string> {
+  if (o.via === "cohere" && process.env.COHERE_API_KEY) return cohereChat(o.system, o.user, o.maxTokens);
   const claude = claudeFor(o.via);
   if (gemini && !(o.via === "anthropic" && claude)) {
     const chain = o.model ? [o.model] : FAST_CHAIN;
@@ -282,6 +314,7 @@ export async function quick(o: { system: string; user: string; maxTokens: number
 
 // One-shot structured output against a JSON schema.
 export async function json<T>(o: { system: string; user: string; schema: Record<string, unknown>; tag: string; via?: Via; fast?: boolean }): Promise<T> {
+  if (o.via === "cohere" && process.env.COHERE_API_KEY) return JSON.parse((await cohereChat(o.system, o.user, 1500, o.schema)) || "{}") as T;
   const claude = claudeFor(o.via);
   if (gemini && !(o.via === "anthropic" && claude)) {
     // Background helpers (fast) only use the light model's quota, never the agent's.
