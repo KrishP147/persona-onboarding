@@ -186,7 +186,7 @@ function userWrappingUp(s: Session) {
 }
 
 // The gmail link goes out only after a yes: they asked for it, or said yes to our question about it.
-const WANTS_LINK = /\b(send (me )?(the |a )?link|connect (my )?(gmail|email|inbox)|hook (up )?my (gmail|email))\b/i;
+const WANTS_LINK = /\b(send|text|give|drop|shoot)\b[^.?!]{0,25}\blink\b|\b(connect|hook up|link)\b[^.?!]{0,15}\b(gmail|email|inbox|google)\b/i;
 // Our last message brought up the link (asked, or offered "i'll send you a link"), so a yes means yes to it.
 const ASKED_LINK = /\b(link|gmail|connect your)\b/i;
 // The gmail ask is written by code (one clear question, the reason, the reassurance, an easy no).
@@ -605,7 +605,8 @@ export async function handleUserMessage(
   let linkSent: Msg[] = [];
   let linkNote: string | undefined;
   const lastLinkAsk = [...s.transcript].slice(0, -1).reverse().find((m) => m.role === "agent" && (!m.kind || m.kind === "text"));
-  if (s.slots.gmail.status === "missing" && lastLinkAsk?.text.includes(GMAIL_ASK_MARK) && gmailConsent(s)) {
+  const askedForLink = WANTS_LINK.test(clean) && !/\b(don'?t|do not|not)\b/i.test(clean);
+  if (s.slots.gmail.status === "missing" && (askedForLink || (lastLinkAsk?.text.includes(GMAIL_ASK_MARK) && gmailConsent(s)))) {
     const ctx: Ctx = { s, channel, actions: [], newMessages: [] };
     const out = await runTool(ctx, "send_gmail_link", {});
     if (!out.startsWith("error")) {
@@ -772,24 +773,25 @@ async function handleEventInner(s: Session, e: SessionEvent): Promise<TurnResult
       if (!s.call.active) return idle();
       s.call.silenceStrikes += 1;
       if (s.call.silenceStrikes >= MAX_SILENCE_STRIKES) {
-        const r = await turn(
-          s,
-          "voice",
-          "The user has been silent for a while. Say it seems like now isn't a great time, which is totally fine, that you'll text them instead, and say goodbye by name if you know it. Then call end_call.",
-          goodbyeLine(s),
-          { forceEnd: true, move: EVENT_MOVES.silence },
-        );
-        return r;
+        // Written by code: a kind, certain goodbye, then hang up.
+        const name = s.slots.userName.value;
+        const ctx: Ctx = { s, channel: "voice", actions: [], newMessages: [], move: EVENT_MOVES.silence };
+        emitAgentText(ctx, `seems like now isn't a great time, totally fine. i'll text you instead. talk soon${name ? `, ${name}` : ""}!`);
+        ctx.actions.push({ type: "end_call" });
+        return { session: s, newMessages: ctx.newMessages, chips: computeDirective(s, "voice").chips, actions: ctx.actions };
       }
-      return turn(
-        s,
-        "voice",
+      // Written by code: instant, and matched to what came before. "take your time" only makes
+      // sense after a question; after a statement, silence more likely means the line dropped.
+      const lastSaid = [...s.transcript].reverse().find((m) => m.role === "agent" && m.channel === "voice")?.text.trim() ?? "";
+      const line =
         s.call.silenceStrikes === 1
-          ? `The user has gone quiet. Don't say "still there?". Offer help instead: "take your time. want me to say that again?" or restate your last question more simply.`
-          : `Still quiet (${s.call.silenceStrikes}x). Offer an easy out: you can just text them instead if that's easier.`,
-        s.call.silenceStrikes === 1 ? "take your time. want me to say that again?" : "no pressure. i can also just text you if that's easier.",
-        { move: EVENT_MOVES.silence },
-      );
+          ? lastSaid.endsWith("?")
+            ? "take your time. want me to say that again?"
+            : "hello? can you hear me okay?"
+          : "no pressure. if now's not great, i can just text you instead.";
+      const ctx: Ctx = { s, channel: "voice", actions: [], newMessages: [], move: EVENT_MOVES.silence };
+      emitAgentText(ctx, line);
+      return { session: s, newMessages: ctx.newMessages, chips: computeDirective(s, "voice").chips, actions: ctx.actions };
     }
     case "contact_saved": {
       if (s.contactSaved) return idle();

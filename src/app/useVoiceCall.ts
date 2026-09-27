@@ -29,9 +29,9 @@ type Rec = {
 };
 
 const SILENCE_MS = 6000;
-const TURN_END_COMPLETE_MS = 450;
-const TURN_END_MIDPHRASE_MS = 1000;
-const TURN_END_SPELLING_MS = 1600;
+const TURN_END_COMPLETE_MS = 350;
+const TURN_END_MIDPHRASE_MS = 850;
+const TURN_END_SPELLING_MS = 1400;
 const TRAILING = /\b(and|but|or|so|because|the|a|an|my|is|are|to|of|with|for|um+|uh+|like|then|if|at|dot)$/i;
 const SPELLING = /(\d\s*){3,}$|@|\bdot\b|\bat\b\s*$|\bemail is\b|\bnumber is\b|\baddress is\b/i;
 
@@ -41,7 +41,7 @@ function turnEndDelay(text: string, speechFinal = false) {
   if (SPELLING.test(t)) return TURN_END_SPELLING_MS;
   if (TRAILING.test(t) || /,$/.test(t)) return TURN_END_MIDPHRASE_MS;
   // Deepgram already heard the pause: answer almost right away, like a person would.
-  return speechFinal ? 200 : TURN_END_COMPLETE_MS;
+  return speechFinal ? 0 : TURN_END_COMPLETE_MS; // deepgram already heard the pause: answer now
 }
 const VOICE_KEY = "persona-voice-";
 
@@ -139,7 +139,7 @@ async function startDeepgram(sessionId: string, stream: MediaStream, onHeard: He
     if (!r.ok) return null;
     const { token } = (await r.json()) as { token: string };
     const lang = (navigator.language || "en").toLowerCase().startsWith("en") ? "en" : "multi";
-    const q = new URLSearchParams({ model: "nova-3", language: lang, interim_results: "true", smart_format: "true", endpointing: "300", vad_events: "true" });
+    const q = new URLSearchParams({ model: "nova-3", language: lang, interim_results: "true", smart_format: "true", endpointing: "250", utterance_end_ms: "1000", vad_events: "true" });
     const ws = new WebSocket(`wss://api.deepgram.com/v1/listen?${q}`, ["bearer", token]);
     const opened = await new Promise<boolean>((resolve) => {
       ws.onopen = () => resolve(true);
