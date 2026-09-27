@@ -55,6 +55,13 @@ export const PERSONAS: Persona[] = [
     expect: ["respects the refusal after one light ask", "doesn't guilt-trip", "still delivers value"],
   },
   {
+    id: "laugher",
+    brief: "Playful and vague. Your first two replies are only 'haha' and then 'lol'. Only after that, name the assistant Kiki. When a call is offered, first reply 'hmm', then 'ok sure'. You're Ari; you want help planning a birthday dinner.",
+    maxTurns: 8,
+    script: [{ atTurn: 5, event: "accept_call" }],
+    expect: ["never invents a name the user didn't give", "treats 'haha'/'lol'/'hmm' as reactions, not answers or a yes", "doesn't ring before a real yes", "reacts naturally, not like a form"],
+  },
+  {
     id: "mind-changer",
     brief: "Name the assistant Max, then two messages later rename it to Luna. Tell it to call you Chris, then 'actually call me CJ'.",
     maxTurns: 8,

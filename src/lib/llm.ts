@@ -53,8 +53,23 @@ export const models = () => (provider ? MODELS[provider] : MODELS.gemini);
 const geminiKey = (process.env.NODE_ENV !== "production" && process.env.GEMINI_API_KEY_TWO) || process.env.GEMINI_API_KEY || process.env.GOOGLE_API_KEY;
 const gemini = provider === "gemini" ? new GoogleGenAI({ apiKey: geminiKey }) : null;
 // Cloudflare Workers AI: a free daily allowance, used as the second tier when gemini is out.
-const CF = process.env.CLOUDFLARE_API_TOKEN && process.env.CLOUDFLARE_ACCOUNT_ID ? { token: process.env.CLOUDFLARE_API_TOKEN, account: process.env.CLOUDFLARE_ACCOUNT_ID } : null;
-const CF_MODEL = process.env.CLOUDFLARE_MODEL ?? "@cf/meta/llama-4-scout-17b-16e-instruct";
+// Any OpenAI-style chat completions endpoint (cloudflare workers ai, cohere's compatibility api).
+type Oai = { name: string; url: string; token: string; model: string };
+const CF: Oai | null =
+  process.env.CLOUDFLARE_API_TOKEN && process.env.CLOUDFLARE_ACCOUNT_ID
+    ? {
+        name: "cloudflare",
+        url: `https://api.cloudflare.com/client/v4/accounts/${process.env.CLOUDFLARE_ACCOUNT_ID}/ai/v1/chat/completions`,
+        token: process.env.CLOUDFLARE_API_TOKEN,
+        model: process.env.CLOUDFLARE_MODEL ?? "@cf/meta/llama-4-scout-17b-16e-instruct",
+      }
+    : null;
+// Local test runs only (LLM_TEST_VIA=cohere): the agent runs on cohere's free trial key, so testing
+// never touches the demo's quotas or costs anything. Never used in production.
+const TEST_COHERE: Oai | null =
+  process.env.NODE_ENV !== "production" && process.env.LLM_TEST_VIA === "cohere" && process.env.COHERE_API_KEY
+    ? { name: "cohere", url: "https://api.cohere.ai/compatibility/v1/chat/completions", token: process.env.COHERE_API_KEY, model: process.env.COHERE_MODEL ?? "command-a-03-2025" }
+    : null;
 const anthropicClient = hasAnthropic ? new Anthropic() : null;
 const anthropic = provider === "anthropic" ? anthropicClient : null;
 const fallback = process.env.LLM_FALLBACK === "anthropic" ? anthropicClient : null;
@@ -161,6 +176,7 @@ type Exec = (c: ToolCall) => Promise<string>;
 // Model/tool loop. Stops after the first round that produced text (more rounds only add
 // filler) unless a tool errored and the model needs to see why.
 export async function runToolLoop(o: LoopOpts, exec: Exec): Promise<LoopResult> {
+  if (TEST_COHERE) return oaiLoop(TEST_COHERE, o, exec);
   if (gemini) {
     try {
       return await geminiLoop(o, exec);
@@ -169,7 +185,7 @@ export async function runToolLoop(o: LoopOpts, exec: Exec): Promise<LoopResult> 
       // Second tier, still free: cloudflare workers ai.
       if (CF) {
         try {
-          return await cloudflareLoop(CF, o, exec);
+          return await oaiLoop(CF, o, exec);
         } catch (cfErr) {
           console.error("cloudflare failed:", String((cfErr as Error).message ?? cfErr).slice(0, 160));
           err = cfErr;
@@ -199,7 +215,7 @@ type CfMessage =
   | { role: "assistant"; content: string | null; tool_calls?: { id: string; type: "function"; function: { name: string; arguments: string } }[] }
   | { role: "tool"; tool_call_id: string; content: string };
 
-async function cloudflareLoop(cf: { token: string; account: string }, o: LoopOpts, exec: Exec): Promise<LoopResult> {
+async function oaiLoop(api: Oai, o: LoopOpts, exec: Exec): Promise<LoopResult> {
   const out = collector();
   const messages: CfMessage[] = [
     { role: "system", content: `${o.system}\n\nSTATE (from the system, not the user):\n${o.state}` },
@@ -210,13 +226,13 @@ async function cloudflareLoop(cf: { token: string; account: string }, o: LoopOpt
   ];
   const tools = o.tools.map((t) => ({ type: "function" as const, function: { name: t.name, description: t.description, parameters: t.schema } }));
   for (let round = 0; round < o.maxRounds; round++) {
-    const res = await fetch(`https://api.cloudflare.com/client/v4/accounts/${cf.account}/ai/v1/chat/completions`, {
+    const res = await fetch(api.url, {
       method: "POST",
-      headers: { Authorization: `Bearer ${cf.token}`, "Content-Type": "application/json" },
-      body: JSON.stringify({ model: CF_MODEL, messages, tools, max_tokens: 600 }),
-      signal: AbortSignal.timeout(15000),
+      headers: { Authorization: `Bearer ${api.token}`, "Content-Type": "application/json" },
+      body: JSON.stringify({ model: api.model, messages, tools, max_tokens: 600 }),
+      signal: AbortSignal.timeout(20000),
     });
-    if (!res.ok) throw new Error(`cloudflare ${res.status}: ${(await res.text()).slice(0, 160)}`);
+    if (!res.ok) throw new Error(`${api.name} ${res.status}: ${(await res.text()).slice(0, 160)}`);
     const data = (await res.json()) as { choices?: { message?: { content?: string | null; tool_calls?: { id: string; function: { name: string; arguments: string | object } }[] } }[] };
     const m = data.choices?.[0]?.message;
     const roundText = (m?.content ?? "").trim();
@@ -249,12 +265,12 @@ async function cloudflareLoop(cf: { token: string; account: string }, o: LoopOpt
 }
 
 // One-shot text or JSON on cloudflare, for background helpers when gemini is out.
-async function cloudflareOnce(cf: { token: string; account: string }, system: string, user: string, maxTokens: number, schema?: Record<string, unknown>): Promise<string> {
-  const res = await fetch(`https://api.cloudflare.com/client/v4/accounts/${cf.account}/ai/v1/chat/completions`, {
+async function cloudflareOnce(cf: Oai, system: string, user: string, maxTokens: number, schema?: Record<string, unknown>): Promise<string> {
+  const res = await fetch(cf.url, {
     method: "POST",
     headers: { Authorization: `Bearer ${cf.token}`, "Content-Type": "application/json" },
     body: JSON.stringify({
-      model: CF_MODEL,
+      model: cf.model,
       messages: [
         { role: "system", content: system },
         { role: "user", content: user },
@@ -406,7 +422,7 @@ async function cohereChat(system: string, user: string, maxTokens: number, schem
 
 // One-shot plain text (classifiers, simulated users).
 export async function quick(o: { system: string; user: string; maxTokens: number; tag: string; model?: string; via?: Via }): Promise<string> {
-  if (o.via === "cohere" && process.env.COHERE_API_KEY) return cohereChat(o.system, o.user, o.maxTokens);
+  if ((o.via === "cohere" || TEST_COHERE) && process.env.COHERE_API_KEY) return cohereChat(o.system, o.user, o.maxTokens);
   const claude = claudeFor(o.via);
   if (gemini && !(o.via === "anthropic" && claude)) {
     const chain = o.model ? [o.model] : FAST_CHAIN;
@@ -431,7 +447,7 @@ export async function quick(o: { system: string; user: string; maxTokens: number
 
 // One-shot structured output against a JSON schema.
 export async function json<T>(o: { system: string; user: string; schema: Record<string, unknown>; tag: string; via?: Via; fast?: boolean }): Promise<T> {
-  if (o.via === "cohere" && process.env.COHERE_API_KEY) return JSON.parse((await cohereChat(o.system, o.user, 1500, o.schema)) || "{}") as T;
+  if ((o.via === "cohere" || TEST_COHERE) && process.env.COHERE_API_KEY) return JSON.parse((await cohereChat(o.system, o.user, 1500, o.schema)) || "{}") as T;
   const claude = claudeFor(o.via);
   if (gemini && !(o.via === "anthropic" && claude)) {
     // Background helpers (fast) only use the light model's quota, never the agent's.

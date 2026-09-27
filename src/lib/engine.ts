@@ -296,6 +296,20 @@ function userWantsOut(s: Session) {
 }
 
 // "no, text is fine" right after a call offer is a no, just like tapping decline.
+// Anything short of this ("haha", "lol", "hmm") is not permission to ring.
+const CALL_OK = /\b(yes|yeah|yep|yup|ya|sure|ok(ay)?|k|fine|alright|go ahead|do it|let'?s (go|do it)|down|call|ring|phone)\b/i;
+// "you pick" / "idk" hands the choice to us; otherwise a name has to come from them.
+const DELEGATE = /\b(you (pick|choose|decide)|up to you|your (call|choice)|surprise me|whatever|anything|any ?name|i don'?t (care|mind|know)|idc|idk|dunno|no idea|dealer'?s choice)\b/i;
+function nameGrounded(s: Session, value: string): boolean {
+  const users = s.transcript.filter((m) => m.role === "user").slice(-3).map((m) => m.text.toLowerCase());
+  const first = value.toLowerCase().split(/\s+/)[0].replace(/[^\p{L}'-]/gu, "");
+  if (!first || users.some((t) => t.includes(first))) return true;
+  const last = users.at(-1) ?? "";
+  if (DELEGATE.test(last)) return true;
+  // They said yes to a name we suggested ("how about alex?" -> "sure").
+  const prevAgent = [...s.transcript].reverse().find((m) => m.role === "agent" && (!m.kind || m.kind === "text"));
+  return !!prevAgent && prevAgent.text.toLowerCase().includes(first) && YES.test(last);
+}
 const CALL_NO = /\b(no|nah|nope|not now|text is fine|rather text|just text|don'?t call|no calls?|hate (phone )?calls)\b/i;
 const OFFERED_CALL = /\b(call|ring|phone)\b[^?]*\?/i;
 const NEGATED_CALL = /\b(don'?t|do not|no|not|never|stop)\b[^.!?]{0,15}\b(call|ring|phone)/i;
@@ -307,6 +321,9 @@ async function runTool(ctx: Ctx, name: string, input: Record<string, unknown>): 
       const slot = input.slot as SlotKey;
       const value = String(input.value ?? "").trim().slice(0, 200);
       if (!SETTABLE.includes(slot as (typeof SETTABLE)[number]) || !value) return "error: invalid slot or empty value";
+      if ((slot === "agentName" || slot === "userName") && !nameGrounded(s, value)) {
+        return `error: they never said "${value}" (their last message: "${lastUserText(s).slice(0, 60)}"). don't fill in a name for them. react to what they actually said like a person would, then lightly ask again, or suggest one as a question ("how about ${value}?")`;
+      }
       const renamed = slot === "agentName" && s.slots.agentName.value && s.slots.agentName.value !== value;
       s.slots[slot] = { ...s.slots[slot], value, status: "filled", source: ctx.channel, updatedAt: Date.now() };
       if (s.lastAskedSlot === slot) s.lastAskedSlot = undefined;
@@ -350,6 +367,10 @@ async function runTool(ctx: Ctx, name: string, input: Record<string, unknown>): 
       const askedSince = s.transcript.slice(lastEnd + 1).some((m) => m.role === "user" && /\b(call|ring|phone)\b/i.test(m.text) && !NEGATED_CALL.test(m.text));
       const said_no = s.callDeclinedAt !== undefined || (lastEnd >= 0 && s.call.endedReason !== "agent_ended");
       if (said_no && !askedSince) return "error: they said no to a call or just hung up. don't call again unless they ask; carry on over text";
+      const last = lastUserText(s);
+      if (!YES.test(last) && !CALL_OK.test(last)) {
+        return `error: they haven't said yes to a call (they said "${last.slice(0, 60)}"). don't ring. react to what they said and ask again lightly, or carry on over text`;
+      }
       ctx.actions.push({ type: "start_call" });
       return "ringing the user";
     }
@@ -472,7 +493,10 @@ const GOODBYE = /\b(bye|goodbye|talk (to you )?(soon|later)|take care|catch you|
 // "i just sent you a link" said without actually sending one.
 const CLAIMS_LINK = /\b(sent|dropped|texted|shared|popped)\b[^.?!]{0,40}\b(link|it)\b|\blink\b[^.?!]{0,30}\b(your texts|our texts|the chat|the thread)\b|\b(it'?s|it is) (in|on) (your|our) texts\b/i;
 // Bracketed stage directions ("[starting call...]") are never said out loud or texted.
-const STAGE_BRACKETS = /\s*\[[^\]\n]{1,160}\]\s*/g;
+const STAGE_BRACKETS = /\s*\[([^\]\n]{1,160})\]\s*/g;
+// Fill-ins in a draft ("hi [client's name],") stay; stripping them left "hi ,".
+const PLACEHOLDER = /\b(name|company|business|date|time|day|email|phone|number|address|role|position|title|service|services|detail|details|amount|price|link|your|their|recipient|client|team|city|industry|x+)\b/i;
+const STAGE_VERB = /^\s*\*?\s*(sends?|sending|sent|calling|calls?|dials?|dialing|pauses?|laughs?|smiles?|waits?|typing|hangs? up|ringing|drops?)\b/i;
 
 // Whatever the model wrapped its words in, keep only what a person would actually say.
 // The model sometimes narrates its own reasoning ("I'm waiting for Krish to respond. Since they're
@@ -494,7 +518,7 @@ function narratesAbout(x: string, userName?: string | null) {
 }
 
 function cleanModelText(t: string, userName?: string | null) {
-  const cleaned = t.replace(TOOL_NAMES, " ").replace(STAGE_BRACKETS, " ").replace(/^\s*\[|\]\s*$/gm, "").replace(/[ \t]{2,}/g, " ").trim();
+  const cleaned = t.replace(TOOL_NAMES, " ").replace(STAGE_BRACKETS, keepFillIns).replace(/^\s*\[|\]\s*$/gm, "").replace(/[ \t]{2,}/g, " ").trim();
   return cleaned
     .split(/\n\s*\n/)
     .map((b) => b.split(/(?<=[.!?])\s+/).filter((x) => !META.test(x) && !EMPTY_PROMISE.test(x) && !narratesAbout(x, userName)).join(" "))
@@ -545,7 +569,7 @@ function capSentences(text: string, max: number) {
 
 function emitAgentText(ctx: Ctx, raw: string) {
   // House style: no em dashes, no stage directions like "(waiting for reply)".
-  const text = stopAtRepeat(raw.replace(TOOL_NAMES, " ").replace(STAGE_BRACKETS, " ")).replace(/\s*[—]\s*/g, ", ").replace(/\((on call|said on the call|texted in the chat|posted in the chat)\)\s*/gi, "").replace(/^\s*\*?\([^)]*\)\*?\s*$/gm, "").trim();
+  const text = stopAtRepeat(raw.replace(TOOL_NAMES, " ").replace(STAGE_BRACKETS, keepFillIns)).replace(/\s*[—]\s*/g, ", ").replace(/\((on call|said on the call|texted in the chat|posted in the chat)\)\s*/gi, "").replace(/^\s*\*?\([^)]*\)\*?\s*$/gm, "").trim();
   // On a call, three sentences is already a lot to listen to; trim anything longer.
   const spoken = ctx.channel === "voice" ? capSentences(text.replace(/\n+/g, " ").trim(), 3) : text;
   const bubbles = ctx.channel === "voice" ? [spoken] : text.split(/\n\s*\n/).map((b) => b.trim());
@@ -1043,4 +1067,8 @@ async function handleEventInner(s: Session, e: SessionEvent): Promise<TurnResult
       );
     }
   }
+}
+
+function keepFillIns(m: string, inner: string) {
+  return PLACEHOLDER.test(inner) && !STAGE_VERB.test(inner) ? m : " ";
 }
