@@ -66,13 +66,28 @@ export default function Home() {
   }, []);
 
   const actionsRef = useRef<(a: ClientAction[]) => void>(() => {});
+  // Replies arrive like texts from a person: one bubble at a time, with a typing pause between.
+  const revealRef = useRef<Promise<void>>(Promise.resolve());
+  const [revealing, setRevealing] = useState(false);
   const apply = useCallback(
     (r: TurnResult) => {
       if (idRef.current && r.session.id !== idRef.current) return; // stale reply from another session
       setSession(r.session);
-      upsert(r.newMessages);
-      actionsRef.current(r.actions);
       chanRef.current?.postMessage("sync");
+      revealRef.current = revealRef.current.then(async () => {
+        let shown = 0;
+        for (const m of r.newMessages) {
+          const paced = m.role === "agent" && m.channel === "text" && m.kind !== "contact_card";
+          if (paced && shown > 0) {
+            setRevealing(true);
+            await new Promise((res) => setTimeout(res, Math.min(1800, 500 + m.text.length * 15)));
+          }
+          upsert([m]);
+          if (paced) shown++;
+        }
+        setRevealing(false);
+        actionsRef.current(r.actions);
+      });
     },
     [upsert],
   );
@@ -120,7 +135,8 @@ export default function Home() {
   useEffect(() => {
     actionsRef.current = (actions) => {
       for (const a of actions) {
-        if (a.type === "start_call") call.setStatus("ringing");
+        // A real call takes a moment to come through after "calling you now."
+        if (a.type === "start_call") setTimeout(() => call.setStatus((st) => (st === "idle" ? "ringing" : st)), 3000);
         if (a.type === "speak") call.speak(a.text);
         if (a.type === "end_call") call.endAfterSpeaking();
         if (a.type === "patience") call.patience(a.ms);
@@ -306,7 +322,7 @@ export default function Home() {
               </div>
             );
           })}
-          {typing && (
+          {(typing || revealing) && (
             <div className="flex justify-start pt-2">
               <div className="bg-[#26272c] rounded-3xl px-4 py-3 flex gap-1" aria-label="typing">
                 {[0, 1, 2].map((i) => (
