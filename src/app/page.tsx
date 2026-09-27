@@ -50,6 +50,7 @@ export default function Home() {
   const retryRef = useRef<(() => void) | null>(null);
   const chanRef = useRef<BroadcastChannel | null>(null);
   const bottomRef = useRef<HTMLDivElement>(null);
+  const seenRef = useRef(false);
   const fileRef = useRef<HTMLInputElement>(null);
   const idRef = useRef<string | null>(null);
 
@@ -190,7 +191,12 @@ export default function Home() {
     })().catch(() => setError("couldn't reach the server"));
   }, [sendEvent, resync]);
 
-  useEffect(() => bottomRef.current?.scrollIntoView({ behavior: "smooth" }), [messages, typing]);
+  useEffect(() => {
+    // Braces matter: newer Chrome returns a Promise from scrollIntoView, which React rejects as a cleanup.
+    // First paint of a resumed thread jumps; new messages glide.
+    void bottomRef.current?.scrollIntoView({ behavior: seenRef.current ? "smooth" : "instant" });
+    if (messages.length) seenRef.current = true;
+  }, [messages, typing]);
 
   const send = async (text: string) => {
     if (!idRef.current || (!text.trim() && pending.length === 0)) return;
@@ -235,21 +241,37 @@ export default function Home() {
     if (!w) setError("your browser blocked the google window. allow popups for this page and tap the link again.");
   };
 
-  const agentName = session?.slots.agentName.value ?? "New assistant";
+  const named = !!session?.slots.agentName.value;
+  const agentName = session?.slots.agentName.value ?? "+1 (650) 555-0142";
   const onCall = call.status === "active" || call.status === "connecting";
 
   return (
     <main className="min-h-dvh bg-neutral-950 flex items-center justify-center p-0 sm:p-6">
       <div className="relative w-full sm:w-[390px] h-dvh sm:h-[800px] sm:rounded-[44px] sm:border-[10px] border-neutral-800 bg-[#16171b] text-neutral-100 overflow-hidden flex flex-col shadow-2xl">
+        {/* status bar (desktop frame only) */}
+        <div className="hidden sm:flex justify-between px-7 pt-2 text-[11px] text-neutral-300 bg-[#1e1f24]">
+          <Clock />
+          <span className="tracking-widest">▂▄▆ ▮</span>
+        </div>
         {/* header */}
-        <header className="flex items-center gap-3 px-4 pt-5 pb-3 border-b border-white/5">
-          <div className="w-10 h-10 rounded-full bg-amber-400 text-neutral-900 flex items-center justify-center font-semibold">
-            {agentName.charAt(0).toUpperCase()}
-          </div>
+        <header className="flex items-center gap-3 px-3 pt-3 pb-3 bg-[#1e1f24]">
+          <span className="text-neutral-300 text-xl px-1" aria-hidden>
+            ←
+          </span>
+          {named ? (
+            <div className="w-10 h-10 rounded-full bg-[#e8665a] text-white flex items-center justify-center font-semibold">{agentName.charAt(0).toUpperCase()}</div>
+          ) : (
+            <div className="w-10 h-10 rounded-full bg-[#f9c22e] text-neutral-900 flex items-center justify-center" aria-hidden>
+              <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor">
+                <circle cx="12" cy="8" r="4" />
+                <path d="M4 20c0-4 3.6-6 8-6s8 2 8 6z" />
+              </svg>
+            </div>
+          )}
           <div className="flex-1 min-w-0">
             <div className="font-medium truncate">{agentName}</div>
             <div className="text-xs text-neutral-400">
-              {onCall ? "on a call" : session?.phase === "graduated" ? "all set" : "Persona"}
+              {onCall ? "on a call" : typing ? "typing…" : session?.phase === "graduated" ? "all set" : "Persona · RCS"}
               {mock ? " · mock mode" : ""}
             </div>
           </div>
@@ -264,13 +286,30 @@ export default function Home() {
         </header>
 
         {/* thread */}
-        <div className="flex-1 overflow-y-auto px-3 py-4 space-y-2">
-          {messages.map((m) => (
-            <Bubble key={m.id} m={m} onConnect={connectGmail} connected={session?.slots.gmail.status === "filled"} />
-          ))}
+        <div className="flex-1 overflow-y-auto px-3 pb-4 bg-[#131316]">
+          {messages.map((m, i) => {
+            const prev = messages[i - 1];
+            const next = messages[i + 1];
+            const side = (x?: Msg) => (!x || x.kind === "event" ? null : x.role);
+            const showTime = !prev || m.ts - prev.ts > 10 * 60 * 1000;
+            const lastUserId = [...messages].reverse().find((x) => x.role === "user")?.id;
+            return (
+              <div key={m.id}>
+                {showTime && <div className="text-center text-[11px] text-neutral-500 pt-3 pb-2">{stamp(m.ts)}</div>}
+                <Bubble
+                  m={m}
+                  first={showTime || side(prev) !== m.role}
+                  last={side(next) !== m.role}
+                  reaction={typing && m.id === lastUserId ? "👀" : undefined}
+                  onConnect={connectGmail}
+                  connected={session?.slots.gmail.status === "filled"}
+                />
+              </div>
+            );
+          })}
           {typing && (
-            <div className="flex justify-start">
-              <div className="bg-[#23252b] rounded-2xl px-4 py-3 flex gap-1" aria-label="typing">
+            <div className="flex justify-start pt-2">
+              <div className="bg-[#26272c] rounded-3xl px-4 py-3 flex gap-1" aria-label="typing">
                 {[0, 1, 2].map((i) => (
                   <span key={i} className="w-1.5 h-1.5 rounded-full bg-neutral-400 animate-bounce" style={{ animationDelay: `${i * 120}ms` }} />
                 ))}
@@ -287,9 +326,9 @@ export default function Home() {
 
         {/* chips */}
         {chips.length > 0 && (
-          <div className="flex gap-2 overflow-x-auto px-3 pb-2">
+          <div className="flex gap-2 overflow-x-auto px-3 pb-1 pt-2 bg-[#131316]">
             {chips.map((c) => (
-              <button key={c} onClick={() => onChip(c)} className="shrink-0 text-sm rounded-full border border-white/20 px-3 py-1.5 hover:bg-white/10">
+              <button key={c} onClick={() => onChip(c)} className="shrink-0 text-sm rounded-full border border-[#8fa4d4]/40 text-[#c4d3f5] px-3.5 py-1.5 hover:bg-white/10">
                 {c}
               </button>
             ))}
@@ -301,7 +340,7 @@ export default function Home() {
           <div className="px-4 pb-1 text-xs text-neutral-400">{pending.map((p) => p.name).join(", ")} attached</div>
         )}
         <form
-          className="flex items-center gap-2 px-3 pb-5 pt-1"
+          className="flex items-center gap-2 px-3 pb-5 pt-2 bg-[#131316]"
           onSubmit={(e) => {
             e.preventDefault();
             void send(draft);
@@ -325,11 +364,19 @@ export default function Home() {
           <input
             value={draft}
             onChange={(e) => setDraft(e.target.value)}
-            placeholder="Text message"
-            className="flex-1 bg-[#23252b] rounded-full px-4 py-2.5 outline-none placeholder:text-neutral-500"
+            placeholder="RCS message"
+            aria-label="Message"
+            className="flex-1 min-w-0 bg-[#26272c] rounded-full px-4 py-2.5 outline-none placeholder:text-neutral-500"
           />
-          <button type="submit" className="rounded-full bg-indigo-500 hover:bg-indigo-400 px-4 py-2.5 text-sm font-medium">
-            Send
+          <button
+            type="submit"
+            aria-label="Send"
+            disabled={!draft.trim() && pending.length === 0}
+            className="w-10 h-10 shrink-0 rounded-full bg-[#5b4a8a] hover:bg-[#6c5a9e] disabled:opacity-40 flex items-center justify-center"
+          >
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor" aria-hidden>
+              <path d="M3 20.5 21 12 3 3.5l.01 6.6L15 12 3.01 13.9z" />
+            </svg>
           </button>
         </form>
 
@@ -360,46 +407,130 @@ export default function Home() {
   );
 }
 
-function Bubble({ m, onConnect, connected }: { m: Msg; onConnect: () => void; connected: boolean }) {
-  if (m.kind === "event") return <div className="text-center text-xs text-neutral-500 py-1">{m.text}</div>;
+function Clock() {
+  const [t, setT] = useState("");
+  useEffect(() => {
+    const tick = () => setT(new Date().toLocaleTimeString([], { hour: "numeric", minute: "2-digit" }));
+    tick();
+    const id = setInterval(tick, 30000);
+    return () => clearInterval(id);
+  }, []);
+  return <span>{t}</span>;
+}
+
+function stamp(ts: number) {
+  const d = new Date(ts);
+  const time = d.toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });
+  return d.toDateString() === new Date().toDateString() ? `Today • ${time}` : `${d.toLocaleDateString([], { weekday: "short" })} • ${time}`;
+}
+
+function CallLogRow({ text }: { text: string }) {
+  const ended = text.match(/^Call ended \((\d+)s\)/);
+  const secs = ended ? Number(ended[1]) : 0;
+  const label = ended ? `Voice call · ${Math.floor(secs / 60)}:${String(secs % 60).padStart(2, "0")}` : text === "Call declined" ? "Declined call" : "Voice call";
+  return (
+    <div className="flex justify-center py-2">
+      <div className="flex items-center gap-2 text-xs text-neutral-400 bg-white/5 rounded-full px-3 py-1.5">
+        <span className={text === "Call declined" ? "text-red-400" : "text-emerald-400"}>
+          <PhoneIcon size={14} down={text === "Call declined"} />
+        </span>
+        {label}
+      </div>
+    </div>
+  );
+}
+
+function Bubble({
+  m,
+  first,
+  last,
+  reaction,
+  onConnect,
+  connected,
+}: {
+  m: Msg;
+  first: boolean;
+  last: boolean;
+  reaction?: string;
+  onConnect: () => void;
+  connected: boolean;
+}) {
+  if (m.kind === "event") {
+    if (m.text === "Call started") return null; // the "Call ended" row carries the duration
+    if (/^Call (ended|declined)/.test(m.text)) return <CallLogRow text={m.text} />;
+    return <div className="text-center text-[11px] text-neutral-500 py-2">{m.text}</div>;
+  }
+  const gap = first ? "pt-2" : "pt-[3px]";
   if (m.kind === "gmail_link")
     return (
-      <div className="max-w-[80%] rounded-2xl overflow-hidden border border-white/10">
-        <div className="bg-gradient-to-br from-neutral-200 to-neutral-400 text-neutral-900 p-4">
-          <div className="text-xs font-medium opacity-70">Persona</div>
-          <div className="text-lg font-semibold leading-tight mt-1">One tap to a quieter inbox</div>
+      <div className={`${gap} flex justify-start`}>
+        <div className="w-[78%] rounded-3xl overflow-hidden bg-[#26272c]">
+          <div className="relative h-36 bg-gradient-to-b from-[#c9d3d6] via-[#dfe3df] to-[#b7bfb4] text-[#1f2420] px-4 pt-3">
+            <div className="text-[11px] font-semibold tracking-wide opacity-70">Persona</div>
+            <div className="font-serif text-xl leading-snug mt-3">One tap to a quieter life</div>
+            <div className="absolute bottom-3 left-4 flex items-center gap-1.5 bg-white rounded-full px-3 py-1 text-xs font-medium shadow-sm">
+              <GoogleG /> Connect with Google
+            </div>
+          </div>
+          <button onClick={onConnect} disabled={connected} className="w-full text-left bg-[#23200a] px-4 py-3 disabled:cursor-default hover:brightness-125">
+            <div className="text-[#f2efa0] text-sm font-medium">{connected ? "Google connected ✓" : "Connect your Google account"}</div>
+            <div className="text-[11px] text-neutral-400 mt-0.5">app.yourpersona.com</div>
+          </button>
         </div>
-        <button onClick={onConnect} disabled={connected} className="w-full text-left bg-[#26250f] text-yellow-200 px-4 py-3 disabled:opacity-60">
-          {connected ? "Google connected ✓" : "Connect your Google account →"}
-        </button>
       </div>
     );
   if (m.kind === "contact_card")
     return (
-      <div className="flex items-center gap-3 bg-[#23252b] rounded-2xl px-3 py-2 w-fit">
-        <div className="w-9 h-9 rounded-full bg-rose-500 flex items-center justify-center font-semibold">{m.text.charAt(0).toUpperCase()}</div>
-        <div>
-          <div className="text-sm">{m.text}</div>
-          <div className="text-xs text-neutral-400">contact card · updates if you rename me</div>
+      <div className={`${gap} flex justify-start`}>
+        <div className="flex items-center gap-3 bg-[#26272c] rounded-3xl pl-2 pr-5 py-2">
+          <div className="w-10 h-10 rounded-full bg-[#e8665a] flex items-center justify-center font-semibold text-white">{m.text.charAt(0).toUpperCase()}</div>
+          <div>
+            <div className="text-sm font-medium">{m.text}</div>
+            <div className="text-[11px] text-neutral-400">Contact card · stays in sync if you rename me</div>
+          </div>
         </div>
       </div>
     );
   const mine = m.role === "user";
+  // Google Messages style grouping: inner corners flatten inside a run of bubbles.
+  const corners = mine
+    ? `rounded-3xl ${first ? "" : "rounded-tr-md"} ${last ? "" : "rounded-br-md"}`
+    : `rounded-3xl ${first ? "" : "rounded-tl-md"} ${last ? "" : "rounded-bl-md"}`;
   return (
-    <div className={`flex ${mine ? "justify-end" : "justify-start"}`}>
-      <div className={`max-w-[80%] rounded-2xl px-3.5 py-2 whitespace-pre-wrap ${mine ? "bg-[#3b4a6b]" : "bg-[#23252b]"}`}>
-        {m.channel === "voice" && <span className="text-[10px] uppercase tracking-wide text-neutral-400 block">on call</span>}
+    <div className={`${gap} flex ${mine ? "justify-end" : "justify-start"}`}>
+      <div className={`relative max-w-[78%] px-4 py-2.5 whitespace-pre-wrap text-[15px] leading-snug ${corners} ${mine ? "bg-[#3b4a6b]" : "bg-[#26272c]"}`}>
+        {m.channel === "voice" && (
+          <span className="flex items-center gap-1 text-[10px] uppercase tracking-wide text-neutral-400 mb-0.5">
+            <PhoneIcon size={10} /> on call
+          </span>
+        )}
         {m.attachments?.map((a, i) =>
           a.dataUrl ? (
             // eslint-disable-next-line @next/next/no-img-element
-            <img key={i} src={a.dataUrl} alt={a.name} className="rounded-lg mb-1 max-h-48" />
+            <img key={i} src={a.dataUrl} alt={a.name} className="rounded-xl mb-1 max-h-48" />
           ) : (
             <div key={i} className="text-xs text-neutral-300 mb-1">📎 {a.name}</div>
           ),
         )}
         {m.text}
+        {reaction && (
+          <span className="absolute -bottom-3 right-2 text-xs bg-[#1e1f24] border border-[#131316] rounded-full w-6 h-6 flex items-center justify-center" aria-label="reaction">
+            {reaction}
+          </span>
+        )}
       </div>
     </div>
+  );
+}
+
+function GoogleG() {
+  return (
+    <svg width="12" height="12" viewBox="0 0 48 48" aria-hidden>
+      <path fill="#EA4335" d="M24 9.5c3.5 0 6.6 1.2 9.1 3.6l6.8-6.8C35.8 2.4 30.3 0 24 0 14.6 0 6.6 5.4 2.7 13.3l7.9 6.1C12.5 13.6 17.8 9.5 24 9.5z" />
+      <path fill="#4285F4" d="M46.1 24.5c0-1.6-.1-3.1-.4-4.5H24v9h12.4c-.5 2.9-2.2 5.3-4.6 6.9l7.4 5.7c4.3-4 6.9-9.9 6.9-17.1z" />
+      <path fill="#FBBC05" d="M10.6 28.6c-.5-1.4-.8-3-.8-4.6s.3-3.2.8-4.6l-7.9-6.1C1 16.6 0 20.2 0 24s1 7.4 2.7 10.7l7.9-6.1z" />
+      <path fill="#34A853" d="M24 48c6.5 0 11.9-2.1 15.9-5.8l-7.4-5.7c-2.1 1.4-4.8 2.2-8.5 2.2-6.2 0-11.5-4.1-13.4-9.9l-7.9 6.1C6.6 42.6 14.6 48 24 48z" />
+    </svg>
   );
 }
 
@@ -454,9 +585,9 @@ function CallScreen(p: {
   );
 }
 
-function PhoneIcon({ down }: { down?: boolean }) {
+function PhoneIcon({ down, size = 22 }: { down?: boolean; size?: number }) {
   return (
-    <svg width="22" height="22" viewBox="0 0 24 24" fill="currentColor" style={down ? { transform: "rotate(135deg)" } : undefined}>
+    <svg width={size} height={size} viewBox="0 0 24 24" fill="currentColor" style={down ? { transform: "rotate(135deg)" } : undefined}>
       <path d="M6.6 10.8a15.1 15.1 0 0 0 6.6 6.6l2.2-2.2c.3-.3.7-.4 1-.2 1.1.4 2.3.6 3.6.6.6 0 1 .4 1 1V20c0 .6-.4 1-1 1A17 17 0 0 1 3 4c0-.6.4-1 1-1h3.5c.6 0 1 .4 1 1 0 1.3.2 2.5.6 3.6.1.3 0 .7-.2 1l-2.3 2.2z" />
     </svg>
   );
