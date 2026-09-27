@@ -90,6 +90,10 @@ async function main() {
   check("\"lol\" is not a name for the assistant", filler.slots.agentName.status === "missing");
   await handleUserMessage(filler, "text", "can you write an email for me");
   const cmd = await handleUserMessage(filler, "text", "send");
+  const terms = newSession();
+  await handleEvent(terms, { type: "open" });
+  const tr = await handleUserMessage(terms, "text", "can you text me the terms link again?");
+  check("terms link is the legal page, not gmail", tr.newMessages.some((m) => m.kind === "link_preview" && m.text.includes("legal")) && !tr.newMessages.some((m) => m.kind === "gmail_link"), said(tr));
   const now = nowLine("America/New_York", new Date("2026-09-28T02:30:00Z"));
   check("agent knows the real date, in their zone", now.includes("September 27, 2026") && now.includes("America/New_York") && now.includes("September 28, 2026"), now);
   const leak = cleanModelText('The system is being strict about the most recent message context. The message "got it, krish." is already sent.');

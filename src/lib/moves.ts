@@ -140,7 +140,7 @@ export function chooseMove(s: Session, channel: Channel, opts: { callFirst: bool
   // The user leads. When they say what they want ("i want to use you for email"), go there now:
   // for email that's the gmail offer (the setup step that unlocks it), otherwise just help. No more digging.
   if (USER_LEADS.test(text) || ASKS_FOR_HELP.test(text)) {
-    if (s.slots.gmail.status === "missing" && !used(s, "ask-gmail") && /\b(e-?mails?|inbox|gmail|mail)\b/i.test(text)) return MOVES.askGmail;
+    if (s.slots.gmail.status === "missing" && !used(s, "ask-gmail") && !linkOut(s) && /\b(e-?mails?|inbox|gmail|mail)\b/i.test(text)) return MOVES.askGmail;
     return MOVES.follow;
   }
   // They called us: listen and follow their lead.
@@ -150,7 +150,7 @@ export function chooseMove(s: Session, channel: Channel, opts: { callFirst: bool
   // This is onboarding for a service they already signed up for, not customer discovery (journal 09):
   // once we know what's bothering them, one mom test style question at most, then the gmail offer,
   // on the call, while they're still talking about it. Asking to help ("anything you can offer?") skips the question.
-  if (channel === "voice" && need.status === "filled" && s.slots.gmail.status === "missing" && !used(s, "ask-gmail")) {
+  if (channel === "voice" && need.status === "filled" && s.slots.gmail.status === "missing" && !used(s, "ask-gmail") && !linkOut(s)) {
     // Any question it already asked on this call counts (the move label doesn't matter).
     const start = s.call.startedAt ?? 0;
     const questionsAsked = Math.max(
@@ -192,3 +192,10 @@ const USER_LEADS = /\b(i'?m (interested in|looking for|trying to)|i (want|need|w
 
 // Turns that only helped, with no step toward setup.
 const PURE_HELP = new Set(["follow", "help", "answer", "give-first"]);
+
+// The connect link is already in their texts (sent, not failed): don't ask again.
+function linkOut(s: Session) {
+  const lastLink = s.transcript.map((m) => m.kind).lastIndexOf("gmail_link");
+  const lastFail = s.transcript.findLastIndex((m) => m.kind === "event" && /^Gmail connection/.test(m.text));
+  return lastLink >= 0 && lastLink > lastFail;
+}

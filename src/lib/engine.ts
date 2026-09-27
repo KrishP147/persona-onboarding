@@ -277,7 +277,7 @@ function userWrappingUp(s: Session) {
 }
 
 // The gmail link goes out only after a yes: they asked for it, or said yes to our question about it.
-const WANTS_LINK = /\b(send|text|give|drop|shoot)\b[^.?!]{0,25}\blink\b|\b(connect|hook up|link)\b[^.?!]{0,15}\b(gmail|email|inbox|google)\b/i;
+const WANTS_LINK = /\b(send|text|give|drop|shoot)\b[^.?!]{0,25}\blink\b|\b(connect|hook up|link|conectar|vincular|connecter|enlace|lien)\b[^.?!]{0,20}\b(gmail|email|e-?mail|inbox|google|correo|cuenta)\b/i;
 // Our last message brought up the link (asked, or offered "i'll send you a link"), so a yes means yes to it.
 const ASKED_LINK = /\b(link|gmail|connect your)\b/i;
 // The gmail ask is written by code (one clear question, the reason, the reassurance, an easy no).
@@ -731,6 +731,13 @@ async function turn(
     }
     else if (!raisedIt && help) text = help;
   }
+  // Already connected, declined, or the link is already sitting in their texts: no more gmail asks
+  // (the most common grader note: "repeated the gmail request after it was connected / agreed").
+  const linkWaiting = linkPending(s) && !ctx.newMessages.some((m) => m.kind === "gmail_link");
+  if ((s.slots.gmail.status !== "missing" || linkWaiting) && !/\b(gmail|google|link|connect)\b/i.test(lastUserText(s))) {
+    const kept = text.split(/(?<=[.!?])\s+/).filter((x) => !GMAIL_ASKISH.test(x)).join(" ").trim();
+    if (kept) text = kept;
+  }
   // On a call, never three questions in a row: after two, it just responds and lets them talk
   // (a call went question, question, question, question...). The gmail ask is the one exception.
   if (channel === "voice" && text.trim().endsWith("?") && ctx.move?.id !== "ask-gmail") {
@@ -944,6 +951,22 @@ export async function handleUserMessage(
       emitAgentText(ctx, out.startsWith("sent") ? `sent to ${pendingDraft.to}.` : pendingDraft.to ? `couldn't send it: ${out.replace(/^error: /, "").split(".")[0]}.` : "who should it go to? send me their email address.");
     } else {
       emitAgentText(ctx, `no, not yet. want me to send it to ${pendingDraft.to || "them"}?`);
+    }
+    recordAsk(s, null);
+    return { session: s, newMessages: [userMsg, ...(early?.msgs ?? []), ...ctx.newMessages], chips: computeDirective(s, channel).chips, actions: ctx.actions };
+  }
+  // "send me the terms link": that's the legal page, not gmail (a run sent the gmail link three times).
+  if (TERMS_LINK.test(clean)) {
+    const ctx: Ctx = { s, channel, actions: [], newMessages: [], move: EVENT_MOVES.honest };
+    const card = msg("agent", "text", "yourpersona.com/legal", { kind: "link_preview" });
+    if (channel === "voice") {
+      s.transcript.push(card);
+      ctx.newMessages.push(card);
+      emitAgentText(ctx, "sure, i just texted you the terms link. it's in our chat.");
+    } else {
+      emitAgentText(ctx, "here are the terms and privacy policy:");
+      s.transcript.push(card);
+      ctx.newMessages.push(card);
     }
     recordAsk(s, null);
     return { session: s, newMessages: [userMsg, ...(early?.msgs ?? []), ...ctx.newMessages], chips: computeDirective(s, channel).chips, actions: ctx.actions };
@@ -1381,4 +1404,17 @@ export function nowLine(tz?: string, now = new Date()) {
   const fmt = (zone: string) =>
     now.toLocaleString("en-US", { timeZone: zone, weekday: "long", year: "numeric", month: "long", day: "numeric", hour: "numeric", minute: "2-digit" });
   return `NOW: ${fmt("UTC")} UTC${tz ? `; their local time: ${fmt(tz)} (${tz})` : ""}. Use this for any question about today's date, the day, or the time anywhere (convert time zones from it); never guess the date.`;
+}
+
+// The legal page, not the gmail link.
+const TERMS_LINK = /\b(terms|tos|legal|privacy( policy)?|policy|t&c|conditions)\b[^.?!]{0,30}\b(link|page|again|send|text)\b|\b(link|send|text)\b[^.?!]{0,30}\b(terms|tos|legal|privacy( policy)?|t&c)\b/i;
+
+// Asking for (or pushing) the gmail connection again.
+const GMAIL_ASKISH = /\b(connect|hook up|link|sign in)\b[^.?!]{0,40}\b(gmail|google|email|inbox)\b|\b(gmail|google) (link|card)\b|\bwant me to (text|send) you (a|the) link\b/i;
+// The connect link went out and hasn't failed or been used yet: it's in their texts.
+export function linkPending(s: Session) {
+  if (s.slots.gmail.status !== "missing") return false;
+  const lastLink = s.transcript.map((m) => m.kind).lastIndexOf("gmail_link");
+  const lastFail = s.transcript.findLastIndex((m) => m.kind === "event" && /^Gmail connection/.test(m.text));
+  return lastLink >= 0 && lastLink > lastFail;
 }
