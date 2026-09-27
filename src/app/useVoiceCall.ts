@@ -110,9 +110,11 @@ const words = (t: string) => t.toLowerCase().replace(/[^a-z0-9' ]/g, " ").split(
 function looksLikeEcho(heard: string, speaking: string) {
   const h = words(heard);
   if (h.length === 0) return true;
+  if (!speaking) return false;
   const said = new Set(words(speaking));
   const overlap = h.filter((w) => said.has(w)).length / h.length;
-  return overlap >= 0.6;
+  // Short fragments ("okay", "take your") are echo if every word was just said.
+  return h.length <= 3 ? overlap === 1 : overlap >= 0.6;
 }
 
 export type CallStatus = "idle" | "ringing" | "connecting" | "active" | "ended";
@@ -213,6 +215,8 @@ export function useVoiceCall(opts: {
   const activeRef = useRef(false);
   const waitingRef = useRef(false); // server is thinking
   const speakingTextRef = useRef(""); // what the agent is saying right now
+  // What it said last and when it stopped: transcripts of its own voice arrive a beat late on speakers.
+  const lastSpokenRef = useRef<{ text: string; endedAt: number }>({ text: "", endedAt: 0 });
   const queueRef = useRef(0); // utterances queued or playing
   const bufferRef = useRef(""); // finalized user speech not yet sent
   const interruptedRef = useRef(false);
@@ -359,6 +363,7 @@ export function useVoiceCall(opts: {
       const done = () => {
         queueRef.current = Math.max(0, queueRef.current - 1);
         if (queueRef.current > 0) return;
+        lastSpokenRef.current = { text: speakingTextRef.current, endedAt: Date.now() };
         speakingTextRef.current = "";
         setSpeaking(false);
         if (pendingEndRef.current) {
@@ -449,6 +454,9 @@ export function useVoiceCall(opts: {
       if (finalEndRef.current && pendingEndRef.current) return;
       // While the agent talks, ignore its own voice coming back through the mic.
       if (queueRef.current > 0 && looksLikeEcho(latest, speakingTextRef.current)) return;
+      // ...and for a moment after it stops (speech-to-text lags), its own words still aren't them.
+      const recent = lastSpokenRef.current;
+      if (queueRef.current === 0 && Date.now() - recent.endedAt < 2500 && looksLikeEcho(latest, recent.text)) return;
       // Real speech over the agent: stop talking and listen (barge-in).
       // Two real words, or one clear "wait"/"stop", stops it (a single stray word from noise doesn't).
       const heardWords = words(latest);
@@ -517,6 +525,7 @@ export function useVoiceCall(opts: {
     const onSpeechStart = () => {
       const a = audioRef.current;
       if (!a || queueRef.current === 0) return;
+      // Speech detected while it's talking is often its own voice; ducking is cheap, stopping waits for words.
       a.el.volume = 0.3;
       setTimeout(() => {
         if (audioRef.current?.el === a.el) a.el.volume = 1; // just a noise: back to normal
@@ -542,7 +551,7 @@ export function useVoiceCall(opts: {
     setStatus("active");
     setListening(true);
     return true;
-  }, [flushTurn, startRec, teardown, hangUp]);
+  }, [flushTurn, startRec, teardown]);
 
   // Greeting arrived (or failed): release the "waiting" hold.
   const greeted = useCallback(() => {
