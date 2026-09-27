@@ -206,7 +206,7 @@ async function startDeepgram(sessionId: string, stream: MediaStream, onHeard: He
 }
 
 export function useVoiceCall(opts: {
-  onUtterance: (text: string, interrupted: boolean) => Promise<void>;
+  onUtterance: (text: string, interrupted: boolean, heardBefore?: string) => Promise<void>;
   onSilence: () => void;
   onEnded: (reason: "user_hangup" | "agent_ended" | "error") => void;
   onMicDenied: () => void;
@@ -236,6 +236,7 @@ export function useVoiceCall(opts: {
   const queueRef = useRef(0); // utterances queued or playing
   const bufferRef = useRef(""); // finalized user speech not yet sent
   const interruptedRef = useRef(false);
+  const cutHeardRef = useRef(""); // what they actually heard of the line they cut off
   const pendingEndRef = useRef(false);
   const usingDeepgramRef = useRef(false);
   const finalEndRef = useRef(false); // this hangup can't be talked out of (e.g. we can't reach the model)
@@ -442,6 +443,8 @@ export function useVoiceCall(opts: {
     if (text) setHeard(text); // keep their full sentence on screen until they speak again
     if (!text || !activeRef.current) return;
     const interrupted = interruptedRef.current;
+    const heardBefore = interrupted ? cutHeardRef.current : undefined;
+    cutHeardRef.current = "";
     interruptedRef.current = false;
     waitingRef.current = true;
     clear(silenceTimer);
@@ -457,7 +460,7 @@ export function useVoiceCall(opts: {
         if (stillWaiting()) void speak(pickFiller(LONG_FILLERS, lastFillerRef), true);
       }, 2000);
     }, 1100);
-    optsRef.current.onUtterance(text, interrupted).finally(() => {
+    optsRef.current.onUtterance(text, interrupted, heardBefore).finally(() => {
       waitingRef.current = false;
       clear(fillerTimer);
       if (queueRef.current === 0) armSilence();
@@ -527,6 +530,9 @@ export function useVoiceCall(opts: {
       }
       // Real speech over the agent: stop talking and listen (barge-in).
       if (queueRef.current > 0) {
+        // Only the sentences that started playing were heard; the agent shouldn't assume the rest.
+        const cut = speakingTextRef.current;
+        cutHeardRef.current = playbackRef.current.filter((p) => cut.includes(p.text)).map((p) => p.text).join(" ");
         stopAudio();
         queueRef.current = 0;
         pendingEndRef.current = false;

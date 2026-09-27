@@ -813,8 +813,15 @@ export async function handleUserMessage(
   attachments?: Attachment[],
   interrupted?: boolean,
   clientId?: string,
+  heardBefore?: string,
 ): Promise<TurnResult> {
   const clean = text.slice(0, 4000);
+  // They cut the agent off: its history should hold only what they actually heard, so it never
+  // assumes they got the rest ("as i said...").
+  if (interrupted && heardBefore !== undefined && channel === "voice") {
+    const last = [...s.transcript].reverse().find((m) => m.role === "agent" && m.channel === "voice" && !m.kind);
+    if (last && heardBefore.trim().length < last.text.length) last.text = `${heardBefore.trim()}${heardBefore.trim() ? " " : ""}[they cut in here; the rest wasn't heard]`.trim();
+  }
   // The client shows the message instantly under its own id; reuse it so there's no duplicate.
   const userMsg = msg("user", channel, clean, { ...(attachments?.length ? { attachments } : {}), ...(clientId ? { id: clientId } : {}) });
   s.transcript.push(userMsg);

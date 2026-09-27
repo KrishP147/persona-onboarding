@@ -16,3 +16,11 @@ export const AURA_VOICES: Record<VoiceStyle, string> = {
   masculine: "aura-2-apollo-en", // casual, comfortable
   neutral: "aura-2-andromeda-en", // casual, expressive
 };
+
+// ElevenLabs (used first when ELEVENLABS_API_KEY is set): premade voices, overridable by env.
+export const ELEVEN_MODEL = process.env.ELEVENLABS_MODEL ?? "eleven_flash_v2_5";
+export const ELEVEN_VOICES: Record<VoiceStyle, string> = {
+  feminine: process.env.ELEVENLABS_VOICE_FEMININE ?? "EXAVITQu4vr4xnSDxMaL", // sarah
+  masculine: process.env.ELEVENLABS_VOICE_MASCULINE ?? "TX3LPaxmHKxFdv7VOQHJ", // liam
+  neutral: process.env.ELEVENLABS_VOICE_NEUTRAL ?? "SAz9YHcvj6GT2YYXdXww", // river
+};

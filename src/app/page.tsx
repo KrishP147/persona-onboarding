@@ -173,11 +173,11 @@ export default function Home() {
   const call = useVoiceCall({
     voice: session?.voice ?? "neutral",
     sessionId: session?.id ?? null,
-    onUtterance: async (text, interrupted) => {
+    onUtterance: async (text, interrupted, heardBefore) => {
       if (!idRef.current) return;
       const turn = ++voiceTurnRef.current;
       // Speaking again before the reply lands means they moved on; say so to the server.
-      const body = { sessionId: idRef.current, channel: "voice", text, interrupted: interrupted || turn > 1 && busyRef.current > 0 };
+      const body = { sessionId: idRef.current, channel: "voice", text, interrupted: interrupted || turn > 1 && busyRef.current > 0, ...(interrupted && heardBefore !== undefined ? { heardBefore } : {}) };
       busyRef.current++;
       try {
         const r = await post<TurnResult>("/api/chat", body).catch(async () => {
