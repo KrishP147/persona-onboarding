@@ -579,7 +579,7 @@ const STAGE_VERB = /^\s*\*?\s*(sends?|sending|sent|calling|calls?|dials?|dialing
 // "send it" / "email them" ... and a reply that says it went out.
 const SEND_REQUEST = /\b(send|sned|sewnd|email|forward|reply to)\b/i;
 const CLAIMS_SENT = /^\s*(sent|done|all set)\b|\b(i('?ve| have)? (just )?sent|it'?s (been )?sent|email (is )?sent|sending (it|that|now)|on its way|(ready|good) to go|went out|it'?s out)\b/i;
-const EMPTY_PROMISE = /\b(give me (a|one) (sec|second|moment|minute)|one sec(ond)?|let me (pull|look|check|grab|find)|pulling (those|that|it|them) up|checking (now|on that))\b/i;
+const EMPTY_PROMISE = /\b(give me (a|one) (sec|second|moment|minute)|one sec(ond)?|i'?m (looking at|reading|going through) (it|this|that|them)( now)?|let me (pull|look|check|grab|find)|pulling (those|that|it|them) up|checking (now|on that))\b/i;
 const META = /\b(i'?m waiting for|i should (stay|wait|remain|let|keep)|since (they|he|she|the user)|the user|i'?ll (stay quiet|wait (silently|quietly))|let them (check|speak|respond)|stay quiet|respond when ready|they haven'?t said)\b/i;
 
 // Talking ABOUT them instead of TO them ("I'll text Paul a quick message... letting him know...").
@@ -726,6 +726,15 @@ async function turn(
     }
     else if (!raisedIt && help) text = help;
   }
+  // On a call, never three questions in a row: after two, it just responds and lets them talk
+  // (a call went question, question, question, question...). The gmail ask is the one exception.
+  if (channel === "voice" && text.trim().endsWith("?") && ctx.move?.id !== "ask-gmail") {
+    const lastTwo = s.transcript.filter((m) => m.role === "agent" && m.channel === "voice" && m.move?.id !== "silence").slice(-2);
+    if (lastTwo.length === 2 && lastTwo.every((m) => m.text.trim().endsWith("?"))) {
+      const kept = text.split(/(?<=[.!?])\s+/).filter((x) => !x.trim().endsWith("?")).join(" ").trim();
+      if (kept) text = kept;
+    }
+  }
   // Already named: never ask "what should i go by?" again (it did, on a call, right after being named).
   if (s.slots.agentName.status === "filled" && NAME_ASK.test(text)) {
     const kept = text.split(/(?<=[.!?])\s+/).filter((x) => !NAME_ASK.test(x)).join(" ").trim();
@@ -756,7 +765,8 @@ async function turn(
     const posted = msg("agent", "text", draft);
     ctx.newMessages.push(posted);
     s.transcript.push(posted);
-    text = "okay, i put it in our chat. take a look and tell me what to change.";
+    const isDraft = /---|\bsubject:|\bdear\b|\bhi \[|\[(landlord|name|recipient)[^\]]*\]/i.test(draft);
+    text = isDraft ? "okay, i put the draft in our chat. take a look and tell me what to change." : "that's a lot to say out loud, so i put it in our chat.";
   }
   // On a call, if the link just went to their texts, say so (the written ask alone isn't enough).
   if (channel === "voice" && ctx.newMessages.some((m) => m.kind === "gmail_link") && !/\b(text|link)\b/i.test(text)) {
@@ -843,7 +853,8 @@ export async function handleUserMessage(
       emitAgentText(ctx, "sure, take your time.");
       return { session: s, newMessages: [userMsg, ...ctx.newMessages], chips: computeDirective(s, channel).chips, actions: ctx.actions };
     }
-    s.call.holding = false;
+    // "i'll let you know once it's connected": they're off doing something, so wait like after "hold on".
+    s.call.holding = WAITING_ON_THEM.test(clean);
     // They said bye: say it back (always, and audibly), then hang up. No model, nothing to go wrong.
     if (/\b(end (the |this )?call|hang up|you can go|let'?s end|bye|goodbye|gotta go|got to go|talk (to you )?(soon|later)|see (you|ya)|that'?s all|that'?s it)\b/i.test(clean) && !/\b(don'?t|do not|not)\b[^.!?]{0,10}\b(hang up|end)/i.test(clean) && clean.split(/\s+/).length <= 12 && s.call.active) {
       const name = s.slots.userName.value;
@@ -985,6 +996,7 @@ export async function handleUserMessage(
   }
   if (early) r.newMessages.unshift(...early.msgs);
   r.newMessages.unshift(userMsg);
+  if (channel === "voice" && s.call.holding && s.call.active) r.actions.push({ type: "patience", ms: 90000 });
   // Image bytes were for this one reply; storing them would bloat every later read and write.
   if (userMsg.attachments?.some((a) => a.dataUrl)) {
     const i = s.transcript.indexOf(userMsg);
@@ -1076,6 +1088,8 @@ async function handleEventInner(s: Session, e: SessionEvent): Promise<TurnResult
               ? "what's been taking up most of your time lately?"
               : "how's it going?";
         const line = e.byUser ? `hey${name ? ` ${name}` : ""}! ${next}` : `hey${name ? ` ${name}` : ""}, it's ${who}! ${next}`;
+        // Right after hello, a quick "can you hear me?" (10s) catches a dead mic; after that, quiet is fine.
+        ctx.actions.push({ type: "patience", ms: 10000 });
         emitAgentText(ctx, line);
         recordAsk(s, !e.byUser && s.slots.userName.status === "missing" ? "userName" : !e.byUser && s.slots.helpNeed.status === "missing" ? "helpNeed" : null, true);
         return { session: s, newMessages: ctx.newMessages, chips: computeDirective(s, "voice").chips, actions: ctx.actions };
@@ -1120,31 +1134,17 @@ async function handleEventInner(s: Session, e: SessionEvent): Promise<TurnResult
     case "silence": {
       if (!s.call.active) return idle();
       s.call.silenceStrikes += 1;
+      const name = s.slots.userName.value;
+      // Quiet is fine. Only after a real while does it check in, once; if it's still quiet after
+      // that, it says it's hanging up and does (never waits forever, never hangs up without warning).
       if (s.call.silenceStrikes >= MAX_SILENCE_STRIKES) {
-        // Written by code: a kind, certain goodbye, then hang up.
-        const name = s.slots.userName.value;
         const ctx: Ctx = { s, channel: "voice", actions: [], newMessages: [], move: EVENT_MOVES.silence };
-        emitAgentText(ctx, `seems like now isn't a great time, totally fine. i'll text you instead. talk soon${name ? `, ${name}` : ""}!`);
+        emitAgentText(ctx, `i haven't heard anything for a bit, so i'm going to hang up now. i'll text you, and you can call me back anytime. bye${name ? ` ${name}` : ""}!`);
         ctx.actions.push({ type: "end_call" });
         return { session: s, newMessages: ctx.newMessages, chips: computeDirective(s, "voice").chips, actions: ctx.actions };
       }
-      // Written by code: instant, and matched to what came before. "take your time" only makes
-      // sense after a question; after a statement, silence more likely means the line dropped.
-      // Quiet check-ins that sound like someone who's just there, not a prompt waiting for input.
-      // Each one buys a longer silence before the next (10s, then 20s, then 30s), and after
-      // "hold on" the wait is much longer.
-      const lastSaid = [...s.transcript].reverse().find((m) => m.role === "agent" && m.channel === "voice")?.text.trim() ?? "";
-      const line =
-        s.call.silenceStrikes === 1 && s.call.holding
-          ? "i'm still here whenever you're ready."
-          : s.call.silenceStrikes === 1
-          ? !heardThemThisCall(s)
-            ? "hello? can you hear me okay?"
-            : lastSaid.endsWith("?")
-              ? "no rush."
-              : "mm, i'm here."
-          : "no pressure at all. if now's not a good time, i can just text you.";
-      const ctx: Ctx = { s, channel: "voice", actions: [{ type: "patience", ms: s.call.holding ? 60000 : s.call.silenceStrikes === 1 ? 20000 : 30000 }], newMessages: [], move: EVENT_MOVES.silence };
+      const line = !heardThemThisCall(s) ? "hello? can you hear me okay?" : s.call.holding ? "still there? no rush." : "you still with me?";
+      const ctx: Ctx = { s, channel: "voice", actions: [{ type: "patience", ms: s.call.holding ? 30000 : 20000 }], newMessages: [], move: EVENT_MOVES.silence };
       emitAgentText(ctx, line);
       return { session: s, newMessages: ctx.newMessages, chips: computeDirective(s, "voice").chips, actions: ctx.actions };
     }
@@ -1341,3 +1341,6 @@ async function nameFirst(s: Session, channel: Channel, text: string, heard: Retu
 // A bare "send it" (not "send me the link"), and "did you send it?".
 const SEND_CMD = /^\s*(ok(ay)?,? |yes,? |yeah,? |yep,? )?(please )?(send|send it|send that|send the (email|draft|message)|send it now|go ahead and send( it)?|ship it)( now| please)?[.! ]*$/i;
 const SENT_Q = /\b(did (u|you) (send|sent)|was it sent|is it sent|has it (been )?sent|did it (go|send))\b/i;
+
+// They're going off to do something and will come back ("i'll let you know once it's connected").
+const WAITING_ON_THEM = /\b(i'?ll (let you know|check (back )?(in )?with you|get back to you|tell you|be right back)|once (it'?s|that'?s|i'?m|i've) (connected|done|set up|signed in|finished)|as soon as (it'?s|that'?s|i'?m) (connected|done|set up))\b/i;

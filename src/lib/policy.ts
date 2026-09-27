@@ -7,7 +7,8 @@ import { MOOD_GUIDANCE, readMood } from "./mood";
 export const MAX_ASKS_PER_SLOT = 2; // after this, defer and bring it up later only when relevant
 export const MAX_CONSECUTIVE_ASKS = 1; // after an ask, the next turn just responds like a person
 export const MAX_CALL_OFFERS = 2;
-export const MAX_SILENCE_STRIKES = 3;
+// One check-in after a real while, then a spoken heads-up and a hangup (never waits forever).
+export const MAX_SILENCE_STRIKES = 2;
 
 const SLOT_NAME: Record<SlotKey, string> = {
   agentName: "agentName (YOUR name, the assistant's)",
@@ -162,9 +163,15 @@ export function recordAsk(s: Session, askedSlot: SlotKey | null, isQuestion = as
 }
 
 export function directiveText(s: Session, d: Directive, channel: Channel, hasMove = false): string {
+  // They called us: the old need stays out of view until they bring it up themselves on this call,
+  // so it can't open with "i've got you down for..." (it did).
+  const callStart = s.call.startedAt ?? 0;
+  const raisedNeed = s.transcript.some((m) => m.role === "user" && m.ts >= callStart && sharesWords(m.text, s.slots.helpNeed.value ?? ""));
+  const hideNeed = channel === "voice" && s.call.byUser && !raisedNeed;
   const slotLines = (Object.keys(s.slots) as SlotKey[])
     .map((k) => {
       const sl = s.slots[k];
+      if (k === "helpNeed" && hideNeed) return `- ${SLOT_NAME[k]}: (don't bring up; follow what they bring to this call)`;
       return `- ${SLOT_NAME[k]}: ${sl.status}${sl.value ? ` = "${sl.value}"` : ""} (asked ${sl.asks}x)`;
     })
     .join("\n");
@@ -191,4 +198,11 @@ export function directiveText(s: Session, d: Directive, channel: Channel, hasMov
   ]
     .filter(Boolean)
     .join("\n");
+}
+
+// Do two texts share a meaningful word ("recruiter", "inbox")?
+function sharesWords(a: string, b: string) {
+  const words = (x: string) => new Set(x.toLowerCase().match(/[a-z]{5,}/g) ?? []);
+  const wb = words(b);
+  return [...words(a)].some((w) => wb.has(w));
 }

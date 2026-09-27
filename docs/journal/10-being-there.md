@@ -15,11 +15,12 @@ i had a research pass done on silence, fillers, listening, and humanizing voice 
 ## silence
 
 - **what the research says:** a normal gap between turns is about 200 ms (stivers et al., *pnas*, 2009). an awkward pause starts around 4 seconds (koudenburg, postmes & gordijn, 2011). but not every silence is a problem: when a topic winds down, a lapse is a normal part of talk (hoey, *when conversation lapses*, 2020). voice guidelines say at most two check-ins, then end warmly (google conversation design, "errors").
-- **what changed:**
-  - the first check-in waits 10 seconds (was 6).
-  - the second waits 20 seconds after the first, and the goodbye another 30 after that.
-  - after "hold on", it waits 90 seconds, then "i'm still here whenever you're ready."
-  - the check-ins sound like presence, not a probe: "no rush." or "mm, i'm here." instead of "anything else you want me to do with that?"
+- **what changed (second pass, after a live call):** the first version checked in too often. "mm, i'm here" every 20 seconds is its own kind of noise. now:
+  - quiet is fine. nothing is said for 20 seconds of silence (10 right after hello, in case they can't hear).
+  - then one check-in: "you still with me?", or "hello? can you hear me okay?" if it hasn't heard them at all yet.
+  - 20 seconds later, it says it's leaving before it leaves: "i haven't heard anything for a bit, so i'm going to hang up now. i'll text you, and you can call me back anytime." it never waits forever, and it never hangs up without a warning.
+  - after "hold on" or "i'll let you know once it's connected", it waits 90 seconds before the check-in.
+  - on a call it never asks three questions in a row. after two, it just responds and lets them talk.
 
 ## thinking out loud
 

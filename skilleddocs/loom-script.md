@@ -13,7 +13,7 @@ show it on a call while you say each point.
 
 - **timing.** a normal gap between turns is about 200 ms (stivers et al., 2009). it answers fast when you sound finished, and waits longer when you trail off or spell something out.
 - **thinking out loud.** when a reply is actually slow, it says "hmm" or "let me think that through for a second", like a person does (clark & fox tree, 2002). a fast reply gets no filler.
-- **comfortable with silence.** it doesn't jump in. the first check-in comes after 10 seconds and says "no rush" or "mm, i'm here". say "hold on" and it waits a minute and a half. it never grills you on why you went quiet.
+- **comfortable with silence.** it doesn't fill quiet. after 20 seconds it checks in once, and if it's still quiet it says "i'm going to hang up now, i'll text you" and does. say "hold on" and it waits a minute and a half.
 - **interruptions.** talk over it and it stops right away. it also knows which part of its line you actually heard, so it never says "as i said" about the part you cut off.
 - **emotional cues.** it reads your mood from what you type or say (rushed, confused, resistant, curious), with a confidence level, and adapts: shorter when you're rushed, slower when you're confused. it reflects how you feel before it fixes anything ("ugh, that sounds exhausting").
 - **a voice that fits.** the voice is chosen from the name you gave it, locked for the whole call, and the same next time. persona's own julia had a masculine voice.

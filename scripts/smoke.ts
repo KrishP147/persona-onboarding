@@ -21,11 +21,11 @@ async function main() {
   await handleEvent(s, { type: "call_started" });
   check("call active", s.call.active && s.phase === "on_call");
 
-  // silence x3 → goodbye + end_call
-  await handleEvent(s, { type: "silence" });
-  await handleEvent(s, { type: "silence" });
+  // silence: one check-in (no hangup), then a spoken heads-up + end_call
+  const r1 = await handleEvent(s, { type: "silence" });
+  check("1st silence only checks in", !r1.actions.some((a) => a.type === "end_call") && r1.actions.some((a) => a.type === "patience"), said(r1));
   const r3 = await handleEvent(s, { type: "silence" });
-  check("3rd silence ends call", r3.actions.some((a) => a.type === "end_call"));
+  check("2nd silence warns and hangs up", r3.actions.some((a) => a.type === "end_call") && /hang up/i.test(said(r3)), said(r3));
   const spoken = r3.actions.find((a) => a.type === "speak");
   check("says goodbye before hanging up", !!spoken && /bye|talk soon|text you/i.test((spoken as { text: string }).text), said(r3));
 

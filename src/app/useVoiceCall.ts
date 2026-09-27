@@ -29,8 +29,8 @@ type Rec = {
 };
 
 // People tolerate a lot more quiet on a call with someone who is there for them than a form does;
-// the first check-in waits 10s (journal 10), later ones longer (the server sends patience).
-const SILENCE_MS = 10000;
+// quiet is fine: the only check-in comes after 20s (10s at the start of a call, in case they can't hear us).
+const SILENCE_MS = 20000;
 const TURN_END_COMPLETE_MS = 700;
 const TURN_END_MIDPHRASE_MS = 850;
 const TURN_END_SPELLING_MS = 1400;
