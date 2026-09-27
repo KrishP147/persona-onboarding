@@ -43,6 +43,19 @@ i had a separate agent review the client code cold. the worst finding: every goo
 
 it also found: a call you hang up while it's still connecting kept going, image sends always failed (a 64kb browser limit), a tab switch could wipe a message in flight, and on phones the call covered the texts with no way back. all fixed.
 
+## the night the quota ran out
+
+halfway through the night, every reply turned into "sorry, i lost my train of thought". nothing was wrong with the code. gemini's free tier counts requests per model per day, and the limits are tiny: twenty a day for the newest flash models, five for one of them, five hundred for the light one. a single test run of fifteen simulated users is about three hundred requests. i'd spent the demo's whole day of quota testing it.
+
+what changed:
+
+- the agent walks a chain of models, fastest first, and remembers which ones are out of quota so a spent model never adds delay.
+- background helpers (the second pair of ears, the voice picker) only use the light model's quota, never the agent's, and have offline fallbacks.
+- test runs now use claude for the simulated users and the grader, paced one at a time.
+- in production, if every gemini model is spent, claude answers instead, with a hard cap on turns per day and in total, so the demo keeps working and the cost stays bounded.
+
+the lesson is an old one: the demo is the product. anything that can take it down, including my own testing, has to be treated like an outage.
+
 ## how it's tested now
 
 - `pnpm e2e` drives real chrome with a fake microphone through the whole flow: 25 checks, from "your message appears instantly" to "the goodbye is spoken before hanging up".

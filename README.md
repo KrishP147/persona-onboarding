@@ -44,6 +44,8 @@ engine
 one session per person, shared by text and voice
 ```
 
+models: gemini 2.5 flash by default, walking a chain of gemini models when one is out of free quota, with an optional capped claude fallback (`LLM_FALLBACK=anthropic`, see `.env.example`). the free tier is small (some models allow 20 requests a day), so don't run the full harness on the key the demo uses.
+
 the short version of the philosophy: the model talks, code decides. anything that must always happen (a goodbye before hanging up, a text after every call, never asking the same thing three times) lives in code, not in a prompt.
 
 ## where things are
