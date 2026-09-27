@@ -22,7 +22,8 @@ pnpm install
 cp .env.example .env.local   # add GEMINI_API_KEY (or ANTHROPIC_API_KEY). with neither, it runs in a mock mode
 pnpm dev                      # http://localhost:3000 (chrome or edge for the voice call)
 pnpm smoke                    # checks the safety nets, no key needed
-pnpm harness                  # simulated difficult users vs the live bot (dev server running, ALLOW_TEST_EVENTS=1, key needed). prints its cost
+pnpm harness                  # 15 simulated difficult users vs the live bot, graded (dev server running, ALLOW_TEST_EVENTS=1). prints its cost
+pnpm e2e                      # real chrome walkthrough with a fake mic: 21 checks + screenshots in harness/e2e/
 ```
 
 ## how it fits together
@@ -67,5 +68,10 @@ the short version of the philosophy: the model talks, code decides. anything tha
 - [x] offline retry, multi tab sync, call me back, deploy ready session store
 - [x] better voice: deepgram streaming speech to text, cartesia text to speech, one fixed voice per style
 - [x] deploy (vercel + upstash, auto deploys from master)
-- [ ] a real voice call tested end to end in the browser
+- [x] persona's own flow: scripted intro with the legal link, name first, save contact card, "calling you now", call on a second phone
+- [x] feels like texting a person: instant send, read receipts, typing pace, 👀 on long messages, the occasional gif
+- [x] research as code: one conversation move per turn, shown in the "why it said that" panel (journal 03)
+- [x] inbox triage: interrupt only when waiting costs them something (journal 07)
+- [x] browser end to end test with a fake mic (`pnpm e2e`)
+- [ ] a real voice call with a real mic, tested by a person
 - [ ] loom walkthrough

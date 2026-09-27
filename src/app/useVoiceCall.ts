@@ -79,9 +79,9 @@ async function lockVoice(style: VoiceStyle): Promise<SpeechSynthesisVoice | unde
   return pick;
 }
 
-async function fetchClip(sessionId: string, text: string, style: VoiceStyle): Promise<string | null> {
+async function fetchClip(sessionId: string, text: string, style: VoiceStyle, signal: AbortSignal): Promise<string | null> {
   try {
-    const r = await fetch("/api/voice/tts", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ sessionId, text, style }) });
+    const r = await fetch("/api/voice/tts", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ sessionId, text, style }), signal });
     if (!r.ok) return null;
     return URL.createObjectURL(await r.blob());
   } catch {
@@ -168,7 +168,11 @@ async function startDeepgram(sessionId: string, stream: MediaStream, onHeard: He
     };
     ws.onclose = () => {
       clearInterval(keepAlive);
-      if (!stopped) onDrop();
+      if (stopped) return;
+      try {
+        rec.stop();
+      } catch {}
+      onDrop();
     };
     return () => {
       stopped = true;
@@ -221,6 +225,9 @@ export function useVoiceCall(opts: {
   const genRef = useRef(0); // bumps on barge-in/hangup so queued audio is dropped
   const chainRef = useRef<Promise<void>>(Promise.resolve());
   const audioRef = useRef<{ el: HTMLAudioElement; done: () => void } | null>(null);
+  const abortersRef = useRef(new Set<AbortController>()); // in-flight speech fetches, cancelled on barge-in or hangup
+  const attemptRef = useRef(0); // bumps on hangup so a call still connecting gives up
+  const connectingRef = useRef(false);
   const optsRef = useRef(opts);
   useEffect(() => {
     optsRef.current = opts;
@@ -234,6 +241,8 @@ export function useVoiceCall(opts: {
   // Stop whatever is playing and drop anything queued.
   const stopAudio = () => {
     genRef.current += 1;
+    for (const a of abortersRef.current) a.abort();
+    abortersRef.current.clear();
     const a = audioRef.current;
     audioRef.current = null;
     if (a) {
@@ -243,19 +252,20 @@ export function useVoiceCall(opts: {
     window.speechSynthesis?.cancel();
   };
 
+  // Resolves true if the clip played; false if the browser blocked it (the caller falls back).
   const playUrl = (url: string, onStart: () => void) =>
-    new Promise<void>((resolve) => {
+    new Promise<boolean>((resolve) => {
       const el = new Audio(url);
       el.onplaying = onStart;
-      const done = () => {
+      const finish = (played: boolean) => {
         URL.revokeObjectURL(url);
         if (audioRef.current?.el === el) audioRef.current = null;
-        resolve();
+        resolve(played);
       };
-      audioRef.current = { el, done };
-      el.onended = done;
-      el.onerror = done;
-      el.play().catch(done);
+      audioRef.current = { el, done: () => finish(true) };
+      el.onended = () => finish(true);
+      el.onerror = () => finish(false);
+      el.play().catch(() => finish(false));
     });
 
   const armSilence = useCallback(() => {
@@ -301,6 +311,10 @@ export function useVoiceCall(opts: {
     stopAudio();
     queueRef.current = 0;
     bufferRef.current = "";
+    pendingEndRef.current = false;
+    waitingRef.current = false;
+    patienceRef.current = null;
+    interruptedRef.current = false;
     setListening(false);
     setSpeaking(false);
     setHeard("");
@@ -309,7 +323,15 @@ export function useVoiceCall(opts: {
 
   const hangUp = useCallback(
     (reason: "user_hangup" | "agent_ended" | "error" = "user_hangup") => {
-      if (!activeRef.current) return;
+      attemptRef.current += 1; // a call still connecting gives up
+      if (!activeRef.current) {
+        if (connectingRef.current) {
+          connectingRef.current = false;
+          teardown();
+          setStatus("idle");
+        }
+        return;
+      }
       teardown();
       setStatus("ended");
       optsRef.current.onEnded(reason);
@@ -327,7 +349,9 @@ export function useVoiceCall(opts: {
       const gen = genRef.current;
       const parts = sentences(text);
       // Start synthesizing every sentence now; play them in order.
-      const clips = parts.map((p) => (cloudTtsRef.current && optsRef.current.sessionId ? fetchClip(optsRef.current.sessionId, p, styleRef.current) : Promise.resolve(null)));
+      const ctrl = new AbortController();
+      abortersRef.current.add(ctrl);
+      const clips = parts.map((p) => (cloudTtsRef.current && optsRef.current.sessionId ? fetchClip(optsRef.current.sessionId, p, styleRef.current, ctrl.signal) : Promise.resolve(null)));
       const done = () => {
         queueRef.current = Math.max(0, queueRef.current - 1);
         if (queueRef.current > 0) return;
@@ -347,15 +371,16 @@ export function useVoiceCall(opts: {
             const url = await clips[i];
             if (gen !== genRef.current || !activeRef.current) return;
             const show = () => setCaption(parts[i]);
-            if (url) await playUrl(url, show);
-            else {
-              cloudTtsRef.current = false;
+            const played = url ? await playUrl(url, show) : false;
+            if (!played && gen === genRef.current && activeRef.current) {
+              if (!url) cloudTtsRef.current = false;
               await speakBrowser(parts[i], voiceRef.current, show);
             }
           }
         })
         .catch(() => {})
         .finally(() => {
+          abortersRef.current.delete(ctrl);
           if (gen === genRef.current) done();
         });
     },
@@ -387,12 +412,21 @@ export function useVoiceCall(opts: {
   const accept = useCallback(async () => {
     const W = window as unknown as { SpeechRecognition?: new () => Rec; webkitSpeechRecognition?: new () => Rec };
     const Ctor = W.SpeechRecognition ?? W.webkitSpeechRecognition;
+    const attempt = ++attemptRef.current;
+    const cancelled = () => attemptRef.current !== attempt;
+    connectingRef.current = true;
     setStatus("connecting");
     try {
       streamRef.current = await navigator.mediaDevices.getUserMedia({ audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true } });
     } catch {
+      connectingRef.current = false;
       setStatus("idle");
       optsRef.current.onMicDenied();
+      return false;
+    }
+    if (cancelled()) {
+      streamRef.current?.getTracks().forEach((t) => t.stop());
+      streamRef.current = null;
       return false;
     }
     styleRef.current = optsRef.current.voice;
@@ -451,9 +485,12 @@ export function useVoiceCall(opts: {
       };
       rec.onerror = (e) => {
         if (e.error === "not-allowed" || e.error === "service-not-allowed") {
+          const wasLive = activeRef.current;
           teardown();
           setStatus("idle");
-          optsRef.current.onMicDenied();
+          // Mid-call: the server must hear the call ended, or it thinks we're still on the line.
+          if (wasLive) optsRef.current.onEnded("error");
+          else optsRef.current.onMicDenied();
         }
         // "no-speech", "network", "aborted": onend restarts; silence is handled by our own timer.
       };
@@ -465,6 +502,13 @@ export function useVoiceCall(opts: {
     const sid = optsRef.current.sessionId;
     activeRef.current = true;
     const stopDg = stream && sid ? await startDeepgram(sid, stream, onHeard, () => void (activeRef.current && startWebSpeech())) : null;
+    if (cancelled()) {
+      // Hung up while we were connecting: close everything we opened.
+      stopDg?.();
+      connectingRef.current = false;
+      return false;
+    }
+    connectingRef.current = false;
     if (stopDg) stopDeepgramRef.current = stopDg;
     else if (!startWebSpeech()) {
       teardown();

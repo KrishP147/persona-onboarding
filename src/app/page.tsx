@@ -22,8 +22,9 @@ function storeId(id: string) {
   } catch {}
 }
 
-async function post<T>(url: string, body: unknown): Promise<T> {
-  const res = await fetch(url, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body), keepalive: true });
+async function post<T>(url: string, body: unknown, keepalive = false): Promise<T> {
+  // keepalive lets a hangup reach the server as the tab closes, but caps bodies at 64KB, so events only.
+  const res = await fetch(url, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body), keepalive });
   if (!res.ok) throw new Error(`${res.status}`);
   return res.json();
 }
@@ -70,6 +71,14 @@ export default function Home() {
   }, []);
 
   const actionsRef = useRef<(a: ClientAction[]) => void>(() => {});
+  const busyRef = useRef(0); // requests in flight (sends, voice turns)
+  const voiceTurnRef = useRef(0);
+  const ringTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const clearRing = () => {
+    if (ringTimerRef.current) clearTimeout(ringTimerRef.current);
+    ringTimerRef.current = null;
+  };
+  const [callHidden, setCallHidden] = useState(false); // small screens: peek at the texts mid-call
   // Replies arrive like texts from a person: one bubble at a time, with a typing pause between.
   const revealRef = useRef<Promise<void>>(Promise.resolve());
   const [revealing, setRevealing] = useState(false);
@@ -98,7 +107,7 @@ export default function Home() {
         }
         setRevealing(false);
         actionsRef.current(r.actions);
-      });
+      }).catch(() => setRevealing(false));
     },
     [upsert],
   );
@@ -109,19 +118,26 @@ export default function Home() {
     try {
       const res = await fetch(`/api/session?id=${encodeURIComponent(idRef.current)}`, { cache: "no-store" });
       const data = (await res.json()) as { session: Session; chips: string[] };
+      if (busyRef.current > 0) return; // a reply is on its way; it carries the fresh state
       setSession(data.session);
-      setMessages(data.session.transcript);
+      setMessages((prev) => {
+        // Server order, plus anything local the server hasn't saved yet (a message still sending).
+        const ids = new Set(data.session.transcript.map((m) => m.id));
+        return [...data.session.transcript, ...prev.filter((m) => !ids.has(m.id) && m.role === "user")];
+      });
     } catch {}
   }, []);
 
   const sendEvent = useCallback(
-    async (event: Record<string, unknown>) => {
-      if (!idRef.current) return;
+    async (event: Record<string, unknown>): Promise<boolean> => {
+      if (!idRef.current) return false;
       try {
-        apply(await post<TurnResult>("/api/session", { sessionId: idRef.current, event }));
+        apply(await post<TurnResult>("/api/session", { sessionId: idRef.current, event }, true));
         setError(null);
+        return true;
       } catch {
         setError("connection hiccup, retrying won't lose anything");
+        return false;
       }
     },
     [apply],
@@ -132,15 +148,22 @@ export default function Home() {
     sessionId: session?.id ?? null,
     onUtterance: async (text, interrupted) => {
       if (!idRef.current) return;
-      const body = { sessionId: idRef.current, channel: "voice", text, interrupted };
+      const turn = ++voiceTurnRef.current;
+      // Speaking again before the reply lands means they moved on; say so to the server.
+      const body = { sessionId: idRef.current, channel: "voice", text, interrupted: interrupted || turn > 1 && busyRef.current > 0 };
+      busyRef.current++;
       try {
-        apply(await post<TurnResult>("/api/chat", body).catch(async () => {
+        const r = await post<TurnResult>("/api/chat", body).catch(async () => {
           // One quiet retry (a busy session or a slow model), then own it out loud, on the call.
-          await new Promise((r) => setTimeout(r, 600));
+          await new Promise((res) => setTimeout(res, 600));
           return post<TurnResult>("/api/chat", body);
-        }));
+        });
+        // A reply to something they've already talked past: keep the text, don't say it out loud.
+        apply(turn === voiceTurnRef.current ? r : { ...r, actions: r.actions.filter((a) => a.type !== "speak") });
       } catch {
         call.speak("sorry, i missed that. say it one more time?");
+      } finally {
+        busyRef.current--;
       }
     },
     onSilence: () => sendEvent({ type: "silence" }),
@@ -150,9 +173,23 @@ export default function Home() {
 
   useEffect(() => {
     actionsRef.current = (actions) => {
-      for (const a of actions) {
+      // Speech first, so a goodbye is queued before the hangup that waits for it.
+      const ordered = [...actions].sort((a, b) => Number(b.type === "speak") - Number(a.type === "speak"));
+      for (const a of ordered) {
         // A real call takes a moment to come through after "calling you now."
-        if (a.type === "start_call") setTimeout(() => call.setStatus((st) => (st === "idle" ? "ringing" : st)), 3000);
+        if (a.type === "start_call") {
+          clearRing();
+          ringTimerRef.current = setTimeout(() => {
+            call.setStatus((st) => (st === "idle" ? "ringing" : st));
+            // Nobody picks up: stop ringing after a while, like a real phone.
+            ringTimerRef.current = setTimeout(() => {
+              call.setStatus((st) => {
+                if (st === "ringing") void sendEvent({ type: "call_declined" });
+                return st === "ringing" ? "idle" : st;
+              });
+            }, 30000);
+          }, 3000);
+        }
         if (a.type === "speak") call.speak(a.text);
         if (a.type === "end_call") call.endAfterSpeaking();
         if (a.type === "patience") call.patience(a.ms);
@@ -246,6 +283,9 @@ export default function Home() {
     // They "read" it first; the typing dots only show after a beat.
     const typingTimer = setTimeout(() => setTyping(true), 500);
     const sentAt = now();
+    // A new text wins over a call that hasn't come through yet ("actually, not now").
+    if (call.status === "idle") clearRing();
+    busyRef.current++;
     try {
       const reply = await post<TurnResult>("/api/chat", { sessionId: idRef.current, channel: "text", text, attachments: atts, clientId });
       clearTimeout(deliveredTimer);
@@ -263,17 +303,24 @@ export default function Home() {
       } else setError("that didn't send, hit send to try again");
     } finally {
       clearTimeout(typingTimer);
-      setTyping(false);
+      busyRef.current--;
+      if (busyRef.current === 0) setTyping(false);
     }
   };
 
   // The user placing the call is consent enough: connect straight away, no ringing.
   const startUserCall = async () => {
     if (call.status !== "idle") return;
-    if (await call.accept()) {
-      await sendEvent({ type: "call_started" });
-      call.greeted();
-    }
+    clearRing();
+    await connectCall();
+  };
+
+  // Mic is live: tell the server, or hang up if it can't hear us.
+  const connectCall = async () => {
+    setCallHidden(false);
+    if (!(await call.accept())) return;
+    if (await sendEvent({ type: "call_started" })) call.greeted();
+    else call.hangUp("error");
   };
 
   const connectGmail = () => {
@@ -305,10 +352,10 @@ export default function Home() {
 
   return (
     <main className="min-h-dvh bg-neutral-950 flex items-center justify-center gap-8 p-0 sm:p-6">
-      <div className="fixed top-3 right-3 z-30 flex gap-2">
+      <div className="fixed top-3 right-3 z-30 hidden sm:flex gap-2">
         <button
           onClick={() => setShowWhy((v) => !v)}
-          className="hidden lg:block text-xs text-neutral-300 bg-neutral-800/90 hover:bg-neutral-700 border border-white/10 rounded-full px-3 py-1.5"
+          className="hidden 2xl:block text-xs text-neutral-300 bg-neutral-800/90 hover:bg-neutral-700 border border-white/10 rounded-full px-3 py-1.5"
         >
           {showWhy ? "Hide reasoning" : "Show reasoning"}
         </button>
@@ -351,10 +398,31 @@ export default function Home() {
           >
             <PhoneIcon />
           </button>
+          {/* On a phone-sized screen the page is the phone, so restart lives in the menu. */}
+          <button
+            aria-label="Restart"
+            onClick={() => {
+              if (window.confirm("Start over with a fresh conversation?")) restart();
+            }}
+            className="sm:hidden w-8 h-10 rounded-full hover:bg-white/10 flex items-center justify-center text-neutral-300"
+          >
+            <svg width="4" height="16" viewBox="0 0 4 16" fill="currentColor" aria-hidden>
+              <circle cx="2" cy="2" r="1.8" />
+              <circle cx="2" cy="8" r="1.8" />
+              <circle cx="2" cy="14" r="1.8" />
+            </svg>
+          </button>
         </header>
 
+        {/* small screens: the call is hidden behind the texts, tap to go back */}
+        {callHidden && onCall && (
+          <button onClick={() => setCallHidden(false)} className="lg:hidden bg-emerald-600 text-white text-sm py-2 px-4 flex items-center justify-center gap-2">
+            <PhoneIcon size={14} /> On a call · tap to return
+          </button>
+        )}
+
         {/* thread */}
-        <div className="flex-1 overflow-y-auto px-3 pb-4 bg-[#131316]">
+        <div className="flex-1 overflow-y-auto px-3 pb-4 bg-[#131316]" role="log" aria-live="polite" aria-label="Messages">
           {thread.map((m, i) => {
             const prev = thread[i - 1];
             const next = thread[i + 1];
@@ -380,7 +448,7 @@ export default function Home() {
           })}
           {(typing || revealing) && (
             <div className="flex justify-start pt-2">
-              <div className="bg-[#26272c] rounded-3xl px-4 py-3 flex gap-1" aria-label="typing">
+              <div className="bg-[#26272c] rounded-3xl px-4 py-3 flex gap-1" role="status" aria-label="typing">
                 {[0, 1, 2].map((i) => (
                   <span key={i} className="w-1.5 h-1.5 rounded-full bg-neutral-400 animate-bounce" style={{ animationDelay: `${i * 120}ms` }} />
                 ))}
@@ -443,9 +511,12 @@ export default function Home() {
       </div>
       {/* call: its own phone beside the chat on wide screens, full screen on small ones */}
       {call.status !== "idle" && (
-        <div className="fixed inset-0 z-20 sm:static sm:z-auto w-full sm:w-[390px] h-dvh sm:h-[800px] sm:rounded-[44px] sm:border-[10px] border-neutral-800 overflow-hidden shadow-2xl">
+        <div
+          className={`fixed inset-0 z-20 lg:static lg:z-auto w-full lg:w-[390px] h-dvh lg:h-[800px] lg:rounded-[44px] lg:border-[10px] border-neutral-800 overflow-hidden shadow-2xl ${callHidden ? "hidden lg:block" : ""}`}
+        >
         <CallScreen
           said={call.caption}
+          onHide={() => setCallHidden(true)}
           saved={saved}
           name={agentName}
           status={call.status}
@@ -453,13 +524,12 @@ export default function Home() {
           heard={call.heard}
           listening={call.listening}
           startedAt={call.startedAt}
-          onAccept={async () => {
-            if (await call.accept()) {
-              await sendEvent({ type: "call_started" });
-              call.greeted();
-            }
+          onAccept={() => {
+            clearRing();
+            void connectCall();
           }}
           onDecline={() => {
+            clearRing();
             call.setStatus("idle");
             void sendEvent({ type: "call_declined" });
           }}
@@ -479,7 +549,7 @@ function WhyPanel({ messages }: { messages: Msg[] }) {
     endRef.current?.scrollIntoView({ block: "end" });
   }, [rows.length]);
   return (
-    <aside className="hidden lg:flex flex-col w-[320px] h-[800px] text-neutral-200">
+    <aside className="hidden 2xl:flex flex-col w-[320px] h-[800px] text-neutral-200">
       <div className="text-sm font-medium mb-1">why it said that</div>
       <div className="text-[11px] text-neutral-500 mb-3">each turn, code picks one move from the research; the model writes the words.</div>
       <div className="flex-1 overflow-y-auto space-y-3 pr-1">
@@ -602,7 +672,7 @@ function Bubble({
     return (
       <div data-role="agent" className={`${gap} flex justify-start`}>
         {/* eslint-disable-next-line @next/next/no-img-element */}
-        <img src={m.text} alt="gif" className="rounded-2xl max-w-[60%] max-h-48 object-cover bg-[#26272c]" loading="lazy" />
+        <img src={m.text} alt="animated reaction" className="rounded-2xl max-w-[60%] max-h-48 object-cover bg-[#26272c]" loading="lazy" />
       </div>
     );
   if (m.kind === "link_preview")
@@ -744,6 +814,7 @@ function CallScreen(p: {
   onAccept: () => void;
   onDecline: () => void;
   onHangup: () => void;
+  onHide?: () => void;
 }) {
   const [now, setNow] = useState(() => Date.now());
   useEffect(() => {
@@ -753,14 +824,23 @@ function CallScreen(p: {
   const secs = p.startedAt ? Math.max(0, Math.floor((now - p.startedAt) / 1000)) : 0;
   const timer = `${Math.floor(secs / 60)}:${String(secs % 60).padStart(2, "0")}`;
   return (
-    <div className="h-full w-full bg-gradient-to-b from-[#1d2433] to-[#0d0f14] text-neutral-100 flex flex-col items-center justify-between py-16">
+    <div
+      className="relative h-full w-full bg-gradient-to-b from-[#1d2433] to-[#0d0f14] text-neutral-100 flex flex-col items-center justify-between py-16"
+      role={p.status === "ringing" ? "alertdialog" : undefined}
+      aria-label={p.status === "ringing" ? `Incoming call from ${p.name}` : "Call"}
+    >
+      {p.onHide && p.status === "active" && (
+        <button onClick={p.onHide} className="lg:hidden absolute top-4 left-4 text-sm text-neutral-300 hover:text-white flex items-center gap-1">
+          ← Messages
+        </button>
+      )}
       <div className="text-center">
         {/* Saved contact: their photo, like any phone. Unsaved: a bare number and a generic avatar. */}
         <div className={`mx-auto w-24 h-24 rounded-full flex items-center justify-center ${p.speaking ? "ring-8 ring-white/20 animate-pulse" : ""}`}>
           {p.saved ? <PersonaLogo size={96} /> : <UnknownAvatar size={96} />}
         </div>
         <div className="mt-4 text-2xl">{p.name}</div>
-        <div className="text-neutral-400 mt-1 text-sm">
+        <div className="text-neutral-400 mt-1 text-sm" role="status">
           {p.status === "ringing" && "incoming call…"}
           {p.status === "connecting" && "connecting…"}
           {p.status === "active" && `${timer} · ${p.speaking ? "speaking" : p.listening ? "listening" : "…"}`}

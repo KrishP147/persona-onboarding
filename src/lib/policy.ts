@@ -88,7 +88,9 @@ export function computeDirective(s: Session, channel: Channel): Directive {
 
   // Early graduation is the user's call; otherwise finish once nothing is left to gather.
   const canGraduate = missing.length === 0;
-  const rushed = readMood(s.transcript).mood === "rushed";
+  // Offering to skip setup is a big move: only on a confident read, not a single terse text.
+  const mood = readMood(s.transcript);
+  const rushed = mood.mood === "rushed" && mood.confidence !== "low";
 
   if (channel === "voice" && isOpen(s, "agentName")) {
     notes.push("Don't ask for your own name on the call; that happens over text. If the user offers one, accept it.");
@@ -165,6 +167,8 @@ export function directiveText(s: Session, d: Directive, channel: Channel): strin
   return [
     moodLine,
     `CHANNEL: ${channel === "voice" ? "live phone call (speak: 1-2 short sentences per turn, then let them talk; no emoji, no lists)" : "text messages"}`,
+    "REMINDER: this is setup. You can't browse, check prices, call businesses, or read anything live yet. Never say \"one sec\", \"checking now\", \"calling them now\", \"it'll be ready in a minute\", or quote prices or availability. Say what you'll do once you're set up, or draft something right here in the message.",
+    s.slots.gmail.status === "filled" ? "GMAIL: already connected. Never mention the link again." : s.slots.gmail.status === "declined" ? "GMAIL: they said no. Don't bring it up again unless they do." : "",
     `PHASE: ${s.phase}`,
     s.slots.agentName.status === "filled" ? `CONTACT CARD: ${s.contactSaved ? "saved by the user" : "sent, not saved yet (a call from you shows up as an unknown number)"}` : "",
     `SLOTS:\n${slotLines}`,

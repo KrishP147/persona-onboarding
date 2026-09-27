@@ -237,20 +237,20 @@ export async function quick(o: { system: string; user: string; maxTokens: number
 }
 
 // One-shot structured output against a JSON schema.
-export async function json<T>(o: { system: string; user: string; schema: Record<string, unknown>; tag: string; via?: Via }): Promise<T> {
+export async function json<T>(o: { system: string; user: string; schema: Record<string, unknown>; tag: string; via?: Via; fast?: boolean }): Promise<T> {
   const claude = claudeFor(o.via);
   if (gemini && !(o.via === "anthropic" && claude)) {
-    const model = MODELS.gemini.agent;
+    const model = o.fast ? MODELS.gemini.fast : MODELS.gemini.agent;
     const res = await geminiCall({
       model,
       contents: o.user,
-      config: { systemInstruction: o.system, responseMimeType: "application/json", responseJsonSchema: o.schema, thinkingConfig: thinking(model, true) },
+      config: { systemInstruction: o.system, responseMimeType: "application/json", responseJsonSchema: o.schema, thinkingConfig: thinking(model, !o.fast) },
     });
     await geminiUsage(model, o.tag, res.usageMetadata);
     return JSON.parse(res.text ?? "{}") as T;
   }
   if (claude) {
-    const model = MODELS.anthropic.agent;
+    const model = o.fast ? MODELS.anthropic.fast : MODELS.anthropic.agent;
     const r = await claude.messages.create({
       model,
       max_tokens: 1500,

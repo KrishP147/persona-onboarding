@@ -7,6 +7,7 @@ import { provider, quick, runToolLoop, type Part, type ToolDef, type Turn } from
 import { DEMO_INBOX, recordOutcome, triageInbox } from "./triage";
 import { EVENT_MOVES, chooseMove, markUsed } from "./moves";
 import { GIF_MIN_GAP, GIF_MOODS, GIFS, gifUrl, type GifMood } from "./gifs";
+import { applyExtracted, extract } from "./extract";
 import type { Move } from "./types";
 
 const MAX_TOOL_ROUNDS = 3;
@@ -133,6 +134,7 @@ export interface Ctx {
   newCard?: Msg;
   move?: Move;
   pending?: Promise<void>[];
+  offeredCall?: boolean;
 }
 
 const WANTS_OUT = /\b(skip|not now|later|no more questions|stop asking|just (help|do|get)|let'?s (just )?(start|go)|that'?s (it|all)|i'?m good|enough setup)\b/i;
@@ -183,6 +185,7 @@ async function runTool(ctx: Ctx, name: string, input: Record<string, unknown>): 
     }
     case "offer_call":
       if (s.call.active) return "already on a call";
+      ctx.offeredCall = true;
       s.callOffers += 1;
       if (s.phase === "intro") s.phase = "call_offered";
       return "call buttons shown";
@@ -352,6 +355,11 @@ async function turn(
   if (channel === "voice" && ctx.actions.some((a) => a.type === "end_call") && !GOODBYE.test(text)) {
     text = `${text.trim()} ${goodbyeLine(s)}`.trim();
   }
+  // An offer to call made in words counts as an offer (so it isn't repeated next turn).
+  if (channel === "text" && !s.call.active && /\b(quick call|give you a (quick )?(call|ring)|hop on a (quick )?call|mind if i call)\b/i.test(text) && !ctx.offeredCall) {
+    s.callOffers += 1;
+    if (s.phase === "intro") s.phase = "call_offered";
+  }
   // Keep words and actions in sync: if it says the link is in their texts, it is.
   if (CLAIMS_LINK.test(text) && s.slots.gmail.status === "missing" && !ctx.newMessages.some((m) => m.kind === "gmail_link")) {
     await runTool(ctx, "send_gmail_link", {});
@@ -397,6 +405,21 @@ export async function handleUserMessage(
   if (channel === "voice") s.call.silenceStrikes = 0;
   // Name reply safety net: models sometimes say "julia it is" without saving it.
   const named = await captureAgentName(s, channel, clean);
+  // A second pass reads the message for names, needs and refusals while the reply is written.
+  // They just named the assistant: answer the way persona does, instantly, no model needed.
+  if (named?.card && channel === "text" && s.callOffers === 0 && !s.call.active) {
+    const name = s.slots.agentName.value!;
+    s.callOffers = 1;
+    if (s.phase === "intro") s.phase = "call_offered";
+    recordAsk(s, null);
+    const ctx: Ctx = { s, channel, actions: [], newMessages: [], move: EVENT_MOVES.named };
+    emitAgentText(ctx, `${name} it is. save my contact card so you know it's me, and i'll walk you through setup on a quick call.\n\nwant me to call?`);
+    s.transcript.push(named.card);
+    ctx.newMessages.push(named.card);
+    await Promise.all(named.pending);
+    return { session: s, newMessages: [userMsg, ...ctx.newMessages], chips: computeDirective(s, channel).chips, actions: [] };
+  }
+  const heard = extract(s, clean);
   if (/^\s*skip setup\s*$/i.test(clean) && s.phase !== "graduated") {
     return turn(s, channel, "The user tapped 'Skip setup'. Respect it: call graduate, then ask what they want to get done first.");
   }
@@ -414,6 +437,19 @@ export async function handleUserMessage(
     r.newMessages.push(card);
   }
   await Promise.all(named?.pending ?? []);
+  const e = await heard;
+  // Only rename the assistant from the extractor when they clearly meant to (answering the ask, or "call you X").
+  const meantAgentName = s.lastAskedSlot === "agentName" || /\b(call (you|yourself)|your name|name you|rename)\b/i.test(clean);
+  await applyExtracted(s, meantAgentName ? e : { ...e, agentName: null }, async (value) => {
+    const ctx: Ctx = { s, channel, actions: [], newMessages: [] };
+    await runTool(ctx, "set_slot", { slot: "agentName", value });
+    await Promise.all(ctx.pending ?? []);
+    const card = ctx.newCard ?? ctx.newMessages.find((m) => m.kind === "contact_card");
+    if (card) {
+      if (!s.transcript.includes(card)) s.transcript.push(card);
+      if (!r.newMessages.includes(card)) r.newMessages.push(card);
+    }
+  });
   return r;
 }
 

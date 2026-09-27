@@ -115,6 +115,31 @@ async function main() {
     check("no call back after hanging up", !(await page.$("button[aria-label='Accept']")));
   }
 
+  // a silent call: the agent checks in, then says a real goodbye out loud before hanging up
+  const callBtn = await page.$("header button[aria-label='Call']");
+  if (callBtn) {
+    await page.evaluate(() => {
+      const w = window as unknown as { __captions: string[] };
+      w.__captions = [];
+      new MutationObserver(() => {
+        const t = document.querySelector("[data-caption='agent']")?.textContent?.trim();
+        if (t && w.__captions[w.__captions.length - 1] !== t) w.__captions.push(t);
+      }).observe(document.body, { subtree: true, childList: true, characterData: true });
+    });
+    const agentBefore2 = await agentBubbleCount(page);
+    await callBtn.click();
+    const connected = await page.waitForSelector("button[aria-label='Hang up']", { timeout: 15000 }).then(() => true).catch(() => false);
+    check("you can call it back from the header", connected);
+    // silence ladder: ~6s per check-in, three strikes, then goodbye
+    const ended = await page.waitForFunction(() => !document.querySelector("button[aria-label='Hang up']"), { timeout: 90000 }).then(() => true).catch(() => false);
+    const captions = await page.evaluate(() => (window as unknown as { __captions: string[] }).__captions);
+    check("silent call ends on its own", ended, `${captions.length} captions`);
+    check("goodbye is spoken before hanging up", captions.some((c) => /\b(bye|text you|talk soon|let you go)\b/i.test(c)), captions.slice(-2).join(" | "));
+    const texted = await page.waitForFunction((n) => document.querySelectorAll("[data-role='agent']").length > n, { timeout: 30000 }, agentBefore2).then(() => true).catch(() => false);
+    check("a text follows the silent call", texted);
+    await snap(page, "after-silent-call");
+  }
+
   // reload keeps everything, restart clears it
   await page.reload({ waitUntil: "networkidle2" });
   check("reload keeps the thread", await bodyHas(page, "calling you now", 10000));

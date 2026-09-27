@@ -106,6 +106,7 @@ export const EVENT_MOVES = {
   declined: { id: "declined", label: "a no is fine, stay easy", source: "brown & levinson (1987); pink (2012): buoyancy" },
   interrupt: { id: "interrupt", label: "interrupt only if waiting costs them", source: "praxic-style triage with evidence (journal 07)" },
   intro: { id: "intro", label: "a small first yes: name me", source: "cialdini (1984): commitment; eyal, hooked (2014): investment" },
+  named: { id: "named", label: "their name choice, then the call ask (persona's own line)", source: "persona's real flow (journal 02); brown & levinson (1987): permission with a reason" },
   callNow: { id: "call-now", label: "they said yes: do it right away", source: "dixon et al. (2013): low effort" },
   greet: { id: "greet", label: "pick up where the texts left off", source: "dixon et al. (2013): never make them repeat themselves" },
 } satisfies Record<string, Move>;
@@ -119,7 +120,8 @@ export function chooseMove(s: Session, channel: Channel, opts: { callFirst: bool
   if (channel === "voice" && s.slots.userName.status === "missing" && !used(s, "ask-name")) return MOVES.askName;
   if (OFF_TOPIC.test(text) && text.length > 3 && !/\b(call|gmail|email|link)\b/i.test(text)) return opts.mayAsk ? MOVES.bridge : MOVES.answer;
   if (need.status === "missing") {
-    if (/\b(skip|just|already know|i need you to|can you)\b/i.test(text) && text.split(/\s+/).length > 4) return MOVES.graduate;
+    // Only a clear "i know what i want, skip this", not every "just" or "can you".
+    if (/\b(skip (this|setup|the setup|it|all this)|already know what i (want|need)|just (want|need) you to|let'?s (just )?get (to it|started))\b/i.test(text)) return MOVES.graduate;
     if (!opts.mayAsk) return MOVES.giveFirst;
     return STALL.test(text) && used(s, "discover") ? MOVES.offramp : MOVES.discover;
   }
