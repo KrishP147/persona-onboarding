@@ -656,7 +656,7 @@ async function handleEventInner(s: Session, e: SessionEvent): Promise<TurnResult
             : "The line dropped on our side.";
       return turn(s, "text", `${RECAP_INSTRUCTION} ${how} Call lasted ${secs}s.`, recapFallback(s, e.reason), {
         move: EVENT_MOVES.recap,
-        avoid: e.reason === "agent_ended" ? /(cut off|dropped|lost you|got disconnected)/i : undefined,
+        avoid: e.reason === "agent_ended" ? /b(cut off|dropped|lost you|got disconnected)b/i : undefined,
       });
     }
     case "silence": {
