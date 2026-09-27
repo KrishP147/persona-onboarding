@@ -135,6 +135,23 @@ async function classifyVoice(name: string): Promise<VoiceStyle> {
   }
 }
 
+// GIFs stay rare: not in the first few messages, and never two close together.
+function gifAllowed(s: Session) {
+  const agentMsgs = s.transcript.filter((m) => m.role === "agent");
+  const lastGif = agentMsgs.map((m) => m.kind).lastIndexOf("gif");
+  return agentMsgs.length >= 5 && (lastGif < 0 || agentMsgs.length - lastGif >= GIF_MIN_GAP);
+}
+
+function makeGif(s: Session, mood: GifMood) {
+  const pool = GIFS[mood];
+  return msg("agent", "text", gifUrl(pool[s.transcript.length % pool.length]), { kind: "gif" });
+}
+
+// A whole message that's just laughter or thanks gets a gif back, no words (and no model call).
+const LAUGH_TOKEN = "(?:(?:ha)+h?|(?:he){2,}|lo+l|lmao+|rofl|😂|🤣)";
+const LAUGH = new RegExp(`^\\s*${LAUGH_TOKEN}(?:[!. ]*${LAUGH_TOKEN})*[!. ]*\\s*$`, "iu");
+const THANKS = /^\s*(thanks|thank you|thx|ty|tysm|appreciate it)[!. ]*\s*$/i;
+
 export interface Ctx {
   s: Session;
   channel: Channel;
@@ -229,14 +246,10 @@ async function runTool(ctx: Ctx, name: string, input: Record<string, unknown>): 
     }
     case "send_gif": {
       if (ctx.channel !== "text") return "error: gifs only over text";
-      const agentMsgs = s.transcript.filter((m) => m.role === "agent");
-      const lastGif = agentMsgs.map((m) => m.kind).lastIndexOf("gif");
-      if (agentMsgs.length < 5 || (lastGif >= 0 && agentMsgs.length - lastGif < GIF_MIN_GAP)) return "error: not now, too soon for another gif. reply in words";
+      if (!gifAllowed(s)) return "error: not now, too soon for another gif. reply in words";
       const mood = String(input.mood) as GifMood;
-      const pool = GIFS[mood];
-      if (!pool) return "error: unknown mood";
-      const id = pool[agentMsgs.length % pool.length];
-      const gif = msg("agent", "text", gifUrl(id), { kind: "gif" });
+      if (!GIFS[mood]) return "error: unknown mood";
+      const gif = makeGif(s, mood);
       ctx.newMessages.push(gif);
       s.transcript.push(gif);
       return "gif sent. that's your whole reply unless you have something new to add";
@@ -416,6 +429,13 @@ export async function handleUserMessage(
   // Name reply safety net: models sometimes say "julia it is" without saving it.
   const named = await captureAgentName(s, channel, clean);
   // A second pass reads the message for names, needs and refusals while the reply is written.
+  // Pure laughter or thanks, over text, when a gif is allowed: answer with one.
+  if (channel === "text" && !s.call.active && (LAUGH.test(clean) || THANKS.test(clean)) && gifAllowed(s)) {
+    const gif = makeGif(s, LAUGH.test(clean) ? "lol" : "ok");
+    s.transcript.push(gif);
+    recordAsk(s, null);
+    return { session: s, newMessages: [userMsg, gif], chips: computeDirective(s, channel).chips, actions: [] };
+  }
   // They just named the assistant: answer the way persona does, instantly, no model needed.
   if (named?.card && channel === "text" && s.callOffers === 0 && !s.call.active) {
     const name = s.slots.agentName.value!;

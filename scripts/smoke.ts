@@ -65,6 +65,17 @@ async function main() {
   await handleUserMessage(g, "text", "yes please draft it");
   check("acting on it is recorded", g.alerts?.[0].outcome === "acted");
 
+  // gifs: laughter gets a gif, but never early and never twice in a row
+  const gs = newSession();
+  await handleEvent(gs, { type: "open" });
+  const early = await handleUserMessage(gs, "text", "haha");
+  check("no gif in the first few messages", !early.newMessages.some((m) => m.kind === "gif"));
+  for (let i = 0; i < 3; i++) gs.transcript.push({ id: `pad${i}`, role: "agent", channel: "text", text: "sure", ts: Date.now() });
+  const laugh = await handleUserMessage(gs, "text", "lol 😂😂");
+  check("laughter gets a gif", laugh.newMessages.some((m) => m.kind === "gif"), said(laugh));
+  const twice = await handleUserMessage(gs, "text", "haha");
+  check("no two gifs close together", !twice.newMessages.some((m) => m.kind === "gif"));
+
   // triage rules: bulk mail never interrupts, payment trouble always does
   check("promo is not an interrupt", scoreItem(DEMO_INBOX[1]).category === null);
   check("overdue bill is a high-confidence money interrupt", scoreItem({ ...DEMO_INBOX[4], subject: "Payment failed: action needed", snippet: "" }).confidence === "high");
