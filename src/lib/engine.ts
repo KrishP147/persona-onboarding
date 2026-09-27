@@ -4,6 +4,7 @@ import { computeDirective, directiveText, recordAsk, MAX_SILENCE_STRIKES } from 
 import { RECAP_INSTRUCTION, SYSTEM_PROMPT } from "./prompt";
 import { mockReply } from "./mock";
 import { provider, quick, runToolLoop, type Part, type ToolDef, type Turn } from "./llm";
+import { DEMO_INBOX, recordOutcome, triageInbox } from "./triage";
 
 const MAX_TOOL_ROUNDS = 3;
 const HISTORY_LIMIT = 40;
@@ -318,6 +319,7 @@ export async function handleUserMessage(
   // The client shows the message instantly under its own id; reuse it so there's no duplicate.
   const userMsg = msg("user", channel, clean, { ...(attachments?.length ? { attachments } : {}), ...(clientId ? { id: clientId } : {}) });
   s.transcript.push(userMsg);
+  recordOutcome(s, clean); // did they act on the last interruption, or wave it off?
   if (channel === "voice") s.call.silenceStrikes = 0;
   if (/^\s*skip setup\s*$/i.test(clean) && s.phase !== "graduated") {
     return turn(s, channel, "The user tapped 'Skip setup'. Respect it: call graduate, then ask what they want to get done first.");
@@ -443,7 +445,7 @@ export async function handleEvent(s: Session, e: SessionEvent): Promise<TurnResu
       );
     case "gmail_connected": {
       // Only trust what the oauth callback verified (test runs may pass an email explicitly).
-      const v = s.gmailVerified ?? (process.env.ALLOW_TEST_EVENTS === "1" && e.email ? { email: e.email, unread: 7 } : null);
+      const v = s.gmailVerified ?? (process.env.ALLOW_TEST_EVENTS === "1" && e.email ? { email: e.email, unread: 7, inbox: DEMO_INBOX } : null);
       if (!v) return idle();
       s.gmailVerified = undefined;
       if (s.slots.gmail.status === "filled" && s.gmailEmail === v.email) return idle();
@@ -451,10 +453,20 @@ export async function handleEvent(s: Session, e: SessionEvent): Promise<TurnResu
       s.gmailEmail = v.email;
       s.gmailUnread = v.unread;
       eventMsg(s, `Gmail connected: ${v.email}`);
-      const unreadNote = typeof v.unread === "number" ? ` Their inbox shows ${v.unread} unread, which you can mention lightly as a first useful observation.` : "";
-      return turn(s, s.call.active ? "voice" : "text", `Their Gmail just connected.${unreadNote} Acknowledge in a few words and, if you know what they need, offer one concrete thing you can now do with their inbox. Don't claim you've read specific emails.`,
-        typeof v.unread === "number" ? `gmail's connected. i see ${v.unread} unread in there, want me to help sort through them?` : "gmail's connected, thanks.",
-      );
+      // Interrupt only if waiting would cost them something; everything else is a digest line.
+      const t = await triageInbox(s, v.inbox ?? []);
+      let inboxNote: string;
+      let fallback: string;
+      if (t.interrupt) {
+        const it = t.interrupt.item;
+        (s.alerts ??= []).push({ id: it.id, category: t.interrupt.category!, reason: t.interrupt.reason, subject: it.subject, from: it.fromName, shownAt: Date.now(), outcome: "pending" });
+        inboxNote = `From their unread mail, ONE item is worth raising now: "${it.subject}" from ${it.fromName} (${it.snippet.slice(0, 120)}). Why it matters: ${t.interrupt.reason}. Mention just this one, say briefly why (the evidence), and offer one concrete thing you can do about it. Say the rest can wait for a digest. Don't list other emails.`;
+        fallback = `gmail's connected. one thing that looks like it can't wait: "${it.subject}" from ${it.fromName}. want me to draft a reply?`;
+      } else {
+        inboxNote = `Nothing in their unread mail looks urgent (no deadlines, money issues, or people waiting). Don't list emails or invent any. Just say it's connected and nothing needs them right now; you'll keep the rest for a digest.`;
+        fallback = "gmail's connected. nothing urgent in there, i'll keep the rest for a digest.";
+      }
+      return turn(s, s.call.active ? "voice" : "text", `Their Gmail just connected. ${inboxNote}`, fallback);
     }
     case "gmail_failed": {
       const cancelled = /access_denied|cancel/i.test(e.error);

@@ -2,6 +2,7 @@
 import { loadSession, newSession, saveSession, withSession } from "../src/lib/store";
 import { handleEvent, handleUserMessage } from "../src/lib/engine";
 import { readMood } from "../src/lib/mood";
+import { DEMO_INBOX, scoreItem } from "../src/lib/triage";
 import type { TurnResult } from "../src/lib/types";
 
 delete process.env.ANTHROPIC_API_KEY;
@@ -56,10 +57,22 @@ async function main() {
   const g = newSession();
   const fake = await handleEvent(g, { type: "gmail_connected", email: "attacker@evil.com" });
   check("unverified gmail event ignored", fake.newMessages.length === 0 && g.slots.gmail.status === "missing");
-  g.gmailVerified = { email: "me@gmail.com", unread: 12 };
+  g.gmailVerified = { email: "me@gmail.com", unread: 12, inbox: DEMO_INBOX };
   const ok = await handleEvent(g, { type: "gmail_connected" });
   check("verified gmail fills slot", g.slots.gmail.status === "filled" && g.gmailEmail === "me@gmail.com");
-  check("gmail value moment mentions unread", said(ok).includes("12"), said(ok));
+  check("gmail raises the one item that can't wait", said(ok).toLowerCase().includes("interview"), said(ok));
+  check("interruption logged as pending", g.alerts?.length === 1 && g.alerts[0].category === "person" && g.alerts[0].outcome === "pending");
+  await handleUserMessage(g, "text", "yes please draft it");
+  check("acting on it is recorded", g.alerts?.[0].outcome === "acted");
+
+  // triage rules: bulk mail never interrupts, payment trouble always does
+  check("promo is not an interrupt", scoreItem(DEMO_INBOX[1]).category === null);
+  check("overdue bill is a high-confidence money interrupt", scoreItem({ ...DEMO_INBOX[4], subject: "Payment failed: action needed", snippet: "" }).confidence === "high");
+  const g2 = newSession();
+  g2.alerts = [{ id: "x", category: "money", reason: "", subject: "", from: "", shownAt: Date.now(), outcome: "acted" }];
+  g2.gmailVerified = { email: "me@gmail.com", inbox: DEMO_INBOX };
+  const quiet = await handleEvent(g2, { type: "gmail_connected" });
+  check("budget spent: no second interruption", g2.alerts.length === 1 && !said(quiet).toLowerCase().includes("interview"), said(quiet));
   const cancel = await handleEvent(newSession(), { type: "gmail_failed", error: "access_denied" });
   check("oauth cancel treated as a choice", /no worries/.test(said(cancel)), said(cancel));
 

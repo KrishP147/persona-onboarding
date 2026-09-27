@@ -25,7 +25,7 @@ export async function GET(req: Request) {
     }
     const who = await fetchIdentity(tok.access_token);
     await withSession(sessionId, async (s) => {
-      s.gmailVerified = { email: who.email, unread: who.unread };
+      s.gmailVerified = { email: who.email, unread: who.unread, inbox: who.inbox };
     });
     return popupPage({ title: "Connected", body: `<p>${who.email}</p>`, result: { ok: true }, sessionId });
   } catch (e) {

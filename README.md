@@ -12,6 +12,7 @@ if you only read one thing, read the journal. it's how my understanding of this 
 - [04. voice, and all the ways people break things](docs/journal/04-voice-and-edge-cases.md)
 - [05. what the research changed](docs/journal/05-research.md)
 - [06. what stress testing found](docs/journal/06-stress-testing.md)
+- [07. deciding when to interrupt](docs/journal/07-interruptions.md)
 - [reading list](docs/reading-list.md)
 
 ## running it
@@ -50,6 +51,7 @@ the short version of the philosophy: the model talks, code decides. anything tha
 - `src/lib/mood.ts`: reading the user
 - `src/lib/engine.ts`: turns, tools, events, the goodbye and recap safety nets
 - `src/lib/llm.ts`: the model layer (gemini or claude)
+- `src/lib/triage.ts`: what in their inbox deserves an interruption, and logging whether it was acted on
 - `src/app/useVoiceCall.ts`: turn taking on the call (pauses, interruptions, silence, locked voice), deepgram and cartesia
 - `src/app/api/voice/`: speech token and text to speech routes
 - `harness/`: the difficult users and the grader

@@ -83,8 +83,8 @@ export default function Home() {
         for (const m of r.newMessages) {
           const paced = m.role === "agent" && m.channel === "text" && m.kind !== "contact_card";
           // A person reads, then types: longer replies take longer. The server's own time counts toward it.
-          const typeMs = Math.min(4500, 700 + m.text.length * 35);
-          const wait = shown === 0 && sentAt ? typeMs + 600 - (Date.now() - sentAt) : shown > 0 ? typeMs : 0;
+          const typeMs = Math.min(1600, 250 + m.text.length * 10);
+          const wait = shown === 0 && sentAt ? typeMs - (Date.now() - sentAt) : shown > 0 ? typeMs : 0;
           if (paced && wait > 0) {
             setRevealing(true);
             await new Promise((res) => setTimeout(res, wait));
@@ -232,7 +232,7 @@ export default function Home() {
     const clientId = nanoid(10);
     upsert([{ id: clientId, role: "user", channel: "text", text, ts: now(), ...(atts.length ? { attachments: atts } : {}) }]);
     // They "read" it first; the typing dots only show after a beat.
-    const typingTimer = setTimeout(() => setTyping(true), 1200);
+    const typingTimer = setTimeout(() => setTyping(true), 500);
     const sentAt = now();
     try {
       apply(await post<TurnResult>("/api/chat", { sessionId: idRef.current, channel: "text", text, attachments: atts, clientId }), sentAt);

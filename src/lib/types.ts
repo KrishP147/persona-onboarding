@@ -66,9 +66,33 @@ export interface Session {
   pendingVoice?: VoiceStyle; // agent renamed mid-call: applies from the next call
   gmailEmail?: string;
   gmailUnread?: number; // small value moment at connect time; tokens are never stored
-  gmailVerified?: { email: string; unread?: number; demo?: boolean }; // set by the oauth callback, consumed by the gmail_connected event
+  gmailVerified?: { email: string; unread?: number; demo?: boolean; inbox?: InboxItem[] }; // set by the oauth callback, consumed by the gmail_connected event
+  alerts?: Alert[]; // interruptions shown, with outcomes (see src/lib/triage.ts)
   graduatedReason?: string;
   transcript: Msg[];
+}
+
+// Headers + a short preview of one unread email. Only what triage needs; bodies are never fetched.
+export interface InboxItem {
+  id: string;
+  fromName: string;
+  fromEmail: string;
+  subject: string;
+  snippet: string;
+  date: number;
+  labels?: string[];
+}
+
+// One interruption the agent raised unprompted, and what the user did with it.
+export interface Alert {
+  id: string;
+  category: "deadline" | "money" | "person";
+  reason: string;
+  subject: string;
+  from: string;
+  shownAt: number;
+  outcome: "pending" | "acted" | "dismissed" | "ignored";
+  resolvedAt?: number;
 }
 
 // What the client needs to render after any turn/event.
