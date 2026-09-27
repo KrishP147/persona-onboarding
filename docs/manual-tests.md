@@ -161,3 +161,15 @@ needs gmail connected with the new draft permission: if you connected before tod
 
 1. skip setup and **type:** `find me a sushi place` then your city.
    - **expect:** real places from a search, a few words on where it's from, no made up hours or prices.
+
+## 22. gmail ask on the call
+
+1. name it, accept the call, say your name, then **say:** `i'm drowning in recruiter emails, i keep missing interview invites`.
+   - **expect:** within a turn or two, on the call, a short bit of help and then "want me to text you a link to connect your gmail, so i can actually help with ...?". not after hanging up.
+2. **say:** `yeah sure`. **expect:** the link card lands in the texts and it says so out loud.
+
+## 23. mute (for recording)
+
+1. on a call, tap **mute**. the status shows "muted".
+2. talk for 20+ seconds. **expect:** no "you:" captions, no reply, no "you there?" check-ins.
+3. tap **unmute** and say something. **expect:** it answers only that, with no sign it knew you were muted.

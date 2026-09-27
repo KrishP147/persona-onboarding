@@ -636,6 +636,8 @@ export default function Home() {
             void sendEvent({ type: "call_declined" });
           }}
           onHangup={() => call.hangUp("user_hangup")}
+          muted={call.muted}
+          onMute={call.toggleMute}
         />
         </div>
       )}
@@ -969,6 +971,8 @@ function CallScreen(p: {
   onAccept: () => void;
   onDecline: () => void;
   onHangup: () => void;
+  muted?: boolean;
+  onMute?: () => void;
   onHide?: () => void;
 }) {
   const [now, setNow] = useState(() => Date.now());
@@ -998,7 +1002,7 @@ function CallScreen(p: {
         <div className="text-neutral-400 mt-1 text-sm" role="status">
           {p.status === "ringing" && "incoming call…"}
           {p.status === "connecting" && "connecting…"}
-          {p.status === "active" && `${timer} · ${p.speaking ? "speaking" : p.listening ? "listening" : "…"}`}
+          {p.status === "active" && `${timer} · ${p.muted ? "muted" : p.speaking ? "speaking" : p.listening ? "listening" : "…"}`}
           {p.status === "ended" && "call ended"}
         </div>
         {p.status === "active" && (
@@ -1022,9 +1026,22 @@ function CallScreen(p: {
           </button>
         </div>
       ) : (
-        <button onClick={p.onHangup} disabled={p.status === "ended"} className="w-16 h-16 rounded-full bg-red-500 flex items-center justify-center" aria-label="Hang up">
-          <PhoneIcon down />
-        </button>
+        <div className="flex items-center gap-10">
+          {p.onMute && p.status === "active" && (
+            <button
+              onClick={p.onMute}
+              aria-pressed={!!p.muted}
+              aria-label={p.muted ? "Unmute" : "Mute"}
+              className={`w-16 h-16 rounded-full flex flex-col items-center justify-center text-[10px] gap-0.5 ${p.muted ? "bg-white text-black" : "bg-white/15 text-white hover:bg-white/25"}`}
+            >
+              <MicIcon off={p.muted} />
+              {p.muted ? "unmute" : "mute"}
+            </button>
+          )}
+          <button onClick={p.onHangup} disabled={p.status === "ended"} className="w-16 h-16 rounded-full bg-red-500 flex items-center justify-center" aria-label="Hang up">
+            <PhoneIcon down />
+          </button>
+        </div>
       )}
     </div>
   );
@@ -1034,6 +1051,16 @@ function PhoneIcon({ down, size = 22 }: { down?: boolean; size?: number }) {
   return (
     <svg width={size} height={size} viewBox="0 0 24 24" fill="currentColor" style={down ? { transform: "rotate(135deg)" } : undefined}>
       <path d="M6.6 10.8a15.1 15.1 0 0 0 6.6 6.6l2.2-2.2c.3-.3.7-.4 1-.2 1.1.4 2.3.6 3.6.6.6 0 1 .4 1 1V20c0 .6-.4 1-1 1A17 17 0 0 1 3 4c0-.6.4-1 1-1h3.5c.6 0 1 .4 1 1 0 1.3.2 2.5.6 3.6.1.3 0 .7-.2 1l-2.3 2.2z" />
+    </svg>
+  );
+}
+
+function MicIcon({ off, size = 20 }: { off?: boolean; size?: number }) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+      <rect x="9" y="3" width="6" height="11" rx="3" />
+      <path d="M5 11a7 7 0 0 0 14 0M12 18v3" />
+      {off && <path d="M4 4l16 16" />}
     </svg>
   );
 }

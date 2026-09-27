@@ -281,8 +281,10 @@ const WANTS_LINK = /\b(send|text|give|drop|shoot)\b[^.?!]{0,25}\blink\b|\b(conne
 const ASKED_LINK = /\b(link|gmail|connect your)\b/i;
 // The gmail ask is written by code (one clear question, the reason, the reassurance, an easy no).
 const GMAIL_ASK_MARK = "text you a link to connect your gmail";
-function gmailAsk(s: Session) {
+function gmailAsk(s: Session, channel: Channel = "text") {
   const need = shortNeed(s);
+  // Out loud it's one short question (the voice cap is 3 sentences, and "paste an email here" makes no sense on a call).
+  if (channel === "voice") return `want me to ${GMAIL_ASK_MARK}, so i can actually help with ${need ?? "that"}?`;
   return `want me to ${GMAIL_ASK_MARK}?${need ? ` then i can help with ${need} for real.` : ""} i never send anything without your ok. or you can just paste an email here.`;
 }
 // Gmail pitches the model slips into other turns (help first, ask later).
@@ -716,8 +718,17 @@ async function turn(
   if (!extraInstruction && s.slots.gmail.status === "missing" && !ctx.newMessages.some((m) => m.kind === "gmail_link")) {
     const raisedIt = /\b(gmail|email|inbox|link)\b/i.test(lastUserText(s));
     const help = text.split(/(?<=[.!?])\s+/).filter((x) => !GMAIL_PITCH.test(x)).join(" ").trim();
-    if (ctx.move?.id === "ask-gmail") text = `${help}${help ? "\n\n" : ""}${gmailAsk(s)}`.trim();
+    if (ctx.move?.id === "ask-gmail") {
+      // On a call: one sentence of help, then the ask, so the question is never cut off.
+      const lead = channel === "voice" ? capSentences(help.replace(/\?[^?]*$/, "."), 1) : help;
+      text = `${lead}${lead ? (channel === "voice" ? " " : "\n\n") : ""}${gmailAsk(s, channel)}`.trim();
+    }
     else if (!raisedIt && help) text = help;
+  }
+  // Already named: never ask "what should i go by?" again (it did, on a call, right after being named).
+  if (s.slots.agentName.status === "filled" && NAME_ASK.test(text)) {
+    const kept = text.split(/(?<=[.!?])\s+/).filter((x) => !NAME_ASK.test(x)).join(" ").trim();
+    if (kept) text = kept;
   }
   // "sent!" only if send_email actually went out this turn.
   if (!ctx.sentEmail && !s.draft?.sent && SEND_REQUEST.test(lastUserText(s)) && CLAIMS_SENT.test(text)) {

@@ -130,6 +130,11 @@ export function chooseMove(s: Session, channel: Channel, opts: { callFirst: bool
   }
   // Dig only when the need is still vague; if they already gave the details, asking more feels like a form.
   const vague = (need.value ?? "").split(/\s+/).length <= 4 && text.split(/\s+/).length < 14;
+  // On a call, once we know what's bothering them, gmail is how we actually help: ask while they're still
+  // on the line (at most one follow-up question first), not in a text after hanging up.
+  if (channel === "voice" && need.status === "filled" && s.slots.gmail.status === "missing" && !used(s, "ask-gmail") && (!vague || used(s, "dig"))) {
+    return MOVES.askGmail;
+  }
   if (need.status === "filled" && !used(s, "dig") && vague) return MOVES.dig;
   if (need.status === "filled" && !used(s, "playback")) return MOVES.playback;
   if (STALL.test(text)) return MOVES.offramp;

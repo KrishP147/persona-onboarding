@@ -217,6 +217,8 @@ export function useVoiceCall(opts: {
   const [heard, setHeard] = useState("");
   const [caption, setCaption] = useState(""); // the sentence being spoken right now, set when audio starts
   const [startedAt, setStartedAt] = useState<number | null>(null);
+  const [muted, setMuted] = useState(false);
+  const mutedRef = useRef(false);
 
   const recRef = useRef<Rec | null>(null);
   const voiceRef = useRef<SpeechSynthesisVoice | undefined>(undefined);
@@ -293,7 +295,7 @@ export function useVoiceCall(opts: {
     const wait = patienceRef.current ?? SILENCE_MS;
     silenceTimer.current = setTimeout(() => {
       patienceRef.current = null;
-      const idle = activeRef.current && !waitingRef.current && queueRef.current === 0 && !bufferRef.current;
+      const idle = activeRef.current && !mutedRef.current && !waitingRef.current && queueRef.current === 0 && !bufferRef.current;
       if (idle) optsRef.current.onSilence();
     }, wait);
   }, []);
@@ -318,6 +320,8 @@ export function useVoiceCall(opts: {
   }, []);
 
   const teardown = useCallback(() => {
+    mutedRef.current = false;
+    setMuted(false);
     activeRef.current = false;
     [silenceTimer, turnTimer, fillerTimer].forEach(clear);
     try {
@@ -445,6 +449,20 @@ export function useVoiceCall(opts: {
     });
   }, [armSilence]);
 
+  // Mute: the mic goes silent at the source (deepgram gets nothing), anything the fallback recognizer
+  // still picks up is dropped, and silence doesn't count. The agent is never told.
+  const toggleMute = useCallback(() => {
+    const m = !mutedRef.current;
+    mutedRef.current = m;
+    setMuted(m);
+    streamRef.current?.getAudioTracks().forEach((t) => (t.enabled = !m));
+    if (m) {
+      clear(turnTimer);
+      clear(silenceTimer);
+      if (bufferRef.current.trim()) flushTurn(); // what they said before muting still counts
+    } else if (activeRef.current && queueRef.current === 0 && !waitingRef.current) armSilence();
+  }, [armSilence, flushTurn]);
+
   const accept = useCallback(async () => {
     const W = window as unknown as { SpeechRecognition?: new () => Rec; webkitSpeechRecognition?: new () => Rec };
     const Ctor = W.SpeechRecognition ?? W.webkitSpeechRecognition;
@@ -471,6 +489,7 @@ export function useVoiceCall(opts: {
     if (window.speechSynthesis) voiceRef.current = await lockVoice(styleRef.current);
 
     const onHeard: Heard = (finals, interim, speechFinal, span) => {
+      if (mutedRef.current) return; // muted: nothing they say reaches the agent
       const latest = (finals || interim).trim();
       if (!latest) return;
       // A final goodbye is already on its way: let it finish; nothing said now changes the ending.
@@ -608,5 +627,5 @@ export function useVoiceCall(opts: {
     return () => window.removeEventListener("pagehide", onHide);
   }, []);
 
-  return { status, setStatus, speaking, listening, heard, caption, startedAt, accept, hangUp, speak, endAfterSpeaking, greeted, patience };
+  return { status, setStatus, speaking, listening, heard, caption, startedAt, accept, hangUp, speak, endAfterSpeaking, greeted, patience, muted, toggleMute };
 }
