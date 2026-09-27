@@ -70,8 +70,11 @@ export default function Home() {
       const next = [...prev];
       for (const m of incoming) {
         const i = next.findIndex((x) => x.id === m.id);
-        if (i >= 0) next[i] = m;
-        else next.push(m);
+        if (i >= 0) {
+          // Keep device-only bits (a voice note's playback link) when the server's copy replaces ours.
+          const local = next[i].attachments;
+          next[i] = local?.some((a) => a.localUrl) && m.attachments ? { ...m, attachments: m.attachments.map((a, j) => ({ ...a, localUrl: local[j]?.localUrl, seconds: local[j]?.seconds })) } : m;
+        } else next.push(m);
       }
       return next;
     });
@@ -90,6 +93,10 @@ export default function Home() {
   const revealRef = useRef<Promise<void>>(Promise.resolve());
   const [revealing, setRevealing] = useState(false);
   const [showWhy, setShowWhy] = useState(true);
+  // Voice notes: record in the browser, transcribe on our server (deepgram), send the words.
+  const [recording, setRecording] = useState<{ startedAt: number } | null>(null);
+  const [transcribing, setTranscribing] = useState(false);
+  const recorderRef = useRef<{ rec: MediaRecorder; chunks: Blob[]; stream: MediaStream } | null>(null);
   // Read receipts for your own texts: sent (one check), delivered (two), seen (two, filled).
   const [receipts, setReceipts] = useState<Record<string, Receipt>>({});
   const setReceipt = (id: string, r: Receipt) => setReceipts((prev) => ({ ...prev, [id]: r }));
@@ -276,11 +283,13 @@ export default function Home() {
     if (messages.length) seenRef.current = true;
   }, [messages, typing]);
 
-  const send = async (text: string) => {
-    if (!idRef.current || (!text.trim() && pending.length === 0)) return;
-    const atts = pending;
-    setDraft("");
-    setPending([]);
+  const send = async (text: string, extra?: { attachments: Attachment[] }) => {
+    if (!idRef.current || (!text.trim() && pending.length === 0 && !extra)) return;
+    const atts = extra?.attachments ?? pending;
+    if (!extra) {
+      setDraft("");
+      setPending([]);
+    }
     // Your own message lands right away, like any messaging app.
     const clientId = nanoid(10);
     upsert([{ id: clientId, role: "user", channel: "text", text, ts: now(), ...(atts.length ? { attachments: atts } : {}) }]);
@@ -312,6 +321,52 @@ export default function Home() {
       clearTimeout(typingTimer);
       busyRef.current--;
       if (busyRef.current === 0) setTyping(false);
+    }
+  };
+
+  const startNote = async () => {
+    if (recording || transcribing || !idRef.current) return;
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: { echoCancellation: true, noiseSuppression: true } });
+      const mime = ["audio/webm;codecs=opus", "audio/webm", "audio/mp4"].find((m) => MediaRecorder.isTypeSupported(m));
+      const rec = new MediaRecorder(stream, mime ? { mimeType: mime } : undefined);
+      const chunks: Blob[] = [];
+      rec.ondataavailable = (e) => e.data.size && chunks.push(e.data);
+      rec.start(250);
+      recorderRef.current = { rec, chunks, stream };
+      setRecording({ startedAt: now() });
+    } catch {
+      setError("i can't reach your mic. check the browser's microphone permission and try again.");
+    }
+  };
+
+  const stopNote = async (cancel = false) => {
+    const r = recorderRef.current;
+    if (!r || !recording) return;
+    const secs = Math.max(1, Math.round((now() - recording.startedAt) / 1000));
+    recorderRef.current = null;
+    setRecording(null);
+    const done = new Promise<void>((res) => (r.rec.onstop = () => res()));
+    r.rec.stop();
+    await done;
+    r.stream.getTracks().forEach((t) => t.stop());
+    if (cancel || !idRef.current) return;
+    const blob = new Blob(r.chunks, { type: r.rec.mimeType || "audio/webm" });
+    setTranscribing(true);
+    try {
+      const res = await fetch(`/api/voice/transcribe?s=${encodeURIComponent(idRef.current)}`, { method: "POST", headers: { "Content-Type": blob.type }, body: blob });
+      const data = (await res.json()) as { transcript?: string };
+      const words = data.transcript?.trim();
+      if (!res.ok || !words) {
+        setError(res.ok ? "couldn't make out any words in that one. try again?" : "that voice note didn't go through, try again?");
+        return;
+      }
+      const url = URL.createObjectURL(blob);
+      await send(words, { attachments: [{ kind: "audio", name: "voice note", mime: blob.type, summary: `voice note, ${secs}s`, dataUrl: undefined, localUrl: url, seconds: secs }] });
+    } catch {
+      setError("that voice note didn't go through, try again?");
+    } finally {
+      setTranscribing(false);
     }
   };
 
@@ -504,6 +559,26 @@ export default function Home() {
             className="flex-1 min-w-0 bg-[#26272c] rounded-full px-4 py-2.5 outline-none placeholder:text-neutral-500"
           />
           <button
+            type="button"
+            aria-label={recording ? "Stop and send voice note" : "Record a voice note"}
+            onClick={() => void (recording ? stopNote() : startNote())}
+            disabled={transcribing}
+            className={`h-10 shrink-0 rounded-full flex items-center justify-center gap-1.5 disabled:opacity-50 ${recording ? "bg-red-500 px-3 text-sm" : "w-10 bg-[#26272c] hover:bg-[#33343a]"}`}
+          >
+            {recording ? (
+              <>
+                <span className="w-2.5 h-2.5 rounded-sm bg-white" aria-hidden />
+                <RecTimer startedAt={recording.startedAt} />
+              </>
+            ) : transcribing ? (
+              <span className="w-4 h-4 rounded-full border-2 border-white/60 border-t-transparent animate-spin" aria-hidden />
+            ) : (
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor" aria-hidden>
+                <path d="M12 14a3 3 0 0 0 3-3V5a3 3 0 1 0-6 0v6a3 3 0 0 0 3 3zm5-3a5 5 0 0 1-10 0H5a7 7 0 0 0 6 6.92V21h2v-3.08A7 7 0 0 0 19 11h-2z" />
+              </svg>
+            )}
+          </button>
+          <button
             type="submit"
             aria-label="Send"
             disabled={!draft.trim() && pending.length === 0}
@@ -573,6 +648,57 @@ function WhyPanel({ messages }: { messages: Msg[] }) {
         <div ref={endRef} />
       </div>
     </aside>
+  );
+}
+
+function RecTimer({ startedAt }: { startedAt: number }) {
+  const [t, setT] = useState(0);
+  useEffect(() => {
+    const id = setInterval(() => setT(Math.floor((Date.now() - startedAt) / 1000)), 250);
+    return () => clearInterval(id);
+  }, [startedAt]);
+  return <span className="tabular-nums">{`${Math.floor(t / 60)}:${String(t % 60).padStart(2, "0")}`}</span>;
+}
+
+// A voice note: play it back (this device only; the audio isn't stored), with the transcript below.
+function VoiceNote({ url, seconds }: { url?: string; seconds?: number }) {
+  const [playing, setPlaying] = useState(false);
+  const audio = useRef<HTMLAudioElement | null>(null);
+  const toggle = () => {
+    if (!url) return;
+    if (!audio.current) {
+      audio.current = new Audio(url);
+      audio.current.onended = () => setPlaying(false);
+    }
+    if (playing) {
+      audio.current.pause();
+      setPlaying(false);
+    } else {
+      void audio.current.play();
+      setPlaying(true);
+    }
+  };
+  return (
+    <div className="flex items-center gap-2 mb-1.5">
+      <button onClick={toggle} disabled={!url} aria-label={playing ? "Pause voice note" : "Play voice note"} className="w-8 h-8 rounded-full bg-white/15 hover:bg-white/25 disabled:opacity-40 flex items-center justify-center">
+        {playing ? (
+          <svg width="12" height="12" viewBox="0 0 12 12" fill="currentColor" aria-hidden>
+            <rect x="2" y="1" width="3" height="10" />
+            <rect x="7" y="1" width="3" height="10" />
+          </svg>
+        ) : (
+          <svg width="12" height="12" viewBox="0 0 12 12" fill="currentColor" aria-hidden>
+            <path d="M3 1.5v9l7-4.5z" />
+          </svg>
+        )}
+      </button>
+      <span className="flex items-end gap-[2px] h-5" aria-hidden>
+        {[6, 12, 8, 16, 10, 14, 6, 12, 9, 15, 7, 11].map((h, i) => (
+          <span key={i} className="w-[3px] rounded-full bg-white/50" style={{ height: h }} />
+        ))}
+      </span>
+      <span className="text-[11px] text-white/70 tabular-nums">{seconds ? `0:${String(seconds).padStart(2, "0")}` : "voice note"}</span>
+    </div>
   );
 }
 
@@ -729,7 +855,9 @@ function Bubble({
           </span>
         )}
         {m.attachments?.map((a, i) =>
-          a.dataUrl ? (
+          a.kind === "audio" ? (
+            <VoiceNote key={i} url={a.localUrl} seconds={a.seconds} />
+          ) : a.dataUrl ? (
             // eslint-disable-next-line @next/next/no-img-element
             <img key={i} src={a.dataUrl} alt={a.name} className="rounded-xl mb-1 max-h-48" />
           ) : (

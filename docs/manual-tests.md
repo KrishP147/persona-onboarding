@@ -134,3 +134,10 @@ each step says **type** (in the text box), **say** (out loud on the call), or **
 - speed: anything that took more than ~2 seconds to start replying, or cut you off
 - voice: any change of voice mid-call, robotic reads, captions out of sync
 - anything it claimed to do that it didn't
+
+## 19. voice notes (text thread)
+
+1. tap the **mic** beside send, say `hey, i keep missing replies to recruiters, can you help?`, tap the red **stop** button.
+   - **expect:** a voice note bubble (play button, length) with your words written under it, then a normal reply to what you said.
+2. tap play on the note. **expect:** your recording plays back (this device only; after a reload the transcript stays but the audio doesn't).
+3. record a note and say nothing. **expect:** "couldn't make out any words in that one. try again?", and nothing is sent.

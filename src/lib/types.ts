@@ -29,6 +29,8 @@ export interface Attachment {
   // parsed content the agent can reason over (transcript, description)
   summary?: string;
   dataUrl?: string; // images only, kept small
+  localUrl?: string; // voice notes: playback on this device only (never sent to the server)
+  seconds?: number;
 }
 
 export type MsgKind = "text" | "gmail_link" | "contact_card" | "event" | "link_preview" | "gif";
