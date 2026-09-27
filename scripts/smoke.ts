@@ -101,6 +101,14 @@ async function main() {
   await handleUserMessage(nameNotRing, "text", "julia");
   const cm = await handleUserMessage(nameNotRing, "text", "you can call me krish");
   check("'you can call me krish' is a name, not a ring", !cm.actions.some((a) => a.type === "start_call"), said(cm));
+  const rude = newSession();
+  await handleEvent(rude, { type: "open" });
+  const ugly = await handleUserMessage(rude, "text", "ugly");
+  check("an insult name gets a laugh, not a cheerful miss", /ouch/i.test(said(ugly)), said(ugly));
+  const yesBut = await handleUserMessage(rude, "text", "yes but u aren't doing anything about my insults");
+  check("'yes but...' to a call offer doesn't ring", !yesBut.actions.some((a) => a.type === "start_call"), said(yesBut));
+  const didnt = await handleUserMessage(rude, "text", "i didn't want u to call me idiot");
+  check("'didn't want u to call me' is a refusal, not a ring", !didnt.actions.some((a) => a.type === "start_call") && rude.callDeclinedAt !== undefined, said(didnt));
   const terms = newSession();
   await handleEvent(terms, { type: "open" });
   const tr = await handleUserMessage(terms, "text", "can you text me the terms link again?");

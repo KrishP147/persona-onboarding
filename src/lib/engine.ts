@@ -166,6 +166,7 @@ function toTurns(s: Session): Turn[] {
     const hadCall = s.call.active || s.transcript.some((x) => x.channel === "voice");
     const prefix = !hadCall ? "" : m.role === "user" ? (m.channel === "voice" ? "(said on the call) " : "(texted in the chat) ") : m.channel === "text" ? "(posted in the chat) " : "";
     let text = m.kind === "gmail_link" ? `${prefix}[the Connect Gmail link card]` : m.kind === "gif" ? `${prefix}[a gif]` : prefix + m.text;
+    if (m.cutOff) text += " [they cut in here; the rest wasn't heard]";
     if (m.attachments?.length) text += "\n" + m.attachments.map(attachmentText).join("\n");
     const parts: Part[] = [];
     // Only the latest user message carries actual image pixels; older ones use the summary.
@@ -338,7 +339,7 @@ function nameGrounded(s: Session, value: string): boolean {
 }
 const CALL_NO = /\b(no|nah|nope|not now|text is fine|rather text|just text|don'?t call|no calls?|hate (phone )?calls)\b/i;
 const OFFERED_CALL = /\b(call|ring|phone)\b[^?]*\?/i;
-const NEGATED_CALL = /\b(don'?t|do not|no|not|never|stop)\b[^.!?]{0,15}\b(call|ring|phone)/i;
+const NEGATED_CALL = /\b(don'?t|do not|didn'?t|did not|won'?t|wasn'?t|shouldn'?t|no|not|never|stop)\b[^.!?]{0,20}\b(call|ring|phone)/i;
 
 async function runTool(ctx: Ctx, name: string, input: Record<string, unknown>): Promise<string> {
   const { s } = ctx;
@@ -842,7 +843,11 @@ export async function handleUserMessage(
   // assumes they got the rest ("as i said...").
   if (interrupted && heardBefore !== undefined && channel === "voice") {
     const last = [...s.transcript].reverse().find((m) => m.role === "agent" && m.channel === "voice" && !m.kind);
-    if (last && heardBefore.trim().length < last.text.length) last.text = `${heardBefore.trim()}${heardBefore.trim() ? " " : ""}[they cut in here; the rest wasn't heard]`.trim();
+    // What shows on screen is just what they heard (with "..."); the note for the model lives in its own field.
+    if (last && heardBefore.trim().length < last.text.length) {
+      last.text = heardBefore.trim() ? `${heardBefore.trim()}...` : "...";
+      last.cutOff = true;
+    }
   }
   // The client shows the message instantly under its own id; reuse it so there's no duplicate.
   const userMsg = msg("user", channel, clean, { ...(attachments?.length ? { attachments } : {}), ...(clientId ? { id: clientId } : {}) });
@@ -902,7 +907,7 @@ export async function handleUserMessage(
     if (s.phase === "intro") s.phase = "call_offered";
     recordAsk(s, null);
     const ctx: Ctx = { s, channel, actions: [], newMessages: [], move: EVENT_MOVES.named };
-    emitAgentText(ctx, `${name} it is. save my contact card so you know it's me, and i'll walk you through setup on a quick call.\n\nwant me to call?`);
+    emitAgentText(ctx, `${nameAck(name)} save my contact card so you know it's me, and i'll walk you through setup on a quick call.\n\nwant me to call?`);
     s.transcript.push(named.card);
     ctx.newMessages.push(named.card);
     await Promise.all(named.pending);
@@ -914,7 +919,8 @@ export async function handleUserMessage(
   const asksForCall =
     /\b(call me(?=\s*($|[.!?,]|(now|back|please|pls|plz|asap|right now|real quick|quick|when|whenever|anytime|later|today|tomorrow|so|and|if|then)\b))|(can|could|should|shall) (we|you) (call|hop on a call|do a call)|let'?s (call|hop on a call|do a call)|give me a (call|ring)|ring me|phone me|hop on a (quick )?call)\b/i.test(clean) &&
     !NEGATED_CALL.test(clean);
-  const saidYesToOffer = !!prevText && OFFERED_CALL.test(prevText.text) && YES.test(clean);
+  // A short yes ("sure", "yeah call me") is a yes; "yes but u aren't listening..." is not (it rang once).
+  const saidYesToOffer = !!prevText && OFFERED_CALL.test(prevText.text) && YES.test(clean) && !/\bbut\b/i.test(clean) && (clean.trim().split(/\s+/).length <= 4 || /\b(call|ring)\b/i.test(clean));
   if (channel === "text" && !s.call.active && s.slots.agentName.status !== "missing" && (asksForCall || saidYesToOffer) && !CALL_NO.test(clean)) {
     const ctx: Ctx = { s, channel, actions: [], newMessages: [], move: EVENT_MOVES.callNow };
     const out = await runTool(ctx, "start_call", {});
@@ -1379,7 +1385,7 @@ async function nameFirst(s: Session, channel: Channel, text: string, heard: Retu
   const ctx: Ctx = { s, channel, actions: [], newMessages: [] };
   if ((await runTool(ctx, "set_slot", { slot: "agentName", value })).startsWith("error")) return null;
   await Promise.all(ctx.pending ?? []);
-  const ack = msg("agent", "text", `${value} it is. here's my contact card so you know it's me.`);
+  const ack = msg("agent", "text", `${nameAck(value)} here's my contact card so you know it's me.`);
   s.transcript.push(ack);
   const msgs = [ack];
   if (ctx.newCard) {
@@ -1423,4 +1429,10 @@ export function linkPending(s: Session) {
 }
 
 // A standing "no calls" ("i hate phone calls", "text only"), whenever it's said.
-const NO_CALLS = /\b(don'?t|do not|dont|pls don'?t|please don'?t|never) (call|ring|phone)( me)?\b|\bno (phone )?calls?\b|\bhate (phone )?calls\b|\b(text|texting) only\b|\bonly text\b|\bnot a phone person\b|\brather (just )?text\b/i;
+const NO_CALLS = /\b(don'?t|do not|dont|pls don'?t|please don'?t|never) (call|ring|phone)( me)?\b|\b(didn'?t|did not|don'?t|do not) want (you|u) to (call|ring|phone)\b|\bno (phone )?calls?\b|\bhate (phone )?calls\b|\b(text|texting) only\b|\bonly text\b|\bnot a phone person\b|\brather (just )?text\b/i;
+
+// Naming it something rude is usually a poke: take it with a laugh instead of cheerfully missing it.
+const INSULT_NAME = /^(ugly|idiot|stupid|dumb|dummy|loser|trash|garbage|moron|clown|useless|lame|jerk|butthead|poopy?|bitch|asshole|dumbass)$/i;
+function nameAck(name: string) {
+  return INSULT_NAME.test(name.trim()) ? `ouch, ${name.toLowerCase()}? harsh, but i'll wear it. ${name} it is.` : `${name} it is.`;
+}
