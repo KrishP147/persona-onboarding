@@ -73,6 +73,7 @@ export default function Home() {
   // Replies arrive like texts from a person: one bubble at a time, with a typing pause between.
   const revealRef = useRef<Promise<void>>(Promise.resolve());
   const [revealing, setRevealing] = useState(false);
+  const [showWhy, setShowWhy] = useState(true);
   const apply = useCallback(
     (r: TurnResult, sentAt?: number) => {
       if (idRef.current && r.session.id !== idRef.current) return; // stale reply from another session
@@ -128,10 +129,15 @@ export default function Home() {
     sessionId: session?.id ?? null,
     onUtterance: async (text, interrupted) => {
       if (!idRef.current) return;
+      const body = { sessionId: idRef.current, channel: "voice", text, interrupted };
       try {
-        apply(await post<TurnResult>("/api/chat", { sessionId: idRef.current, channel: "voice", text, interrupted }));
+        apply(await post<TurnResult>("/api/chat", body).catch(async () => {
+          // One quiet retry (a busy session or a slow model), then own it out loud, on the call.
+          await new Promise((r) => setTimeout(r, 600));
+          return post<TurnResult>("/api/chat", body);
+        }));
       } catch {
-        setError("lost you for a sec");
+        call.speak("sorry, i missed that. say it one more time?");
       }
     },
     onSilence: () => sendEvent({ type: "silence" }),
@@ -289,12 +295,21 @@ export default function Home() {
 
   return (
     <main className="min-h-dvh bg-neutral-950 flex items-center justify-center gap-8 p-0 sm:p-6">
-      <button
-        onClick={restart}
-        className="fixed top-3 right-3 z-30 text-xs text-neutral-300 bg-neutral-800/90 hover:bg-neutral-700 border border-white/10 rounded-full px-3 py-1.5"
-      >
-        Restart
-      </button>
+      <div className="fixed top-3 right-3 z-30 flex gap-2">
+        <button
+          onClick={() => setShowWhy((v) => !v)}
+          className="hidden lg:block text-xs text-neutral-300 bg-neutral-800/90 hover:bg-neutral-700 border border-white/10 rounded-full px-3 py-1.5"
+        >
+          {showWhy ? "Hide reasoning" : "Show reasoning"}
+        </button>
+        <button
+          onClick={restart}
+          className="text-xs text-neutral-300 bg-neutral-800/90 hover:bg-neutral-700 border border-white/10 rounded-full px-3 py-1.5"
+        >
+          Restart
+        </button>
+      </div>
+      {showWhy && <WhyPanel messages={messages} />}
       <div className="relative w-full sm:w-[390px] h-dvh sm:h-[800px] sm:rounded-[44px] sm:border-[10px] border-neutral-800 bg-[#16171b] text-neutral-100 overflow-hidden flex flex-col shadow-2xl">
         {/* status bar (desktop frame only) */}
         <div className="hidden sm:flex justify-between px-7 pt-2 text-[11px] text-neutral-300 bg-[#1e1f24]">
@@ -307,16 +322,9 @@ export default function Home() {
             ←
           </span>
           {saved ? (
-            <div className="w-10 h-10 rounded-full bg-white text-black flex items-center justify-center" aria-hidden>
-              <LoopMark />
-            </div>
+            <PersonaLogo size={40} />
           ) : (
-            <div className="w-10 h-10 rounded-full bg-[#f9c22e] text-neutral-900 flex items-center justify-center" aria-hidden>
-              <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor">
-                <circle cx="12" cy="8" r="4" />
-                <path d="M4 20c0-4 3.6-6 8-6s8 2 8 6z" />
-              </svg>
-            </div>
+            <UnknownAvatar size={40} />
           )}
           <div className="flex-1 min-w-0">
             <div className="font-medium truncate">{agentName}</div>
@@ -427,6 +435,7 @@ export default function Home() {
         <div className="fixed inset-0 z-20 sm:static sm:z-auto w-full sm:w-[390px] h-dvh sm:h-[800px] sm:rounded-[44px] sm:border-[10px] border-neutral-800 overflow-hidden shadow-2xl">
         <CallScreen
           said={call.caption}
+          saved={saved}
           name={agentName}
           status={call.status}
           speaking={call.speaking}
@@ -448,6 +457,34 @@ export default function Home() {
         </div>
       )}
     </main>
+  );
+}
+
+// Off the phone: which research-backed move produced each agent message, and where it comes from.
+function WhyPanel({ messages }: { messages: Msg[] }) {
+  const rows = messages.filter((m) => m.role === "agent" && m.move).slice(-12);
+  const endRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    endRef.current?.scrollIntoView({ block: "end" });
+  }, [rows.length]);
+  return (
+    <aside className="hidden lg:flex flex-col w-[320px] h-[800px] text-neutral-200">
+      <div className="text-sm font-medium mb-1">why it said that</div>
+      <div className="text-[11px] text-neutral-500 mb-3">each turn, code picks one move from the research; the model writes the words.</div>
+      <div className="flex-1 overflow-y-auto space-y-3 pr-1">
+        {rows.length === 0 && <div className="text-xs text-neutral-500">moves show up here as the agent talks.</div>}
+        {rows.map((m) => (
+          <div key={m.id} className="rounded-xl bg-white/5 border border-white/10 p-3">
+            <div className="text-[11px] text-neutral-400 line-clamp-2">
+              {m.channel === "voice" ? "📞 " : ""}&ldquo;{m.text}&rdquo;
+            </div>
+            <div className="text-sm mt-1.5 text-[#c4d3f5]">{m.move!.label}</div>
+            <div className="text-[11px] text-neutral-500 mt-0.5 italic">{m.move!.source}</div>
+          </div>
+        ))}
+        <div ref={endRef} />
+      </div>
+    </aside>
   );
 }
 
@@ -532,7 +569,7 @@ function Bubble({
       <div className={`${gap} flex justify-start`}>
         <a href={`https://${m.text}`} target="_blank" rel="noreferrer" className="w-[78%] rounded-3xl overflow-hidden bg-[#26272c] border border-white/10 hover:brightness-110">
           <div className="h-20 bg-gradient-to-br from-[#e9ece8] to-[#c9d0c6] flex items-center gap-2 px-4 text-[#1f2420]">
-            <LoopMark /> <span className="font-medium">Persona</span>
+            <PersonaLogo size={28} /> <span className="font-medium">Persona</span>
           </div>
           <div className="px-4 py-2.5">
             <div className="text-sm">Terms, SMS Terms and Privacy Policy</div>
@@ -604,12 +641,23 @@ function linkify(text: string) {
   );
 }
 
-// Stand-in for Persona's continuous-line logo.
-function LoopMark() {
+// Persona's logo (black mark on white), used as the saved contact's profile photo.
+function PersonaLogo({ size }: { size: number }) {
   return (
-    <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" aria-hidden>
-      <path d="M5 18c2.5 0 4-3 5-6s2-6 4-6 3 2 2 4-4 4-6 4-4-1-4-3 2-3 4-2 3 3 4 5 2 4 4 4" />
-    </svg>
+    // eslint-disable-next-line @next/next/no-img-element
+    <img src="/persona-logo.png" alt="Persona" width={size} height={size} className="rounded-full bg-white object-cover" style={{ width: size, height: size }} />
+  );
+}
+
+// Unsaved contact: the generic yellow person avatar Google Messages shows for a bare number.
+function UnknownAvatar({ size }: { size: number }) {
+  return (
+    <div className="rounded-full bg-[#f9c22e] text-neutral-900 flex items-center justify-center" style={{ width: size, height: size }} aria-hidden>
+      <svg width={size / 2} height={size / 2} viewBox="0 0 24 24" fill="currentColor">
+        <circle cx="12" cy="8" r="4" />
+        <path d="M4 20c0-4 3.6-6 8-6s8 2 8 6z" />
+      </svg>
+    </div>
   );
 }
 
@@ -625,6 +673,7 @@ function GoogleG() {
 }
 
 function CallScreen(p: {
+  saved: boolean;
   said: string;
   name: string;
   status: string;
@@ -646,8 +695,9 @@ function CallScreen(p: {
   return (
     <div className="h-full w-full bg-gradient-to-b from-[#1d2433] to-[#0d0f14] text-neutral-100 flex flex-col items-center justify-between py-16">
       <div className="text-center">
-        <div className={`mx-auto w-24 h-24 rounded-full bg-amber-400 text-neutral-900 text-4xl font-semibold flex items-center justify-center ${p.speaking ? "ring-8 ring-amber-400/30 animate-pulse" : ""}`}>
-          {p.name.charAt(0).toUpperCase()}
+        {/* Saved contact: their photo, like any phone. Unsaved: a bare number and a generic avatar. */}
+        <div className={`mx-auto w-24 h-24 rounded-full flex items-center justify-center ${p.speaking ? "ring-8 ring-white/20 animate-pulse" : ""}`}>
+          {p.saved ? <PersonaLogo size={96} /> : <UnknownAvatar size={96} />}
         </div>
         <div className="mt-4 text-2xl">{p.name}</div>
         <div className="text-neutral-400 mt-1 text-sm">

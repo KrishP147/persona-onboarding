@@ -34,6 +34,7 @@ export interface Directive {
   mayAsk: boolean;
   offerCall: boolean;
   canGraduate: boolean;
+  callFirst: boolean;
   missing: SlotKey[];
   notes: string[];
   chips: string[];
@@ -53,6 +54,7 @@ export function computeDirective(s: Session, channel: Channel): Directive {
       mayAsk: false,
       offerCall: false,
       canGraduate: false,
+      callFirst: false,
       missing,
       notes: [
         "Onboarding is over; act as the full assistant. Only mention a missing item if it directly helps the current request.",
@@ -118,7 +120,7 @@ export function computeDirective(s: Session, channel: Channel): Directive {
     );
   }
 
-  return { nextSlot, mayAsk: mayAsk && !callFirst, offerCall, canGraduate, missing, notes, chips: chipsFor(s, channel, offerCall) };
+  return { nextSlot, mayAsk: mayAsk && !callFirst, offerCall, canGraduate, callFirst, missing, notes, chips: chipsFor(s, channel, offerCall) };
 }
 
 function chipsFor(s: Session, channel: Channel, offerCall: boolean): string[] {

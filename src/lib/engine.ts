@@ -5,6 +5,8 @@ import { RECAP_INSTRUCTION, SYSTEM_PROMPT } from "./prompt";
 import { mockReply } from "./mock";
 import { provider, quick, runToolLoop, type Part, type ToolDef, type Turn } from "./llm";
 import { DEMO_INBOX, recordOutcome, triageInbox } from "./triage";
+import { EVENT_MOVES, chooseMove, markUsed } from "./moves";
+import type { Move } from "./types";
 
 const MAX_TOOL_ROUNDS = 3;
 const HISTORY_LIMIT = 40;
@@ -117,6 +119,7 @@ export interface Ctx {
   newMessages: Msg[];
   resendOk?: boolean;
   newCard?: Msg;
+  move?: Move;
 }
 
 const WANTS_OUT = /\b(skip|not now|later|no more questions|stop asking|just (help|do|get)|let'?s (just )?(start|go)|that'?s (it|all)|i'?m good|enough setup)\b/i;
@@ -180,6 +183,13 @@ async function runTool(ctx: Ctx, name: string, input: Record<string, unknown>): 
       const lastFail = s.transcript.findLastIndex((m) => m.kind === "event" && /^Gmail connection/.test(m.text));
       if (lastLink >= 0 && lastLink > lastFail && !ctx.resendOk) return "already sent; it's still in their texts. don't send another, just point to it";
       const link = msg("agent", "text", "Connect your Google account", { kind: "gmail_link" });
+      if (ctx.channel === "voice") {
+        // On a call the ask still lands in the chat, in writing, right above the link.
+        const need = shortNeed(s);
+        const ask = msg("agent", "text", `here's the link to connect your gmail${need ? ` so i can help with ${need}` : ""}. it's read only, and i never send anything without asking you first.`);
+        ctx.newMessages.push(ask);
+        s.transcript.push(ask);
+      }
       ctx.newMessages.push(link);
       s.transcript.push(link);
       // They're off doing a task: silence is expected, don't nag with check-ins.
@@ -209,7 +219,16 @@ async function generate(ctx: Ctx, extraInstruction?: string): Promise<string> {
   const { s, channel } = ctx;
   if (!provider) return extraInstruction ? "" : mockReply(ctx, runTool);
   // The directive is computed once per turn; tool effects show up in the next turn's STATE.
-  const state = directiveText(s, computeDirective(s, channel), channel) + (extraInstruction ? `\n\nINSTRUCTION: ${extraInstruction}` : "");
+  const d = computeDirective(s, channel);
+  let state = directiveText(s, d, channel);
+  if (extraInstruction) state += `\n\nINSTRUCTION: ${extraInstruction}`;
+  else {
+    // One research-backed move per turn, chosen in code, so the principles actually get applied.
+    const move = chooseMove(s, channel, { callFirst: d.callFirst, mayAsk: d.mayAsk });
+    markUsed(s, move.id);
+    ctx.move = { id: move.id, label: move.label, source: move.source };
+    state += `\n\nMOVE THIS TURN (${move.label}): ${move.instruction}`;
+  }
   const r = await runToolLoop({ system: SYSTEM_PROMPT, state, turns: toTurns(s), tools: TOOLS, maxRounds: MAX_TOOL_ROUNDS }, (c) => runTool(ctx, c.name, c.input));
   if (r.refused) return "hmm, i can't help with that one. anything else on your mind?";
   return r.text;
@@ -266,7 +285,7 @@ function emitAgentText(ctx: Ctx, raw: string) {
   const text = stopAtRepeat(raw).replace(/\s*[—]\s*/g, ", ").replace(/^\s*\(on call\)\s*/gim, "").replace(/^\s*\*?\([^)]*\)\*?\s*$/gm, "").trim();
   const bubbles = ctx.channel === "voice" ? [text.replace(/\n+/g, " ").trim()] : text.split(/\n\s*\n/).map((b) => b.trim());
   for (const b of bubbles.filter(Boolean)) {
-    const m = msg("agent", ctx.channel, b);
+    const m = msg("agent", ctx.channel, b, ctx.move ? { move: ctx.move } : {});
     ctx.newMessages.push(m);
     ctx.s.transcript.push(m);
   }
@@ -278,10 +297,10 @@ async function turn(
   channel: Channel,
   extraInstruction?: string,
   fallback?: string,
-  opts: { forceEnd?: boolean } = {},
+  opts: { forceEnd?: boolean; move?: Move } = {},
 ): Promise<TurnResult> {
   const resendOk = /\b(resend|send (it|the link) again|another link|new link|lost the link)\b/i.test(lastUserText(s));
-  const ctx: Ctx = { s, channel, actions: [], newMessages: [], resendOk };
+  const ctx: Ctx = { s, channel, actions: [], newMessages: [], resendOk, move: opts.move };
   let text = "";
   try {
     text = await generate(ctx, extraInstruction);
@@ -307,6 +326,19 @@ async function turn(
   return { session: s, newMessages: ctx.newMessages, chips: final.chips, actions: ctx.actions };
 }
 
+const NOT_A_NAME = /^(no|nah|nope|idk|i don'?t know|you pick|whatever|skip|why|what|hi|hey|hello|yes|yeah|ok|okay|sure)\b/i;
+
+// Right after the agent asks for its name, a short reply like "Julia" or "call you Max" is the name.
+async function captureAgentName(s: Session, channel: Channel, text: string): Promise<Msg | undefined> {
+  if (channel !== "text" || s.slots.agentName.status !== "missing" || s.lastAskedSlot !== "agentName") return;
+  const m = text.trim().match(/^(?:(?:i'?ll |let'?s |i wanna |i want to )?call (?:you|yourself) |how about |go with |name(?: you)?(?: is)? )?([\p{L}][\p{L}'-]{0,19}(?: [\p{L}][\p{L}'-]{0,19})?)[.!]?$/iu);
+  if (!m || NOT_A_NAME.test(m[1])) return;
+  const value = m[1].replace(/\b\p{L}/gu, (c) => c.toUpperCase());
+  const ctx: Ctx = { s, channel, actions: [], newMessages: [] };
+  await runTool(ctx, "set_slot", { slot: "agentName", value });
+  return ctx.newCard;
+}
+
 export async function handleUserMessage(
   s: Session,
   channel: Channel,
@@ -321,6 +353,8 @@ export async function handleUserMessage(
   s.transcript.push(userMsg);
   recordOutcome(s, clean); // did they act on the last interruption, or wave it off?
   if (channel === "voice") s.call.silenceStrikes = 0;
+  // Name reply safety net: models sometimes say "julia it is" without saving it.
+  const named = await captureAgentName(s, channel, clean);
   if (/^\s*skip setup\s*$/i.test(clean) && s.phase !== "graduated") {
     return turn(s, channel, "The user tapped 'Skip setup'. Respect it: call graduate, then ask what they want to get done first.");
   }
@@ -331,6 +365,11 @@ export async function handleUserMessage(
     channel === "voice" ? "sorry, say that one more time?" : "ha, fair. what's going on?",
   );
   r.newMessages.unshift(userMsg);
+  if (named && !r.newMessages.includes(named)) {
+    // Card goes after the text, like persona's.
+    if (!s.transcript.includes(named)) s.transcript.push(named);
+    r.newMessages.push(named);
+  }
   return r;
 }
 
@@ -361,7 +400,7 @@ export async function handleEvent(s: Session, e: SessionEvent): Promise<TurnResu
         msg("agent", "text", "Hey! I'm your new personal assistant"),
         msg("agent", "text", INTRO_CAPABILITIES),
         msg("agent", "text", "yourpersona.com/legal", { kind: "link_preview" }),
-        msg("agent", "text", "What do you want to call me?"),
+        msg("agent", "text", "What do you want to call me?", { move: EVENT_MOVES.intro }),
       ];
       s.transcript.push(...intro);
       recordAsk(s, "agentName");
@@ -377,6 +416,7 @@ export async function handleEvent(s: Session, e: SessionEvent): Promise<TurnResu
         "voice",
         "The call just connected. Two short spoken sentences, normal punctuation: a warm hello with your name, then one easy question that picks up where the texts left off (never re-ask anything already known). Like: \"hey, it's julia! what should i call you?\"",
         "hey, it's me. thanks for picking up, this'll only take a minute.",
+        { move: EVENT_MOVES.greet },
       );
     case "call_declined":
       s.call = { ...s.call, active: false, endedReason: "declined" };
@@ -388,6 +428,7 @@ export async function handleEvent(s: Session, e: SessionEvent): Promise<TurnResu
         "text",
         "The user declined the call. Totally fine: one short, easygoing text that you're happy to keep it to texting. No question this time.",
         "no worries, texting works great.",
+        { move: EVENT_MOVES.declined },
       );
     case "call_ended": {
       if (!s.call.active) return idle(); // duplicate hangup events
@@ -405,7 +446,7 @@ export async function handleEvent(s: Session, e: SessionEvent): Promise<TurnResu
           : e.reason === "user_hangup"
             ? "They hung up (maybe on purpose, maybe not)."
             : "The line dropped on our side.";
-      return turn(s, "text", `${RECAP_INSTRUCTION} ${how} Call lasted ${secs}s.`, recapFallback(s, e.reason));
+      return turn(s, "text", `${RECAP_INSTRUCTION} ${how} Call lasted ${secs}s.`, recapFallback(s, e.reason), { move: EVENT_MOVES.recap });
     }
     case "silence": {
       if (!s.call.active) return idle();
@@ -416,7 +457,7 @@ export async function handleEvent(s: Session, e: SessionEvent): Promise<TurnResu
           "voice",
           "The user has been silent for a while. Say it seems like now isn't a great time, which is totally fine, that you'll text them instead, and say goodbye by name if you know it. Then call end_call.",
           goodbyeLine(s),
-          { forceEnd: true },
+          { forceEnd: true, move: EVENT_MOVES.silence },
         );
         return r;
       }
@@ -427,6 +468,7 @@ export async function handleEvent(s: Session, e: SessionEvent): Promise<TurnResu
           ? `The user has gone quiet. Don't say "still there?". Offer help instead: "take your time. want me to say that again?" or restate your last question more simply.`
           : `Still quiet (${s.call.silenceStrikes}x). Offer an easy out: you can just text them instead if that's easier.`,
         s.call.silenceStrikes === 1 ? "take your time. want me to say that again?" : "no pressure. i can also just text you if that's easier.",
+        { move: EVENT_MOVES.silence },
       );
     }
     case "contact_saved":
@@ -466,7 +508,7 @@ export async function handleEvent(s: Session, e: SessionEvent): Promise<TurnResu
         inboxNote = `Nothing in their unread mail looks urgent (no deadlines, money issues, or people waiting). Don't list emails or invent any. Just say it's connected and nothing needs them right now; you'll keep the rest for a digest.`;
         fallback = "gmail's connected. nothing urgent in there, i'll keep the rest for a digest.";
       }
-      return turn(s, s.call.active ? "voice" : "text", `Their Gmail just connected. ${inboxNote}`, fallback);
+      return turn(s, s.call.active ? "voice" : "text", `Their Gmail just connected. ${inboxNote}`, fallback, t.interrupt ? { move: EVENT_MOVES.interrupt } : {});
     }
     case "gmail_failed": {
       const cancelled = /access_denied|cancel/i.test(e.error);

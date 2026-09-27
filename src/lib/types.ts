@@ -41,6 +41,13 @@ export interface Msg {
   ts: number;
   kind?: MsgKind;
   attachments?: Attachment[];
+  move?: Move; // which research-backed move produced this agent message (shown in the side panel)
+}
+
+export interface Move {
+  id: string;
+  label: string;
+  source: string;
 }
 
 export interface CallState {
@@ -67,7 +74,8 @@ export interface Session {
   gmailEmail?: string;
   gmailUnread?: number; // small value moment at connect time; tokens are never stored
   gmailVerified?: { email: string; unread?: number; demo?: boolean; inbox?: InboxItem[] }; // set by the oauth callback, consumed by the gmail_connected event
-  alerts?: Alert[]; // interruptions shown, with outcomes (see src/lib/triage.ts)
+  alerts?: Alert[];
+  movesUsed?: string[]; // conversation moves already made (src/lib/moves.ts) // interruptions shown, with outcomes (see src/lib/triage.ts)
   graduatedReason?: string;
   transcript: Msg[];
 }

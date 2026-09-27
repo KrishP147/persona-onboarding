@@ -66,6 +66,7 @@ stop asking "how do i get their info" and ask "what would a great human assistan
 
 ## where to find it in the code
 
+- the principles as conversation moves, one picked in code each turn: `src/lib/moves.ts`. a prompt full of principles got applied unevenly, so now code decides the move (ask about a specific recent moment, dig into the last time it happened, play back their words, give before asking, answer then bridge, offer an easy next step) and the model only writes the words. the "why it said that" panel beside the phone shows which move and which book produced each message.
 - system prompt with the principles: `src/lib/prompt.ts`
 - mood gauge and what each mood changes: `src/lib/mood.ts`
 - nudge budget, call offers, graduation: `src/lib/policy.ts`

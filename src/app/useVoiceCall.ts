@@ -29,18 +29,19 @@ type Rec = {
 };
 
 const SILENCE_MS = 6000;
-const TURN_END_COMPLETE_MS = 700;
-const TURN_END_MIDPHRASE_MS = 1500;
-const TURN_END_SPELLING_MS = 2000;
+const TURN_END_COMPLETE_MS = 450;
+const TURN_END_MIDPHRASE_MS = 1000;
+const TURN_END_SPELLING_MS = 1600;
 const TRAILING = /\b(and|but|or|so|because|the|a|an|my|is|are|to|of|with|for|um+|uh+|like|then|if|at|dot)$/i;
 const SPELLING = /(\d\s*){3,}$|@|\bdot\b|\bat\b\s*$|\bemail is\b|\bnumber is\b|\baddress is\b/i;
 
 // How long to wait before deciding the user is done talking.
-function turnEndDelay(text: string) {
+function turnEndDelay(text: string, speechFinal = false) {
   const t = text.trim();
   if (SPELLING.test(t)) return TURN_END_SPELLING_MS;
   if (TRAILING.test(t) || /,$/.test(t)) return TURN_END_MIDPHRASE_MS;
-  return TURN_END_COMPLETE_MS;
+  // Deepgram already heard the pause: answer almost right away, like a person would.
+  return speechFinal ? 200 : TURN_END_COMPLETE_MS;
 }
 const VOICE_KEY = "persona-voice-";
 
@@ -126,7 +127,7 @@ function sentences(text: string) {
   return out;
 }
 
-type Heard = (finals: string, interim: string) => void;
+type Heard = (finals: string, interim: string, speechFinal?: boolean) => void;
 
 // Deepgram live transcription straight from the browser. Resolves to a stop function, or null
 // if it can't start (no token, blocked socket): the caller falls back to Web Speech.
@@ -161,7 +162,7 @@ async function startDeepgram(sessionId: string, stream: MediaStream, onHeard: He
         if (m.type !== "Results") return;
         const t = String(m.channel?.alternatives?.[0]?.transcript ?? "");
         if (!t.trim()) return;
-        if (m.is_final) onHeard(t, "");
+        if (m.is_final) onHeard(t, "", !!m.speech_final);
         else onHeard("", t);
       } catch {}
     };
@@ -399,7 +400,7 @@ export function useVoiceCall(opts: {
     genRef.current += 1;
     if (window.speechSynthesis) voiceRef.current = await lockVoice(styleRef.current);
 
-    const onHeard: Heard = (finals, interim) => {
+    const onHeard: Heard = (finals, interim, speechFinal) => {
       const latest = (finals || interim).trim();
       if (!latest) return;
       // While the agent talks, ignore its own voice coming back through the mic.
@@ -423,7 +424,7 @@ export function useVoiceCall(opts: {
       turnTimer.current = setTimeout(() => {
         if (interim.trim() && !finals.trim()) bufferRef.current += ` ${interim.trim()}`;
         flushTurn();
-      }, turnEndDelay(`${bufferRef.current} ${interim}`));
+      }, turnEndDelay(`${bufferRef.current} ${interim}`, speechFinal));
     };
 
     // Prefer Deepgram; fall back to the browser recognizer if it can't start or drops mid-call.
