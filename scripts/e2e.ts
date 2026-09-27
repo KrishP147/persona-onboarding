@@ -73,7 +73,9 @@ async function main() {
   const saveBtn = await page.waitForSelector("xpath/.//button[normalize-space()='Save']", { timeout: 15000 }).catch(() => null);
   check("contact card has a save button", !!saveBtn);
   if (saveBtn) {
-    await saveBtn.click();
+    // The thread may still be smooth-scrolling; click the element itself, not a screen position.
+    await new Promise((r) => setTimeout(r, 600));
+    await page.evaluate(() => [...document.querySelectorAll("button")].find((b) => b.textContent?.trim() === "Save")?.click());
     check("header shows the name once saved", await page.waitForFunction(() => document.querySelector("header")?.textContent?.includes("Julia"), { timeout: 3000 }).then(() => true).catch(() => false));
   }
   await snap(page, "named");

@@ -535,7 +535,7 @@ async function handleEventInner(s: Session, e: SessionEvent): Promise<TurnResult
         s,
         "voice",
         "The call just connected. Two short spoken sentences, normal punctuation: a warm hello with your name, then one easy question that picks up where the texts left off (never re-ask anything already known). Like: \"hey, it's julia! what should i call you?\"",
-        "hey, it's me. thanks for picking up, this'll only take a minute.",
+        `hey, it's ${s.slots.agentName.value ?? "me"}! thanks for picking up.${s.slots.userName.status === "missing" ? " what should i call you?" : ""}`,
         { move: EVENT_MOVES.greet },
       );
     case "call_declined":

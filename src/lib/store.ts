@@ -9,6 +9,7 @@ import { SLOT_KEYS } from "./types";
 // - deployed: Upstash Redis over its REST API (serverless has no writable disk and many instances)
 interface Backend {
   incrDaily(name: string): Promise<number>;
+  incrTotal(name: string): Promise<number>;
   get(id: string): Promise<string | null>;
   set(id: string, value: string): Promise<void>;
   lock(id: string): Promise<() => Promise<void>>;
@@ -48,6 +49,11 @@ const memLocks = new Map<string, Promise<unknown>>();
 const memCounters = new Map<string, number>();
 
 const fileBackend: Backend = {
+  async incrTotal(name) {
+    const n = (memCounters.get(`total:${name}`) ?? 0) + 1;
+    memCounters.set(`total:${name}`, n);
+    return n;
+  },
   async incrDaily(name) {
     const key = `${name}:${new Date().toISOString().slice(0, 10)}`;
     const n = (memCounters.get(key) ?? 0) + 1;
@@ -91,6 +97,7 @@ function upstash(url: string, token: string): Backend {
     return ((await res.json()) as { result: T }).result;
   }
   return {
+    incrTotal: (name) => cmd<number>("INCR", `count:${name}:total`),
     async incrDaily(name) {
       const key = `count:${name}:${new Date().toISOString().slice(0, 10)}`;
       const n = await cmd<number>("INCR", key);
@@ -125,6 +132,7 @@ const backend: Backend =
 
 // Shared daily counter (across serverless instances when Upstash is configured).
 export const incrDaily = (name: string) => backend.incrDaily(name);
+export const incrTotal = (name: string) => backend.incrTotal(name);
 
 export async function loadSession(id: string): Promise<Session | null> {
   const raw = await backend.get(safeId(id));

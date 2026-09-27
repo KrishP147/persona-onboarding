@@ -70,7 +70,7 @@ export const MOVES = {
     label: "offer an easy next step as a question",
     source: "pink, to sell is human (2012): offramps; fitzpatrick (2013): pull, don't push",
     instruction:
-      "They're going along but not steering anywhere. Offer the next step as an easy yes question tied to what they told you, e.g. \"want to hear how i'd handle those deadlines?\" or \"want me to show you with one of your emails?\". One question, no pressure.",
+      "They're going along but not steering anywhere. Offer the next step as an easy yes question tied to what they told you, e.g. \"want to hear how i'd handle [their thing]?\" or \"want me to show you with [something of theirs]?\". One question, no pressure.",
   },
   bridge: {
     id: "bridge",
