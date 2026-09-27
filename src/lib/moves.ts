@@ -121,6 +121,13 @@ export function chooseMove(s: Session, channel: Channel, opts: { callFirst: bool
   if (channel === "voice" && s.call.byUser) return STALL.test(text) ? MOVES.offramp : MOVES.answer;
   // On the call, the name comes first and naturally (the greeting asks it).
   if (channel === "voice" && s.slots.userName.status === "missing" && !used(s, "ask-name")) return MOVES.askName;
+  // This is onboarding for a service they already signed up for, not customer discovery (journal 09):
+  // once we know what's bothering them, one mom test style question at most, then the gmail offer,
+  // on the call, while they're still talking about it. Asking to help ("anything you can offer?") skips the question.
+  if (channel === "voice" && need.status === "filled" && s.slots.gmail.status === "missing" && !used(s, "ask-gmail")) {
+    const questionsAsked = (s.movesUsed ?? []).filter((m) => DISCOVERY.has(m)).length;
+    if (questionsAsked >= 1 || ASKS_FOR_HELP.test(text)) return MOVES.askGmail;
+  }
   if (OFF_TOPIC.test(text) && text.length > 3 && !/\b(call|gmail|email|link)\b/i.test(text)) return opts.mayAsk ? MOVES.bridge : MOVES.answer;
   if (need.status === "missing") {
     // Only a clear "i know what i want, skip this", not every "just" or "can you".
@@ -130,11 +137,6 @@ export function chooseMove(s: Session, channel: Channel, opts: { callFirst: bool
   }
   // Dig only when the need is still vague; if they already gave the details, asking more feels like a form.
   const vague = (need.value ?? "").split(/\s+/).length <= 4 && text.split(/\s+/).length < 14;
-  // On a call, once we know what's bothering them, gmail is how we actually help: ask while they're still
-  // on the line (at most one follow-up question first), not in a text after hanging up.
-  if (channel === "voice" && need.status === "filled" && s.slots.gmail.status === "missing" && !used(s, "ask-gmail") && (!vague || used(s, "dig"))) {
-    return MOVES.askGmail;
-  }
   if (need.status === "filled" && !used(s, "dig") && vague) return MOVES.dig;
   if (need.status === "filled" && !used(s, "playback")) return MOVES.playback;
   if (STALL.test(text)) return MOVES.offramp;
@@ -148,3 +150,8 @@ export function markUsed(s: Session, id: string) {
   (s.movesUsed ??= []).push(id);
   if (s.movesUsed.length > 40) s.movesUsed.splice(0, s.movesUsed.length - 40);
 }
+
+// Moves that dig into their situation (each one is a question to them, even "give first" usually ends in one).
+const DISCOVERY = new Set(["discover", "dig", "give-first", "playback", "offramp"]);
+// They're asking what we can do for them: that's the cue to offer, not to ask another question.
+const ASKS_FOR_HELP = /\b(anything (you|u) (can|could) (do|offer)|what can (you|u) do|can (you|u) help|how (can|could|would) (you|u) help|is there (a|any|some) (way|solution|fix)|any (ideas|solution|suggestions))\b/i;

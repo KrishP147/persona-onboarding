@@ -266,6 +266,7 @@ export interface Ctx {
   allowEnd?: boolean; // the system decided to end the call (silence, skip setup, outage)
   sentEmail?: boolean; // send_email actually went out this turn
   shownDraft?: string; // a draft was posted this turn (the reply shouldn't repeat it)
+  softInstruction?: boolean; // the extra instruction is just context: still pick a move this turn
 }
 
 const WANTS_OUT = /\b(skip|not now|later|no more questions|stop asking|just (help|do|get)|let'?s (just )?(start|go)|that'?s (it|all)|i'?m good|i'?m done|enough setup|just let me (use|try)|stop)\b/i;
@@ -495,7 +496,7 @@ async function generate(ctx: Ctx, extraInstruction?: string): Promise<string> {
     state += `\nUNSENT DRAFT in the chat: to ${s.draft.to || "(no address yet)"}, "${s.draft.subject}". ${s.slots.gmail.status === "filled" ? "They can send it with a clear yes (send_email)." : "Gmail isn't connected, so it can't be sent until they connect."} Never say it was sent unless send_email succeeded.`;
   }
   if (extraInstruction) state += `\n\nINSTRUCTION: ${extraInstruction}`;
-  else {
+  if (!extraInstruction || ctx.softInstruction) {
     // One research-backed move per turn, chosen in code, so the principles actually get applied.
     const move = chooseMove(s, channel, { callFirst: d.callFirst, mayAsk: d.mayAsk });
     markUsed(s, move.id);
@@ -668,10 +669,10 @@ async function turn(
   channel: Channel,
   extraInstruction?: string,
   fallback?: string,
-  opts: { forceEnd?: boolean; move?: Move; avoid?: RegExp } = {},
+  opts: { forceEnd?: boolean; move?: Move; avoid?: RegExp; soft?: boolean } = {},
 ): Promise<TurnResult> {
   const resendOk = /\b(resend|send (it|the link) again|another link|new link|lost the link)\b/i.test(lastUserText(s));
-  const ctx: Ctx = { s, channel, actions: [], newMessages: [], resendOk, move: opts.move, allowEnd: !!opts.forceEnd };
+  const ctx: Ctx = { s, channel, actions: [], newMessages: [], resendOk, move: opts.move, allowEnd: !!opts.forceEnd, softInstruction: opts.soft };
   let text = "";
   let failed = false;
   try {
@@ -715,7 +716,7 @@ async function turn(
     ctx.actions.push({ type: "end_call" });
   }
   // Gmail, by the book: the gmail turn ends with the code-written question; other turns don't pitch it.
-  if (!extraInstruction && s.slots.gmail.status === "missing" && !ctx.newMessages.some((m) => m.kind === "gmail_link")) {
+  if ((!extraInstruction || ctx.softInstruction) && s.slots.gmail.status === "missing" && !ctx.newMessages.some((m) => m.kind === "gmail_link")) {
     const raisedIt = /\b(gmail|email|inbox|link)\b/i.test(lastUserText(s));
     const help = text.split(/(?<=[.!?])\s+/).filter((x) => !GMAIL_PITCH.test(x)).join(" ").trim();
     if (ctx.move?.id === "ask-gmail") {
@@ -967,6 +968,8 @@ export async function handleUserMessage(
     replyChannel,
     [early?.note, linkNote ?? sawText].filter(Boolean).join(" ") || (interrupted ? "They talked over you mid-sentence. Drop what you were saying and respond to what they just said; don't repeat your cut-off line unless they ask." : undefined),
     linkNote ? (channel === "voice" ? "okay, i'm texting you the link right now. it's the card that says connect your google account, tap it whenever you're ready." : "here you go, it's the card right there. signing in takes a few seconds.") : channel === "voice" ? "sorry, i missed that. say it one more time?" : "sorry, i lost my train of thought for a sec. can you say that again?",
+    // A note about an interruption or a text mid-call still gets this turn's move (like the gmail offer).
+    { soft: !linkNote },
   );
   if (linkSent.length) {
     // The link sits right before the reply that mentions it.

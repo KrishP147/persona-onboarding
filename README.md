@@ -14,6 +14,7 @@ if you only read one thing, read the journal. it's how my understanding of this 
 - [06. what stress testing found](docs/journal/06-stress-testing.md)
 - [07. deciding when to interrupt](docs/journal/07-interruptions.md)
 - [08. the long polish](docs/journal/08-polish.md)
+- [09. ask while it hurts](docs/journal/09-ask-while-it-hurts.md)
 - [reading list](docs/reading-list.md)
 
 ## running it
