@@ -20,8 +20,11 @@ each step says **type** (in the text box), **say** (out loud on the call), or **
    - **expect:** it uses your name and asks one light question about your week or what's been eating your time.
 7. **say:** something real, e.g. `i keep missing replies to recruiters`
    - **expect:** at most one follow-up about the last time it happened, or a playback of what you said. no pitch, no list of features.
-8. **expect** (at some point): it mentions a link in your texts. check the text thread: a written ask ("read only, i never send anything without asking") plus the google card.
-9. **say:** `ok sounds good, bye`
+8. **expect:** first a bit of real help or comfort about your problem, **then** a question like "want me to text you a link to connect your gmail?". no link appears before you say yes.
+9. **say:** `yeah sure`
+   - **expect:** "sent it to our texts". the text thread shows the written ask ("read only, i never send anything without asking") plus the google card.
+10. **say** something else, then wait: it should **not** hang up on its own while you're still talking to it.
+11. **say:** `ok sounds good, bye`
    - **expect:** a real goodbye with your name, then it hangs up. a short text follows that remembers what you talked about.
 
 ## 2. talk over it (barge-in)
