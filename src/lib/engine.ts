@@ -164,10 +164,15 @@ async function runTool(ctx: Ctx, name: string, input: Record<string, unknown>): 
       s.callOffers += 1;
       if (s.phase === "intro") s.phase = "call_offered";
       return "call buttons shown";
-    case "start_call":
+    case "start_call": {
       if (s.call.active) return "already on a call";
+      // They declined or hung up: never ring again unless they ask for a call afterwards.
+      const lastEnd = s.transcript.findLastIndex((m) => m.kind === "event" && /^Call (ended|declined)/.test(m.text));
+      const askedSince = s.transcript.slice(lastEnd + 1).some((m) => m.role === "user" && /\b(call|ring|phone)\b/i.test(m.text));
+      if (lastEnd >= 0 && s.call.endedReason !== "agent_ended" && !askedSince) return "error: they just declined or hung up. don't call again unless they ask; carry on over text";
       ctx.actions.push({ type: "start_call" });
       return "ringing the user";
+    }
     case "send_gmail_link": {
       if (s.slots.gmail.status === "filled") return `already connected as ${s.gmailEmail}`;
       const lastLink = s.transcript.map((m) => m.kind).lastIndexOf("gmail_link");
