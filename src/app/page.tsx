@@ -25,6 +25,13 @@ function storeId(id: string) {
 async function post<T>(url: string, body: unknown, keepalive = false): Promise<T> {
   // keepalive lets a hangup reach the server as the tab closes, but caps bodies at 64KB, so events only.
   const res = await fetch(url, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body), keepalive });
+  if (res.status === 409) {
+    // The previous turn on this conversation is still finishing: wait a beat and try once more.
+    await new Promise((r) => setTimeout(r, 1200));
+    const again = await fetch(url, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body), keepalive });
+    if (!again.ok) throw new Error(`${again.status}`);
+    return again.json();
+  }
   if (!res.ok) throw new Error(`${res.status}`);
   return res.json();
 }
