@@ -123,7 +123,7 @@ export function chooseMove(s: Session, channel: Channel, opts: { callFirst: bool
   if (OFF_TOPIC.test(text) && text.length > 3 && !/\b(call|gmail|email|link)\b/i.test(text)) return opts.mayAsk ? MOVES.bridge : MOVES.answer;
   if (need.status === "missing") {
     // Only a clear "i know what i want, skip this", not every "just" or "can you".
-    if (/\b(skip (this|setup|the setup|it|all this)|already know what i (want|need)|just (want|need) you to|let'?s (just )?get (to it|started))\b/i.test(text)) return MOVES.graduate;
+    if (/\b(skip (all (of )?)?(this|that|setup|the setup|it|the rest)|already know what i (want|need)|just (want|need) you to|let'?s (just )?get (to it|started))\b/i.test(text)) return MOVES.graduate;
     if (!opts.mayAsk) return MOVES.giveFirst;
     return STALL.test(text) && used(s, "discover") ? MOVES.offramp : MOVES.discover;
   }

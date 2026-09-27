@@ -247,6 +247,8 @@ function gmailConsent(s: Session) {
   return !!prevAgent && ASKED_LINK.test(prevAgent.text) && explicitYes;
 }
 
+// A clear "skip setup" (not every "skip"): skip this / all of this / the setup / the rest / ahead.
+const SKIP_SETUP = /\b(skip (all (of )?)?(this|that|it|setup|the setup|the rest|ahead|the questions)|(forget|no more|enough) (the )?(setup|questions)|stop asking (me )?questions)\b/i;
 const SKIP_OFFER = /\b(skip|jump (right )?in|get (right )?started|start (on|with))\b/i;
 const YES = /^\s*(yes|yeah|yep|yup|sure|ok(ay)?|do it|please|go ahead|let'?s do it|sounds good|perfect)\b/i;
 
@@ -746,6 +748,23 @@ export async function handleUserMessage(
     s.slots.gmail.status = "declined";
   }
   const heard = extract(s, clean);
+  // "skip all this, just find me sushi": setup ends now, in code, and the request gets answered.
+  if (!s.call.active && s.phase !== "graduated" && SKIP_SETUP.test(clean)) {
+    s.phase = "graduated";
+    s.graduatedReason = "they skipped setup";
+    for (const k of Object.keys(s.slots) as SlotKey[]) if (s.slots[k].status === "missing") s.slots[k].status = "deferred";
+    const bare = /^\s*(ok(ay)?,?\s*)?(can we |let'?s |i want to |just )?skip( all( of)?)?( this| that| it| setup| the setup| the rest)*\W*$/i.test(clean);
+    const r = await turn(
+      s,
+      "text",
+      bare
+        ? "They skipped setup, and setup is over: you're their full assistant now. Say that's fine in a few words and ask what they want to get done first. Don't ask for their name, Gmail, or a call."
+        : "They skipped setup, and setup is over: you're their full assistant now. Help with what they asked for in this same message, right now, in text. Don't offer a call, and don't ask for their name or Gmail.",
+    );
+    r.actions.push({ type: "graduate" });
+    r.newMessages.unshift(userMsg);
+    return r;
+  }
   if (/^\s*skip setup\s*$/i.test(clean) && s.phase !== "graduated") {
     const skip = s.call.active
       ? await turn(s, channel, "They want to skip the rest of setup. Say a short goodbye, say you'll pick it up over text, and call end_call.", goodbyeLine(s), { forceEnd: true })
