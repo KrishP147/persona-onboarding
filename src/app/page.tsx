@@ -273,7 +273,6 @@ export default function Home() {
   };
   const onCall = call.status === "active" || call.status === "connecting";
   const thread = messages.filter((m) => m.channel !== "voice");
-  const lastSaid = [...messages].reverse().find((m) => m.channel === "voice" && m.role === "agent" && (!call.startedAt || m.ts >= call.startedAt))?.text ?? "";
 
   return (
     <main className="min-h-dvh bg-neutral-950 flex items-center justify-center gap-8 p-0 sm:p-6">
@@ -414,7 +413,7 @@ export default function Home() {
       {call.status !== "idle" && (
         <div className="fixed inset-0 z-20 sm:static sm:z-auto w-full sm:w-[390px] h-dvh sm:h-[800px] sm:rounded-[44px] sm:border-[10px] border-neutral-800 overflow-hidden shadow-2xl">
         <CallScreen
-          said={lastSaid}
+          said={call.caption}
           name={agentName}
           status={call.status}
           speaking={call.speaking}

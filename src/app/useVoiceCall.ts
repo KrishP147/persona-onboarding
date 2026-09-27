@@ -88,10 +88,11 @@ async function fetchClip(sessionId: string, text: string, style: VoiceStyle): Pr
   }
 }
 
-function speakBrowser(text: string, voice?: SpeechSynthesisVoice) {
+function speakBrowser(text: string, voice: SpeechSynthesisVoice | undefined, onStart: () => void) {
   return new Promise<void>((resolve) => {
     if (!window.speechSynthesis) return resolve();
     const u = new SpeechSynthesisUtterance(text);
+    u.onstart = onStart;
     if (voice) u.voice = voice;
     u.rate = 1.03;
     u.onend = () => resolve();
@@ -196,6 +197,7 @@ export function useVoiceCall(opts: {
   const [speaking, setSpeaking] = useState(false);
   const [listening, setListening] = useState(false);
   const [heard, setHeard] = useState("");
+  const [caption, setCaption] = useState(""); // the sentence being spoken right now, set when audio starts
   const [startedAt, setStartedAt] = useState<number | null>(null);
 
   const recRef = useRef<Rec | null>(null);
@@ -240,9 +242,10 @@ export function useVoiceCall(opts: {
     window.speechSynthesis?.cancel();
   };
 
-  const playUrl = (url: string) =>
+  const playUrl = (url: string, onStart: () => void) =>
     new Promise<void>((resolve) => {
       const el = new Audio(url);
+      el.onplaying = onStart;
       const done = () => {
         URL.revokeObjectURL(url);
         if (audioRef.current?.el === el) audioRef.current = null;
@@ -300,6 +303,7 @@ export function useVoiceCall(opts: {
     setListening(false);
     setSpeaking(false);
     setHeard("");
+    setCaption("");
   }, []);
 
   const hangUp = useCallback(
@@ -341,10 +345,11 @@ export function useVoiceCall(opts: {
             setSpeaking(true);
             const url = await clips[i];
             if (gen !== genRef.current || !activeRef.current) return;
-            if (url) await playUrl(url);
+            const show = () => setCaption(parts[i]);
+            if (url) await playUrl(url, show);
             else {
               cloudTtsRef.current = false;
-              await speakBrowser(parts[i], voiceRef.current);
+              await speakBrowser(parts[i], voiceRef.current, show);
             }
           }
         })
@@ -488,5 +493,5 @@ export function useVoiceCall(opts: {
     return () => window.removeEventListener("pagehide", onHide);
   }, []);
 
-  return { status, setStatus, speaking, listening, heard, startedAt, accept, hangUp, speak, endAfterSpeaking, greeted, patience };
+  return { status, setStatus, speaking, listening, heard, caption, startedAt, accept, hangUp, speak, endAfterSpeaking, greeted, patience };
 }

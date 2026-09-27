@@ -241,19 +241,10 @@ export function goodbyeLine(s: Session) {
 
 // Used only if the model produced nothing: the post-call text must always arrive.
 export function recapFallback(s: Session, reason: string) {
-  const name = s.slots.userName.value;
-  const got: string[] = [];
-  if (s.slots.userName.status === "filled") got.push(`i'll call you ${name}`);
-  if (shortNeed(s)) got.push(`you want help with ${shortNeed(s)}`);
-  if (s.slots.gmail.status === "filled") got.push("gmail's connected");
-  const open = (["helpNeed", "gmail", "userName"] as SlotKey[]).find((k) => s.slots[k].status === "missing");
-  const nudge: Record<string, string> = {
-    helpNeed: "what's one thing you'd love off your plate this week?",
-    gmail: "whenever you want, the gmail link is right here.",
-    userName: "also, what should i call you?",
-  };
-  const opener = reason === "user_hangup" || reason === "error" ? "looks like we got cut off, no worries." : "thanks for the chat!";
-  return [opener, got.length ? `so far: ${got.join(", ")}.` : "", open ? nudge[open] : "reply here anytime, or call me back."].filter(Boolean).join("\n\n");
+  const need = shortNeed(s);
+  const keep = need ? ` i'll keep ${need} in mind.` : "";
+  if (reason === "user_hangup" || reason === "error") return `got cut off, no worries.${keep} text me whenever.`;
+  return `thanks for the chat!${keep} text or call me anytime.`;
 }
 
 // Cut a reply at the first repeated sentence (models occasionally loop: "let's go. let's go...").
@@ -373,7 +364,7 @@ export async function handleEvent(s: Session, e: SessionEvent): Promise<TurnResu
       return turn(
         s,
         "voice",
-        "The call just connected. Greet them warmly by your name if you have one, pick up where the texts left off (never re-ask anything already known), and say this'll take about a minute and they can hang up anytime.",
+        "The call just connected. Two short spoken sentences, normal punctuation: a warm hello with your name, then one easy question that picks up where the texts left off (never re-ask anything already known). Like: \"hey, it's julia! what should i call you?\"",
         "hey, it's me. thanks for picking up, this'll only take a minute.",
       );
     case "call_declined":
@@ -384,7 +375,7 @@ export async function handleEvent(s: Session, e: SessionEvent): Promise<TurnResu
       return turn(
         s,
         "text",
-        "The user declined the call. Totally fine: continue over text, no pressure, don't offer the call again this turn.",
+        "The user declined the call. Totally fine: one short, easygoing text that you're happy to keep it to texting. No question this time.",
         "no worries, texting works great.",
       );
     case "call_ended": {

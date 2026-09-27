@@ -5,7 +5,7 @@ import { MOOD_GUIDANCE, readMood } from "./mood";
 // what the next move is, so behavior stays consistent under adversarial users.
 
 export const MAX_ASKS_PER_SLOT = 2; // after this, defer and bring it up later only when relevant
-export const MAX_CONSECUTIVE_ASKS = 2; // then give value before asking again
+export const MAX_CONSECUTIVE_ASKS = 1; // after an ask, the next turn just responds like a person
 export const MAX_CALL_OFFERS = 2;
 export const MAX_SILENCE_STRIKES = 3;
 
@@ -166,7 +166,7 @@ export function directiveText(s: Session, d: Directive, channel: Channel): strin
     `PHASE: ${s.phase}`,
     s.slots.agentName.status === "filled" ? `CONTACT CARD: ${s.contactSaved ? "saved by the user" : "sent, not saved yet (a call from you shows up as an unknown number)"}` : "",
     `SLOTS:\n${slotLines}`,
-    d.nextSlot && d.mayAsk ? `NEXT TO GATHER (gently, woven in): ${SLOT_LABEL[d.nextSlot]}` : "NEXT TO GATHER: nothing this turn",
+    d.nextSlot && d.mayAsk ? `COULD ASK ABOUT (only if it flows naturally, fine to skip this turn): ${SLOT_LABEL[d.nextSlot]}` : "NEXT TO GATHER: nothing this turn",
     d.offerCall ? "You may offer a quick call (call offer_call) if it fits naturally." : "",
     d.notes.length ? `NOTES:\n- ${d.notes.join("\n- ")}` : "",
   ]
