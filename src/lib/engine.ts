@@ -281,7 +281,13 @@ async function turn(
 ): Promise<TurnResult> {
   const resendOk = /\b(resend|send (it|the link) again|another link|new link|lost the link)\b/i.test(lastUserText(s));
   const ctx: Ctx = { s, channel, actions: [], newMessages: [], resendOk };
-  let text = await generate(ctx, extraInstruction);
+  let text = "";
+  try {
+    text = await generate(ctx, extraInstruction);
+  } catch (err) {
+    // Provider down or overloaded: fall through to the scripted line rather than go quiet.
+    console.error("llm turn failed", err);
+  }
   if (!text.trim() && fallback) text = fallback;
   if (opts.forceEnd && !ctx.actions.some((a) => a.type === "end_call")) ctx.actions.push({ type: "end_call" });
   // Placing a call: the text is just the heads up; the talking happens on the call.
@@ -306,9 +312,11 @@ export async function handleUserMessage(
   text: string,
   attachments?: Attachment[],
   interrupted?: boolean,
+  clientId?: string,
 ): Promise<TurnResult> {
   const clean = text.slice(0, 4000);
-  const userMsg = msg("user", channel, clean, attachments?.length ? { attachments } : {});
+  // The client shows the message instantly under its own id; reuse it so there's no duplicate.
+  const userMsg = msg("user", channel, clean, { ...(attachments?.length ? { attachments } : {}), ...(clientId ? { id: clientId } : {}) });
   s.transcript.push(userMsg);
   if (channel === "voice") s.call.silenceStrikes = 0;
   if (/^\s*skip setup\s*$/i.test(clean) && s.phase !== "graduated") {
@@ -318,6 +326,7 @@ export async function handleUserMessage(
     s,
     channel,
     interrupted ? "They talked over you mid-sentence. Drop what you were saying and respond to what they just said; don't repeat your cut-off line unless they ask." : undefined,
+    channel === "voice" ? "sorry, say that one more time?" : "ha, fair. what's going on?",
   );
   r.newMessages.unshift(userMsg);
   return r;

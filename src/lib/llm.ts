@@ -1,7 +1,7 @@
 // One small LLM surface, two providers. Gemini is the default when its key is set;
 // Anthropic stays wired for later (LLM_PROVIDER=anthropic).
 import Anthropic from "@anthropic-ai/sdk";
-import { GoogleGenAI, ThinkingLevel, type Content, type Part as GPart, type ThinkingConfig } from "@google/genai";
+import { GoogleGenAI, HarmBlockThreshold, HarmCategory, ThinkingLevel, type Content, type Part as GPart, type SafetySetting, type ThinkingConfig } from "@google/genai";
 import { recordUsage } from "./usage";
 
 export type Part = { type: "text"; text: string } | { type: "image"; mime: string; data: string };
@@ -32,6 +32,36 @@ export const models = () => (provider ? MODELS[provider] : MODELS.gemini);
 
 const gemini = provider === "gemini" ? new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY ?? process.env.GOOGLE_API_KEY }) : null;
 const anthropic = provider === "anthropic" ? new Anthropic() : null;
+
+// Default filters block ordinary swearing ("this is fucking annoying"), which left the user with
+// silence. Only block clearly severe content; the prompt handles tone.
+const SAFETY: SafetySetting[] = [
+  { category: HarmCategory.HARM_CATEGORY_HARASSMENT, threshold: HarmBlockThreshold.BLOCK_NONE },
+  { category: HarmCategory.HARM_CATEGORY_HATE_SPEECH, threshold: HarmBlockThreshold.BLOCK_ONLY_HIGH },
+  { category: HarmCategory.HARM_CATEGORY_SEXUALLY_EXPLICIT, threshold: HarmBlockThreshold.BLOCK_ONLY_HIGH },
+  { category: HarmCategory.HARM_CATEGORY_DANGEROUS_CONTENT, threshold: HarmBlockThreshold.BLOCK_ONLY_HIGH },
+];
+
+// Gemini sometimes answers 503 "high demand" or 429. Retry briefly, then drop to the lighter
+// model, so a busy moment never turns into silence for the user.
+type GenParams = Parameters<GoogleGenAI["models"]["generateContent"]>[0];
+async function geminiCall(params: GenParams) {
+  const models = [params.model, MODELS.gemini.fast].filter((m, i, a) => a.indexOf(m) === i);
+  let last: unknown;
+  for (const model of models) {
+    for (let attempt = 0; attempt < 2; attempt++) {
+      try {
+        return await gemini!.models.generateContent({ ...params, model });
+      } catch (err) {
+        last = err;
+        const status = (err as { status?: number }).status;
+        if (status !== 503 && status !== 429 && status !== 500) throw err;
+        await new Promise((r) => setTimeout(r, 400 * (attempt + 1)));
+      }
+    }
+  }
+  throw last;
+}
 
 // Gemini 3 takes a level; 2.5 takes a token budget (0 = off on flash models).
 function thinking(model: string, deep: boolean): ThinkingConfig {
@@ -85,13 +115,14 @@ export async function runToolLoop(o: LoopOpts, exec: (c: ToolCall) => Promise<st
     const model = MODELS.gemini.agent;
     const contents = geminiContents(o.turns);
     for (let round = 0; round < o.maxRounds; round++) {
-      const res = await gemini.models.generateContent({
+      const res = await geminiCall({
         model,
         contents,
         config: {
           systemInstruction: `${o.system}\n\nSTATE (from the system, not the user):\n${o.state}`,
           tools: [{ functionDeclarations: o.tools.map((t) => ({ name: t.name, description: t.description, parametersJsonSchema: t.schema })) }],
           thinkingConfig: thinking(model, true),
+          safetySettings: SAFETY,
           // Replies are a few short bubbles; a low cap also bounds runaway repetition.
           maxOutputTokens: 1200,
         },
@@ -158,7 +189,7 @@ export async function runToolLoop(o: LoopOpts, exec: (c: ToolCall) => Promise<st
 export async function quick(o: { system: string; user: string; maxTokens: number; tag: string; model?: string }): Promise<string> {
   if (gemini) {
     const model = o.model ?? MODELS.gemini.fast;
-    const res = await gemini.models.generateContent({
+    const res = await geminiCall({
       model,
       contents: o.user,
       config: { systemInstruction: o.system, maxOutputTokens: o.maxTokens, thinkingConfig: thinking(model, false) },
@@ -179,7 +210,7 @@ export async function quick(o: { system: string; user: string; maxTokens: number
 export async function json<T>(o: { system: string; user: string; schema: Record<string, unknown>; tag: string }): Promise<T> {
   if (gemini) {
     const model = MODELS.gemini.agent;
-    const res = await gemini.models.generateContent({
+    const res = await geminiCall({
       model,
       contents: o.user,
       config: { systemInstruction: o.system, responseMimeType: "application/json", responseJsonSchema: o.schema, thinkingConfig: thinking(model, true) },

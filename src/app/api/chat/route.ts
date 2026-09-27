@@ -7,6 +7,7 @@ const Body = z.object({
   channel: z.enum(["text", "voice"]),
   text: z.string().max(8000).default(""),
   interrupted: z.boolean().optional(),
+  clientId: z.string().regex(/^[A-Za-z0-9_-]{6,32}$/).optional(),
   attachments: z
     .array(
       z.object({
@@ -24,10 +25,10 @@ const Body = z.object({
 export async function POST(req: Request) {
   const parsed = Body.safeParse(await req.json().catch(() => null));
   if (!parsed.success) return Response.json({ error: "bad request" }, { status: 400 });
-  const { sessionId, channel, text, attachments, interrupted } = parsed.data;
+  const { sessionId, channel, text, attachments, interrupted, clientId } = parsed.data;
   if (!text.trim() && !attachments?.length) return Response.json({ error: "empty message" }, { status: 400 });
   try {
-    const result = await withSession(sessionId, (s) => handleUserMessage(s, channel, text, attachments, interrupted));
+    const result = await withSession(sessionId, (s) => handleUserMessage(s, channel, text, attachments, interrupted, clientId));
     return Response.json(result);
   } catch (err) {
     console.error("chat turn failed", err);

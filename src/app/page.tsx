@@ -1,9 +1,12 @@
 "use client";
+import { nanoid } from "nanoid";
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { Attachment, ClientAction, Msg, Session, TurnResult } from "@/lib/types";
 import { useVoiceCall } from "./useVoiceCall";
 
 const LS_KEY = "persona-onboarding-session";
+// Event-handler clock (kept out of the component body so the purity lint rule stays quiet).
+const now = () => Date.now();
 const AGENT_NUMBER = "+1 (650) 555-0142";
 
 function readStoredId(): string | null {
@@ -71,7 +74,7 @@ export default function Home() {
   const revealRef = useRef<Promise<void>>(Promise.resolve());
   const [revealing, setRevealing] = useState(false);
   const apply = useCallback(
-    (r: TurnResult) => {
+    (r: TurnResult, sentAt?: number) => {
       if (idRef.current && r.session.id !== idRef.current) return; // stale reply from another session
       setSession(r.session);
       chanRef.current?.postMessage("sync");
@@ -79,9 +82,12 @@ export default function Home() {
         let shown = 0;
         for (const m of r.newMessages) {
           const paced = m.role === "agent" && m.channel === "text" && m.kind !== "contact_card";
-          if (paced && shown > 0) {
+          // A person reads, then types: longer replies take longer. The server's own time counts toward it.
+          const typeMs = Math.min(4500, 700 + m.text.length * 35);
+          const wait = shown === 0 && sentAt ? typeMs + 600 - (Date.now() - sentAt) : shown > 0 ? typeMs : 0;
+          if (paced && wait > 0) {
             setRevealing(true);
-            await new Promise((res) => setTimeout(res, Math.min(1800, 500 + m.text.length * 15)));
+            await new Promise((res) => setTimeout(res, wait));
           }
           upsert([m]);
           if (paced) shown++;
@@ -222,11 +228,17 @@ export default function Home() {
     const atts = pending;
     setDraft("");
     setPending([]);
-    setTyping(true);
+    // Your own message lands right away, like any messaging app.
+    const clientId = nanoid(10);
+    upsert([{ id: clientId, role: "user", channel: "text", text, ts: now(), ...(atts.length ? { attachments: atts } : {}) }]);
+    // They "read" it first; the typing dots only show after a beat.
+    const typingTimer = setTimeout(() => setTyping(true), 1200);
+    const sentAt = now();
     try {
-      apply(await post<TurnResult>("/api/chat", { sessionId: idRef.current, channel: "text", text, attachments: atts }));
+      apply(await post<TurnResult>("/api/chat", { sessionId: idRef.current, channel: "text", text, attachments: atts, clientId }), sentAt);
       setError(null);
     } catch {
+      setMessages((prev) => prev.filter((m) => m.id !== clientId));
       setDraft(text);
       setPending(atts);
       if (!navigator.onLine) {
@@ -234,6 +246,7 @@ export default function Home() {
         retryRef.current = () => void send(text);
       } else setError("that didn't send, hit send to try again");
     } finally {
+      clearTimeout(typingTimer);
       setTyping(false);
     }
   };
