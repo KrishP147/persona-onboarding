@@ -361,8 +361,9 @@ export function useVoiceCall(opts: {
   );
 
   const speak = useCallback(
-    (text: string, isFiller = false) => {
-      if (!activeRef.current || !text.trim()) return;
+    // Resolves once this line has finished playing (or was cut off), so the chat can wait for it.
+    (text: string, isFiller = false): Promise<void> => {
+      if (!activeRef.current || !text.trim()) return Promise.resolve();
       if (!isFiller) clear(fillerTimer);
       clear(silenceTimer);
       queueRef.current += 1;
@@ -384,6 +385,8 @@ export function useVoiceCall(opts: {
           setTimeout(() => hangUp("agent_ended"), 400); // a beat after "bye", like a person
         } else if (!waitingRef.current) armSilence();
       };
+      let finished = () => {};
+      const spoken = new Promise<void>((res) => (finished = res));
       chainRef.current = chainRef.current
         .then(async () => {
           for (let i = 0; i < parts.length; i++) {
@@ -409,7 +412,9 @@ export function useVoiceCall(opts: {
         .finally(() => {
           abortersRef.current.delete(ctrl);
           if (gen === genRef.current) done();
+          finished();
         });
+      return spoken;
     },
     [armSilence, hangUp],
   );

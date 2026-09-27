@@ -80,7 +80,7 @@ export default function Home() {
     });
   }, []);
 
-  const actionsRef = useRef<(a: ClientAction[]) => void>(() => {});
+  const actionsRef = useRef<(a: ClientAction[]) => Promise<unknown>>(async () => {});
   const busyRef = useRef(0); // requests in flight (sends, voice turns)
   const voiceTurnRef = useRef(0);
   const ringTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -106,6 +106,19 @@ export default function Home() {
       setSession(r.session);
       chanRef.current?.postMessage("sync");
       revealRef.current = revealRef.current.then(async () => {
+        // On a call: say it first, then do it in the chat ("i'm texting you the link" -> the link shows up).
+        const speaks = r.actions.some((a) => a.type === "speak");
+        const later = speaks ? r.newMessages.filter((m) => m.role === "agent" && m.channel === "text") : [];
+        if (later.length) {
+          upsert(r.newMessages.filter((m) => !later.includes(m)));
+          const spoken = actionsRef.current(r.actions);
+          await Promise.race([spoken, new Promise((res) => setTimeout(res, 20000))]);
+          for (const m of later) {
+            await new Promise((res) => setTimeout(res, 500));
+            upsert([m]);
+          }
+          return;
+        }
         let shown = 0;
         for (const m of r.newMessages) {
           const paced = m.role === "agent" && m.channel === "text" && m.kind !== "contact_card";
@@ -189,6 +202,7 @@ export default function Home() {
     actionsRef.current = (actions) => {
       // Speech first, so a goodbye is queued before the hangup that waits for it.
       const ordered = [...actions].sort((a, b) => Number(b.type === "speak") - Number(a.type === "speak"));
+      let spoken: Promise<unknown> = Promise.resolve();
       for (const a of ordered) {
         // A real call takes a moment to come through after "calling you now."
         if (a.type === "start_call") {
@@ -204,10 +218,11 @@ export default function Home() {
             }, 30000);
           }, 3000);
         }
-        if (a.type === "speak") call.speak(a.text);
+        if (a.type === "speak") spoken = call.speak(a.text);
         if (a.type === "end_call") call.endAfterSpeaking(!!a.final);
         if (a.type === "patience") call.patience(a.ms);
       }
+      return spoken;
     };
   });
 
@@ -267,7 +282,12 @@ export default function Home() {
       setMessages(data.session.transcript);
       setMock(data.mock);
       // A call can't survive a reload: tell the server it dropped.
-      if (data.session.call.active) await sendEvent({ type: "call_ended", reason: "error" });
+      if (data.session.call.active) {
+        await sendEvent({ type: "call_ended", reason: "error" });
+        // The old page's hangup may still be finishing: show its "call ended" and recap when they land.
+        await resync();
+        setTimeout(() => void resync(), 4000);
+      }
       else if (data.session.transcript.length === 0) {
         setTyping(true);
         await sendEvent({ type: "open" });
