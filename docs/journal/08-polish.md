@@ -43,6 +43,15 @@ i had a separate agent review the client code cold. the worst finding: every goo
 
 it also found: a call you hang up while it's still connecting kept going, image sends always failed (a 64kb browser limit), a tab switch could wipe a message in flight, and on phones the call covered the texts with no way back. all fixed.
 
+a second review, of the server logic, found the subtler ones:
+
+- every question mark was counted as asking for whatever slot came next, so "want me to call?" three times could quietly use up the name ask. now a question is credited to what the move was actually about.
+- almost any short reply to "what do you want to call me?" became the assistant's name, including "lol" and "i'm dana". now "i'm dana" is taken as their name (which is what they meant), and fillers aren't names.
+- saying "yeah" to the agent's own "want to skip setup?" was refused. now it isn't.
+- "no, text is fine" after a call offer wasn't remembered as a no. now it is, same as tapping decline.
+- a model that said "calling you now!" alongside a call that code refused would send both. words written next to a failed action are dropped now.
+- after the agent hung up on a silent call, the text said "got cut off", which blames the line for something it did itself.
+
 ## the night the quota ran out
 
 halfway through the night, every reply turned into "sorry, i lost my train of thought". nothing was wrong with the code. gemini's free tier counts requests per model per day, and the limits are tiny: twenty a day for the newest flash models, five for one of them, five hundred for the light one. a single test run of fifteen simulated users is about three hundred requests. i'd spent the demo's whole day of quota testing it.
