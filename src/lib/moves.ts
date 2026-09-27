@@ -5,6 +5,7 @@
 // records which move produced it and where the idea comes from. The side panel shows that,
 // so you can see the research working. Sources: docs/journal/03-principles.md, 05-research.md.
 import type { Channel, Move, Session } from "./types";
+import { INBOUND_OWN_TURNS, userTurnsThisCall } from "./policy";
 
 export interface MoveDef extends Move {
   instruction: string;
@@ -79,6 +80,13 @@ export const MOVES = {
     instruction:
       "They asked something off to the side. Answer it briefly and honestly first. Then bridge back with one concrete, specific next step (not generic). If you're parking their topic, say you'll come back to it.",
   },
+  follow: {
+    id: "follow",
+    label: "they lead, you follow",
+    source: "rogers & farson, active listening (1957); nichols, the lost art of listening (1995)",
+    instruction:
+      "They just told you where they want to go. Go there now: help with exactly that, concretely. Don't redirect, don't dig into something else, don't \"back up\". If a setup step is what unlocks it, offer that step as the way to do it.",
+  },
   help: {
     id: "help",
     label: "get out of the way and help",
@@ -117,15 +125,26 @@ export function chooseMove(s: Session, channel: Channel, opts: { callFirst: bool
   const need = s.slots.helpNeed;
   if (s.phase === "graduated") return MOVES.help;
   if (opts.callFirst && channel === "text") return MOVES.askCall;
+  // The user leads. When they say what they want ("i want to use you for email"), go there now:
+  // for email that's the gmail offer (the setup step that unlocks it), otherwise just help. No more digging.
+  if (USER_LEADS.test(text) || ASKS_FOR_HELP.test(text)) {
+    if (s.slots.gmail.status === "missing" && !used(s, "ask-gmail") && /\b(e-?mails?|inbox|gmail|mail)\b/i.test(text)) return MOVES.askGmail;
+    return MOVES.follow;
+  }
   // They called us: listen and follow their lead.
-  if (channel === "voice" && s.call.byUser) return STALL.test(text) ? MOVES.offramp : MOVES.answer;
+  if (channel === "voice" && s.call.byUser && userTurnsThisCall(s) < INBOUND_OWN_TURNS) return STALL.test(text) ? MOVES.offramp : MOVES.answer;
   // On the call, the name comes first and naturally (the greeting asks it).
   if (channel === "voice" && s.slots.userName.status === "missing" && !used(s, "ask-name")) return MOVES.askName;
   // This is onboarding for a service they already signed up for, not customer discovery (journal 09):
   // once we know what's bothering them, one mom test style question at most, then the gmail offer,
   // on the call, while they're still talking about it. Asking to help ("anything you can offer?") skips the question.
   if (channel === "voice" && need.status === "filled" && s.slots.gmail.status === "missing" && !used(s, "ask-gmail")) {
-    const questionsAsked = (s.movesUsed ?? []).filter((m) => DISCOVERY.has(m)).length;
+    // Any question it already asked on this call counts (the move label doesn't matter).
+    const start = s.call.startedAt ?? 0;
+    const questionsAsked = Math.max(
+      (s.movesUsed ?? []).filter((m) => DISCOVERY.has(m)).length,
+      s.transcript.filter((m) => m.role === "agent" && m.channel === "voice" && m.ts >= start && m.move?.id !== "greet" && m.move?.id !== "silence" && m.text.trim().endsWith("?")).length,
+    );
     if (questionsAsked >= 1 || ASKS_FOR_HELP.test(text)) return MOVES.askGmail;
   }
   if (OFF_TOPIC.test(text) && text.length > 3 && !/\b(call|gmail|email|link)\b/i.test(text)) return opts.mayAsk ? MOVES.bridge : MOVES.answer;
@@ -155,3 +174,6 @@ export function markUsed(s: Session, id: string) {
 const DISCOVERY = new Set(["discover", "dig", "give-first", "playback", "offramp"]);
 // They're asking what we can do for them: that's the cue to offer, not to ask another question.
 const ASKS_FOR_HELP = /\b(anything (you|u) (can|could) (do|offer)|what can (you|u) do|can (you|u) help|how (can|could|would) (you|u) help|is there (a|any|some) (way|solution|fix)|any (ideas|solution|suggestions))\b/i;
+
+// They're steering: saying what they want, not answering our question.
+const USER_LEADS = /\b(i'?m (interested in|looking for|trying to)|i (want|need|would like|wanna) (you )?to|i'?d like (you )?to|(use|using) you (for|to)|let'?s (do|talk about|start|get)|help me (with|to)|can we (do|talk about|start))\b/i;

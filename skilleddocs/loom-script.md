@@ -56,4 +56,4 @@ i went through their onboarding myself first (journal 02). the gaps were all at 
 ## 5. how i know it holds up (30s)
 
 - stress tested: people who won't give a name, hang up, go silent, change their minds, or just say "haha". fifteen simulated difficult users, graded by a strict model (`pnpm harness`), a real browser walkthrough with a fake mic (`pnpm e2e`), and 23 manual scripts.
-- the reasoning and the sources are in the journal (docs/journal, 01 to 11).
+- the reasoning and the sources are in the journal (docs/journal, 01 to 12).

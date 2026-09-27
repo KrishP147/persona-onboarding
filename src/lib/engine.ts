@@ -718,7 +718,7 @@ async function turn(
   // Gmail, by the book: the gmail turn ends with the code-written question; other turns don't pitch it.
   if ((!extraInstruction || ctx.softInstruction) && s.slots.gmail.status === "missing" && !ctx.newMessages.some((m) => m.kind === "gmail_link")) {
     const raisedIt = /\b(gmail|email|inbox|link)\b/i.test(lastUserText(s));
-    const help = text.split(/(?<=[.!?])\s+/).filter((x) => !GMAIL_PITCH.test(x)).join(" ").trim();
+    const help = text.split(/(?<=[.!?])\s+/).filter((x) => !GMAIL_PITCH.test(x) && !(ctx.move?.id === "ask-gmail" && /\b(without your (ok|okay)|won.?t send)/i.test(x))).join(" ").trim();
     if (ctx.move?.id === "ask-gmail") {
       // On a call: one sentence of help, then the ask, so the question is never cut off.
       const lead = channel === "voice" ? capSentences(help.replace(/\?[^?]*$/, "."), 1) : help;
@@ -836,6 +836,9 @@ export async function handleUserMessage(
   const userMsg = msg("user", channel, clean, { ...(attachments?.length ? { attachments } : {}), ...(clientId ? { id: clientId } : {}) });
   s.transcript.push(userMsg);
   recordOutcome(s, clean); // did they act on the last interruption, or wave it off?
+  // A real answer ("mostly applying to jobs and schoolwork") pays for the question: the next turn can
+  // respond AND move things forward. Without this, a call went "yeah, that's a lot." and died.
+  if (clean.trim().split(/\s+/).length >= 5) s.consecutiveAsks = 0;
   // "no, text is fine" right after we offered a call: same as declining the ring.
   const prevAgent = [...s.transcript].slice(0, -1).reverse().find((m) => m.role === "agent" && (!m.kind || m.kind === "text"));
   if (channel === "text" && !s.call.active && prevAgent && OFFERED_CALL.test(prevAgent.text) && CALL_NO.test(clean) && !/\b(sure|yes|yeah|ok)\b/i.test(clean)) {
@@ -1143,7 +1146,12 @@ async function handleEventInner(s: Session, e: SessionEvent): Promise<TurnResult
         ctx.actions.push({ type: "end_call" });
         return { session: s, newMessages: ctx.newMessages, chips: computeDirective(s, "voice").chips, actions: ctx.actions };
       }
-      const line = !heardThemThisCall(s) ? "hello? can you hear me okay?" : s.call.holding ? "still there? no rush." : "you still with me?";
+      // When the conversation has just run out, pick it back up gently instead of "still there?".
+      const line = !heardThemThisCall(s)
+        ? "hello? can you hear me okay?"
+        : s.call.holding
+          ? "still there? no rush."
+          : "is there anything you wanted to ask me, about setup or anything else? i'm here to help, and we can always just text if that's easier.";
       const ctx: Ctx = { s, channel: "voice", actions: [{ type: "patience", ms: s.call.holding ? 30000 : 20000 }], newMessages: [], move: EVENT_MOVES.silence };
       emitAgentText(ctx, line);
       return { session: s, newMessages: ctx.newMessages, chips: computeDirective(s, "voice").chips, actions: ctx.actions };

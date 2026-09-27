@@ -66,8 +66,10 @@ export function computeDirective(s: Session, channel: Channel): Directive {
 
   const nextSlot = ORDER[channel].find((k) => isOpen(s, k)) ?? null;
 
-  // They called us: no gathering at all, it's their call.
-  const mayAsk = nextSlot !== null && s.consecutiveAsks < MAX_CONSECUTIVE_ASKS && !(channel === "voice" && s.call.byUser);
+  // They called us: their topic first. Setup can come back only after a few turns of theirs
+  // (the brief still wants it kept on track when something's missing).
+  const theirTurn = channel === "voice" && s.call.byUser && userTurnsThisCall(s) < INBOUND_OWN_TURNS;
+  const mayAsk = nextSlot !== null && s.consecutiveAsks < MAX_CONSECUTIVE_ASKS && !theirTurn;
   if (!mayAsk && nextSlot) {
     notes.push(
       "You've asked for things several turns in a row. This turn, give the user something useful (answer, idea, mini-demo) and do NOT ask for info.",
@@ -97,10 +99,10 @@ export function computeDirective(s: Session, channel: Channel): Directive {
   if (channel === "voice" && isOpen(s, "agentName")) {
     notes.push("Don't ask for your own name on the call; that happens over text. If the user offers one, accept it.");
   }
-  if (channel === "voice" && isOpen(s, "gmail") && nextSlot === "gmail" && !s.call.byUser) {
+  if (channel === "voice" && isOpen(s, "gmail") && nextSlot === "gmail" && !theirTurn) {
     notes.push("Gmail can't be connected by voice: call send_gmail_link and tell them the link is in their texts.");
   }
-  if (channel === "voice" && s.call.byUser) {
+  if (theirTurn) {
     notes.push(
       "They called you, so they're bringing something. Be there like a friend: listen, reflect what they said, follow their topic. Don't push setup items or any agenda, and don't bring up earlier topics (their old need, past emails, what you talked about before) unless they do. Short replies, comfortable with pauses.",
     );
@@ -111,7 +113,7 @@ export function computeDirective(s: Session, channel: Channel): Directive {
   if (rushed && !canGraduate && s.phase !== "on_call") {
     notes.push("They seem in a hurry: offer to skip the rest of setup and just start with whatever they need. Graduate only if they say yes.");
   }
-  if (s.slots.helpNeed.status === "filled" && !canGraduate && !(channel === "voice" && s.call.byUser)) {
+  if (s.slots.helpNeed.status === "filled" && !canGraduate && !theirTurn) {
     notes.push(
       "You know what they need: give a small concrete taste of help now, and tie whatever's left (especially Gmail) to that need. Don't graduate unless they ask to skip or stop setup.",
     );
@@ -205,4 +207,11 @@ function sharesWords(a: string, b: string) {
   const words = (x: string) => new Set(x.toLowerCase().match(/[a-z]{5,}/g) ?? []);
   const wb = words(b);
   return [...words(a)].some((w) => wb.has(w));
+}
+
+// On a call they started, this many of their turns belong to their topic before setup can come up.
+export const INBOUND_OWN_TURNS = 3;
+export function userTurnsThisCall(s: Session) {
+  const start = s.call.startedAt ?? 0;
+  return s.transcript.filter((m) => m.role === "user" && m.channel === "voice" && m.ts >= start).length;
 }
