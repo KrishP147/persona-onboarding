@@ -120,16 +120,6 @@ function similar(a: string, b: string) {
   return 1 - d[a.length][b.length] / Math.max(a.length, b.length);
 }
 
-// Speakers feed the agent's own voice back into the mic, often transcribed a little wrong.
-// It's echo when nearly every heard word matches (or nearly matches) something it just said.
-function looksLikeEcho(heard: string, speaking: string) {
-  const h = words(heard);
-  if (h.length === 0) return true;
-  if (!speaking) return false;
-  const said = words(speaking);
-  const matched = h.filter((w) => said.some((s) => similar(w, s) >= 0.6)).length;
-  return matched / h.length >= 0.75;
-}
 
 export type CallStatus = "idle" | "ringing" | "connecting" | "active" | "ended";
 
@@ -480,22 +470,24 @@ export function useVoiceCall(opts: {
       if (!latest) return;
       // A final goodbye is already on its way: let it finish; nothing said now changes the ending.
       if (finalEndRef.current && pendingEndRef.current) return;
-      // While the agent talks, ignore its own voice coming back through the mic.
-      if (span) {
-        // Deepgram says when this audio happened. If it overlapped our own playback (plus a short
-        // room tail), it may be our voice: drop it if it sounds like what we said then. If it came
-        // after we stopped, it's them, whatever the words.
-        const now = Date.now();
-        const overlapping = playbackRef.current.filter((p) => span[0] < (p.end ?? now) + 600 && span[1] > p.start);
-        if (overlapping.length && looksLikeEcho(latest, overlapping.map((p) => p.text).join(" "))) return;
-      } else if (queueRef.current > 0 && looksLikeEcho(latest, speakingTextRef.current)) return;
-      // ...and for a moment after it stops (speech-to-text lags), its own words still aren't them.
+      // Half duplex, like a speakerphone: anything heard while we were talking (by deepgram's own
+      // timestamps, or by arrival time without them) is our voice coming back through the mic,
+      // unless it's clearly them cutting in: 3+ words we didn't just say, or a lone "wait"/"stop".
+      // Ignored audio never shows up as "you".
+      const now = Date.now();
       const recent = lastSpokenRef.current;
-      if (!span && queueRef.current === 0 && Date.now() - recent.endedAt < 3000 && looksLikeEcho(latest, `${recent.text} ${prevSpokenRef.current}`)) return;
+      const overlapping = span ? playbackRef.current.filter((p) => span[0] < (p.end ?? now) + 300 && span[1] > p.start) : [];
+      const duringUs = queueRef.current > 0 || overlapping.length > 0 || (!span && now - recent.endedAt < 1200);
+      if (duringUs) {
+        const said = words([speakingTextRef.current, recent.text, prevSpokenRef.current, ...overlapping.map((p) => p.text)].join(" "));
+        const heardWords = words(latest);
+        const novel = heardWords.filter((w) => !said.some((x) => similar(w, x) >= 0.6));
+        const cutsIn = novel.length >= 3 && novel.length / heardWords.length >= 0.5;
+        const saysStop = heardWords.length <= 2 && STOP_WORDS.test(heardWords[0] ?? "") && !said.some((x) => similar(heardWords[0], x) >= 0.8);
+        if (!cutsIn && !saysStop) return;
+      }
       // Real speech over the agent: stop talking and listen (barge-in).
-      // Two real words, or one clear "wait"/"stop", stops it (a single stray word from noise doesn't).
-      const heardWords = words(latest);
-      if (queueRef.current > 0 && (heardWords.length >= 2 || STOP_WORDS.test(heardWords[0] ?? ""))) {
+      if (queueRef.current > 0) {
         stopAudio();
         queueRef.current = 0;
         pendingEndRef.current = false;
