@@ -37,7 +37,13 @@ const MODELS = {
 };
 export const models = () => (provider ? MODELS[provider] : MODELS.gemini);
 
-const gemini = provider === "gemini" ? new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY ?? process.env.GOOGLE_API_KEY }) : null;
+// Local dev and test runs use a key from a separate Google project (its own free quota), so testing
+// can never use up the live demo's quota. Production only ever sees GEMINI_API_KEY.
+const geminiKey = (process.env.NODE_ENV !== "production" && process.env.GEMINI_API_KEY_TWO) || process.env.GEMINI_API_KEY || process.env.GOOGLE_API_KEY;
+const gemini = provider === "gemini" ? new GoogleGenAI({ apiKey: geminiKey }) : null;
+// Cloudflare Workers AI: a free daily allowance, used as the second tier when gemini is out.
+const CF = process.env.CLOUDFLARE_API_TOKEN && process.env.CLOUDFLARE_ACCOUNT_ID ? { token: process.env.CLOUDFLARE_API_TOKEN, account: process.env.CLOUDFLARE_ACCOUNT_ID } : null;
+const CF_MODEL = process.env.CLOUDFLARE_MODEL ?? "@cf/meta/llama-4-scout-17b-16e-instruct";
 const anthropicClient = hasAnthropic ? new Anthropic() : null;
 const anthropic = provider === "anthropic" ? anthropicClient : null;
 const fallback = process.env.LLM_FALLBACK === "anthropic" ? anthropicClient : null;
@@ -141,8 +147,18 @@ export async function runToolLoop(o: LoopOpts, exec: Exec): Promise<LoopResult> 
   if (gemini) {
     try {
       return await geminiLoop(o, exec);
-    } catch (err) {
-      // Quota or outage: a paid fallback keeps the conversation going, only if explicitly enabled,
+    } catch (geminiErr) {
+      let err = geminiErr;
+      // Second tier, still free: cloudflare workers ai.
+      if (CF) {
+        try {
+          return await cloudflareLoop(CF, o, exec);
+        } catch (cfErr) {
+          console.error("cloudflare failed:", String((cfErr as Error).message ?? cfErr).slice(0, 160));
+          err = cfErr;
+        }
+      }
+      // Last resort: a paid fallback keeps the conversation going, only if explicitly enabled,
       // and only within a small daily budget so a busy day can't run up a bill.
       if (!fallback) throw err;
       if ((await incrDaily("anthropic-fallback").catch(() => Infinity)) > FALLBACK_DAILY_TURNS) throw err;
@@ -158,6 +174,82 @@ export async function runToolLoop(o: LoopOpts, exec: Exec): Promise<LoopResult> 
 // Gemini can return a reply in several text parts; gluing them blindly gave "sage it is.since...".
 function joinParts(parts: string[]) {
   return parts.reduce((acc, p) => (acc && /[.!?,]$/.test(acc) && /^\S/.test(p) ? `${acc} ${p}` : acc + p), "");
+}
+
+// OpenAI-style chat completions on Cloudflare Workers AI, with the same tool loop rules.
+type CfMessage =
+  | { role: "system" | "user"; content: string }
+  | { role: "assistant"; content: string | null; tool_calls?: { id: string; type: "function"; function: { name: string; arguments: string } }[] }
+  | { role: "tool"; tool_call_id: string; content: string };
+
+async function cloudflareLoop(cf: { token: string; account: string }, o: LoopOpts, exec: Exec): Promise<LoopResult> {
+  const out = collector();
+  const messages: CfMessage[] = [
+    { role: "system", content: `${o.system}\n\nSTATE (from the system, not the user):\n${o.state}` },
+    ...o.turns.map((t): CfMessage => {
+      const text = t.parts.map((p) => (p.type === "text" ? p.text : "[they sent a photo]")).join("\n");
+      return t.role === "user" ? { role: "user", content: text } : { role: "assistant", content: text };
+    }),
+  ];
+  const tools = o.tools.map((t) => ({ type: "function" as const, function: { name: t.name, description: t.description, parameters: t.schema } }));
+  for (let round = 0; round < o.maxRounds; round++) {
+    const res = await fetch(`https://api.cloudflare.com/client/v4/accounts/${cf.account}/ai/v1/chat/completions`, {
+      method: "POST",
+      headers: { Authorization: `Bearer ${cf.token}`, "Content-Type": "application/json" },
+      body: JSON.stringify({ model: CF_MODEL, messages, tools, max_tokens: 600 }),
+      signal: AbortSignal.timeout(15000),
+    });
+    if (!res.ok) throw new Error(`cloudflare ${res.status}: ${(await res.text()).slice(0, 160)}`);
+    const data = (await res.json()) as { choices?: { message?: { content?: string | null; tool_calls?: { id: string; function: { name: string; arguments: string | object } }[] } }[] };
+    const m = data.choices?.[0]?.message;
+    const roundText = (m?.content ?? "").trim();
+    const calls = m?.tool_calls ?? [];
+    if (calls.length === 0) {
+      out.add(roundText);
+      break;
+    }
+    const results: string[] = [];
+    for (const c of calls) {
+      let input: Record<string, unknown> = {};
+      try {
+        input = typeof c.function.arguments === "string" ? JSON.parse(c.function.arguments || "{}") : (c.function.arguments as Record<string, unknown>);
+      } catch {
+        input = {};
+      }
+      results.push(await exec({ name: c.function.name, input }));
+    }
+    const failed = results.some((r) => r.startsWith("error"));
+    if (!failed) out.add(roundText);
+    messages.push({
+      role: "assistant",
+      content: roundText || null,
+      tool_calls: calls.map((c) => ({ id: c.id, type: "function", function: { name: c.function.name, arguments: typeof c.function.arguments === "string" ? c.function.arguments : JSON.stringify(c.function.arguments) } })),
+    });
+    calls.forEach((c, i) => messages.push({ role: "tool", tool_call_id: c.id, content: results[i] }));
+    if (out.get() && !failed) break;
+  }
+  return { text: out.get() };
+}
+
+// One-shot text or JSON on cloudflare, for background helpers when gemini is out.
+async function cloudflareOnce(cf: { token: string; account: string }, system: string, user: string, maxTokens: number, schema?: Record<string, unknown>): Promise<string> {
+  const res = await fetch(`https://api.cloudflare.com/client/v4/accounts/${cf.account}/ai/v1/chat/completions`, {
+    method: "POST",
+    headers: { Authorization: `Bearer ${cf.token}`, "Content-Type": "application/json" },
+    body: JSON.stringify({
+      model: CF_MODEL,
+      messages: [
+        { role: "system", content: system },
+        { role: "user", content: user },
+      ],
+      max_tokens: maxTokens,
+      ...(schema ? { response_format: { type: "json_schema", json_schema: { name: "out", schema } } } : {}),
+    }),
+    signal: AbortSignal.timeout(15000),
+  });
+  if (!res.ok) throw new Error(`cloudflare ${res.status}`);
+  const data = (await res.json()) as { choices?: { message?: { content?: string | null } }[] };
+  return (data.choices?.[0]?.message?.content ?? "").trim();
 }
 
 function collector() {
@@ -299,9 +391,14 @@ export async function quick(o: { system: string; user: string; maxTokens: number
   const claude = claudeFor(o.via);
   if (gemini && !(o.via === "anthropic" && claude)) {
     const chain = o.model ? [o.model] : FAST_CHAIN;
-    const { res, model } = await geminiCall({ model: chain[0], contents: o.user, config: { systemInstruction: o.system, maxOutputTokens: o.maxTokens } }, { chain, deep: false });
-    await geminiUsage(model, o.tag, res.usageMetadata);
-    return (res.text ?? "").trim();
+    try {
+      const { res, model } = await geminiCall({ model: chain[0], contents: o.user, config: { systemInstruction: o.system, maxOutputTokens: o.maxTokens } }, { chain, deep: false });
+      await geminiUsage(model, o.tag, res.usageMetadata);
+      return (res.text ?? "").trim();
+    } catch (err) {
+      if (!CF) throw err;
+      return cloudflareOnce(CF, o.system, o.user, o.maxTokens);
+    }
   }
   if (claude) {
     const model = MODELS.anthropic.fast;
@@ -319,12 +416,17 @@ export async function json<T>(o: { system: string; user: string; schema: Record<
   if (gemini && !(o.via === "anthropic" && claude)) {
     // Background helpers (fast) only use the light model's quota, never the agent's.
     const chain = o.fast ? FAST_CHAIN : AGENT_CHAIN;
-    const { res, model } = await geminiCall(
-      { model: chain[0], contents: o.user, config: { systemInstruction: o.system, responseMimeType: "application/json", responseJsonSchema: o.schema } },
-      { chain, deep: !o.fast },
-    );
-    await geminiUsage(model, o.tag, res.usageMetadata);
-    return JSON.parse(res.text ?? "{}") as T;
+    try {
+      const { res, model } = await geminiCall(
+        { model: chain[0], contents: o.user, config: { systemInstruction: o.system, responseMimeType: "application/json", responseJsonSchema: o.schema } },
+        { chain, deep: !o.fast },
+      );
+      await geminiUsage(model, o.tag, res.usageMetadata);
+      return JSON.parse(res.text ?? "{}") as T;
+    } catch (err) {
+      if (!CF) throw err;
+      return JSON.parse((await cloudflareOnce(CF, o.system, o.user, 800, o.schema)) || "{}") as T;
+    }
   }
   if (claude) {
     const model = o.fast ? MODELS.anthropic.fast : MODELS.anthropic.agent;
