@@ -32,7 +32,7 @@ export const provider: "gemini" | "anthropic" | null =
   process.env.LLM_PROVIDER === "anthropic" && hasAnthropic ? "anthropic" : hasGemini ? "gemini" : hasAnthropic ? "anthropic" : null;
 
 const MODELS = {
-  gemini: { agent: process.env.GEMINI_MODEL ?? "gemini-2.5-flash", fast: process.env.GEMINI_FAST_MODEL ?? "gemini-3.5-flash-lite" },
+  gemini: { agent: process.env.GEMINI_MODEL ?? "gemini-3.5-flash-lite", fast: process.env.GEMINI_FAST_MODEL ?? "gemini-3.5-flash-lite" },
   anthropic: { agent: process.env.AGENT_MODEL ?? "claude-sonnet-5", fast: process.env.FAST_MODEL ?? "claude-haiku-4-5" },
 };
 export const models = () => (provider ? MODELS[provider] : MODELS.gemini);
@@ -63,7 +63,7 @@ const SAFETY: SafetySetting[] = [
 // skipped until it's likely back (a minute for per-minute limits, an hour for daily ones), so a
 // spent model never adds delay. 503 "high demand" gets one quick retry.
 type GenParams = Parameters<GoogleGenAI["models"]["generateContent"]>[0];
-const AGENT_CHAIN = (process.env.GEMINI_AGENT_CHAIN ?? "gemini-2.5-flash,gemini-3.5-flash-lite,gemini-flash-latest,gemini-3.5-flash").split(",");
+const AGENT_CHAIN = (process.env.GEMINI_AGENT_CHAIN ?? "gemini-3.5-flash-lite,gemini-2.5-flash,gemini-3.5-flash,gemini-flash-latest").split(",");
 const FAST_CHAIN = (process.env.GEMINI_FAST_CHAIN ?? "gemini-3.5-flash-lite").split(",");
 const coolUntil = new Map<string, number>();
 
@@ -99,7 +99,8 @@ async function geminiCall(params: GenParams, opts: { chain: string[]; deep: bool
 // Thinking settings differ by model family: 2.5 takes a token budget (0 = off), 3.x takes a level,
 // and some 3.x models don't accept MINIMAL. Chat wants the lightest setting: speed is part of feeling human.
 function thinking(model: string, deep: boolean): ThinkingConfig {
-  if (model.startsWith("gemini-2")) return { thinkingBudget: 0 };
+  // With thinking fully off, 2.5 flash drifted (tool names as text, offering a call mid-call); a small budget fixes it.
+  if (model.startsWith("gemini-2")) return { thinkingBudget: deep ? Number(process.env.GEMINI_THINKING_BUDGET ?? 384) : 0 };
   if (/latest|3\.8/.test(model)) return { thinkingLevel: ThinkingLevel.LOW };
   return { thinkingLevel: deep && process.env.GEMINI_AGENT_THINKING === "low" ? ThinkingLevel.LOW : ThinkingLevel.MINIMAL };
 }

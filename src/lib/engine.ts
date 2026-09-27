@@ -187,14 +187,26 @@ function userWrappingUp(s: Session) {
 
 // The gmail link goes out only after a yes: they asked for it, or said yes to our question about it.
 const WANTS_LINK = /\b(send (me )?(the |a )?link|connect (my )?(gmail|email|inbox)|hook (up )?my (gmail|email))\b/i;
-const ASKED_LINK = /\b(link|gmail|connect|inbox|email)\b[^?]*\?/i;
+// Our last message brought up the link (asked, or offered "i'll send you a link"), so a yes means yes to it.
+const ASKED_LINK = /\b(link|gmail|connect your)\b/i;
+// The gmail ask is written by code (one clear question, the reason, the reassurance, an easy no).
+const GMAIL_ASK_MARK = "text you a link to connect your gmail";
+function gmailAsk(s: Session) {
+  const need = shortNeed(s);
+  return `want me to ${GMAIL_ASK_MARK}?${need ? ` then i can help with ${need} for real.` : ""} it's read only, and i never send anything without asking. or you can just paste an email here.`;
+}
+// Gmail pitches the model slips into other turns (help first, ask later).
+const GMAIL_PITCH = /\b(gmail|link|connect (your|my) (email|inbox|account)|read[- ]only|paste an email|without asking|pull up (your|the|those) (emails|inbox))\b/i;
+
 function gmailConsent(s: Session) {
   const text = lastUserText(s);
   if (WANTS_LINK.test(text) && !/\b(don'?t|do not|no|not)\b/i.test(text)) return true;
   const users = s.transcript.map((m, i) => (m.role === "user" ? i : -1)).filter((i) => i >= 0);
   const lastUser = users[users.length - 1] ?? -1;
   const prevAgent = s.transcript.slice(0, lastUser).reverse().find((m) => m.role === "agent" && (!m.kind || m.kind === "text"));
-  return !!prevAgent && ASKED_LINK.test(prevAgent.text) && YES.test(text);
+  // "yeah it's been rough, i lose track..." agrees with the feeling, not to a link: a yes must be short or explicit.
+  const explicitYes = YES.test(text) && (text.trim().split(/\s+/).length <= 5 || /\b(sure|go ahead|send|do it|please|ok(ay)?|connect)\b/i.test(text));
+  return !!prevAgent && ASKED_LINK.test(prevAgent.text) && explicitYes;
 }
 
 const SKIP_OFFER = /\b(skip|jump (right )?in|get (right )?started|start (on|with))\b/i;
@@ -338,6 +350,10 @@ async function generate(ctx: Ctx, extraInstruction?: string): Promise<string> {
     markUsed(s, move.id);
     ctx.move = { id: move.id, label: move.label, source: move.source };
     state += `\n\nMOVE THIS TURN (${move.label}): ${move.instruction}`;
+    // Help first: gmail only comes up on its own turn (or if they raise it).
+    if (move.id !== "ask-gmail" && s.slots.gmail.status === "missing" && !/\b(gmail|email|inbox|link)\b/i.test(lastUserText(s))) {
+      state += "\nNot this turn: don't bring up gmail or a link.";
+    }
   }
   const r = await runToolLoop({ system: SYSTEM_PROMPT, state, turns: toTurns(s), tools: TOOLS, maxRounds: MAX_TOOL_ROUNDS }, (c) => runTool(ctx, c.name, c.input));
   if (r.refused) return "hmm, i can't help with that one. anything else on your mind?";
@@ -357,7 +373,9 @@ const INTRO_CAPABILITIES = [
 
 const GOODBYE = /\b(bye|goodbye|talk (to you )?(soon|later)|take care|catch you|ciao|see ya|i'?ll let you go|call me (back )?(whenever|anytime)|good talking|have a (good|great|nice|lovely) (one|day|night|evening|weekend)|see (you|ya)|later!|i'?ll text you( instead)?)\b/i;
 // "i just sent you a link" said without actually sending one.
-const CLAIMS_LINK = /\b(sent|dropped|texted|shared|popped)\b[^.?!]{0,40}\blink\b|\blink\b[^.?!]{0,30}\b(your texts|our texts|the chat|the thread)\b/i;
+const CLAIMS_LINK = /\b(sent|dropped|texted|shared|popped)\b[^.?!]{0,40}\b(link|it)\b|\blink\b[^.?!]{0,30}\b(your texts|our texts|the chat|the thread)\b|\b(it'?s|it is) (in|on) (your|our) texts\b/i;
+// Tool names occasionally leak into the reply text ("[send_gmail_link] sent it..."): never say them.
+const TOOL_NAMES = /\s*\[?\b(set_slot|decline_slot|offer_call|start_call|send_gmail_link|end_call|graduate|send_gif)\b\]?\s*/gi;
 
 function shortNeed(s: Session) {
   const n = s.slots.helpNeed.value;
@@ -399,7 +417,7 @@ function capSentences(text: string, max: number) {
 
 function emitAgentText(ctx: Ctx, raw: string) {
   // House style: no em dashes, no stage directions like "(waiting for reply)".
-  const text = stopAtRepeat(raw).replace(/\s*[—]\s*/g, ", ").replace(/^\s*\(on call\)\s*/gim, "").replace(/^\s*\*?\([^)]*\)\*?\s*$/gm, "").trim();
+  const text = stopAtRepeat(raw.replace(TOOL_NAMES, " ")).replace(/\s*[—]\s*/g, ", ").replace(/^\s*\(on call\)\s*/gim, "").replace(/^\s*\*?\([^)]*\)\*?\s*$/gm, "").trim();
   // On a call, three sentences is already a lot to listen to; trim anything longer.
   const spoken = ctx.channel === "voice" ? capSentences(text.replace(/\n+/g, " ").trim(), 3) : text;
   const bubbles = ctx.channel === "voice" ? [spoken] : text.split(/\n\s*\n/).map((b) => b.trim());
@@ -454,6 +472,13 @@ async function turn(
   // Said goodbye on a call but didn't hang up: hang up (a silence prompt after "bye" is the worst).
   if (channel === "voice" && s.call.active && !failed && GOODBYE.test(text) && userWrappingUp(s) && !ctx.actions.some((a) => a.type === "end_call")) {
     ctx.actions.push({ type: "end_call" });
+  }
+  // Gmail, by the book: the gmail turn ends with the code-written question; other turns don't pitch it.
+  if (!extraInstruction && s.slots.gmail.status === "missing" && !ctx.newMessages.some((m) => m.kind === "gmail_link")) {
+    const raisedIt = /\b(gmail|email|inbox|link)\b/i.test(lastUserText(s));
+    const help = text.split(/(?<=[.!?])\s+/).filter((x) => !GMAIL_PITCH.test(x)).join(" ").trim();
+    if (ctx.move?.id === "ask-gmail") text = `${help}${help ? "\n\n" : ""}${gmailAsk(s)}`.trim();
+    else if (!raisedIt && help) text = help;
   }
   const sentences = text.split(/(?<=[.!?])\s+|\n+/);
   // An offer to call made in words counts as an offer (so it isn't repeated next turn).
@@ -552,6 +577,20 @@ export async function handleUserMessage(
     await Promise.all(named.pending);
     return { session: s, newMessages: [userMsg, ...ctx.newMessages], chips: computeDirective(s, channel).chips, actions: [] };
   }
+  // They said yes to the link: send it now (not left to the model), then let the reply mention it.
+  let linkSent: Msg[] = [];
+  let linkNote: string | undefined;
+  const lastLinkAsk = [...s.transcript].slice(0, -1).reverse().find((m) => m.role === "agent" && (!m.kind || m.kind === "text"));
+  if (s.slots.gmail.status === "missing" && lastLinkAsk?.text.includes(GMAIL_ASK_MARK) && gmailConsent(s)) {
+    const ctx: Ctx = { s, channel, actions: [], newMessages: [] };
+    const out = await runTool(ctx, "send_gmail_link", {});
+    if (!out.startsWith("error")) {
+      linkSent = ctx.newMessages;
+      linkNote = "You just texted them the Gmail link (it's in their texts now). Say so in a few words, and that it takes a few seconds. Don't send another.";
+    }
+  } else if (s.slots.gmail.status === "missing" && lastLinkAsk?.text.includes(GMAIL_ASK_MARK) && /^\s*(no|nah|nope|not now|later|no thanks)\b/i.test(clean)) {
+    s.slots.gmail.status = "declined";
+  }
   const heard = extract(s, clean);
   if (/^\s*skip setup\s*$/i.test(clean) && s.phase !== "graduated") {
     const skip = s.call.active
@@ -564,9 +603,14 @@ export async function handleUserMessage(
   const r = await turn(
     s,
     channel,
-    interrupted ? "They talked over you mid-sentence. Drop what you were saying and respond to what they just said; don't repeat your cut-off line unless they ask." : undefined,
-    channel === "voice" ? "sorry, i missed that. say it one more time?" : "sorry, i lost my train of thought for a sec. can you say that again?",
+    linkNote ?? (interrupted ? "They talked over you mid-sentence. Drop what you were saying and respond to what they just said; don't repeat your cut-off line unless they ask." : undefined),
+    linkNote ? (channel === "voice" ? "sent it to our texts. it only takes a few seconds." : "sent! it only takes a few seconds.") : channel === "voice" ? "sorry, i missed that. say it one more time?" : "sorry, i lost my train of thought for a sec. can you say that again?",
   );
+  if (linkSent.length) {
+    // The link sits right before the reply that mentions it.
+    r.newMessages.unshift(...linkSent);
+    if (s.call.active) r.actions.unshift({ type: "patience", ms: 30000 });
+  }
   r.newMessages.unshift(userMsg);
   // Image bytes were for this one reply; storing them would bloat every later read and write.
   if (userMsg.attachments?.some((a) => a.dataUrl)) {

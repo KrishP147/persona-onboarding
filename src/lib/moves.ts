@@ -57,7 +57,7 @@ export const MOVES = {
     label: "reason first, name the worry, easy no",
     source: "tan et al., chi 2014; voss (2016): accusation audit; brown & levinson (1987)",
     instruction:
-      "Ask to connect Gmail with the specific reason tied to their need, name the obvious worry before they have to (\"you might be wondering why i'd want your email\"), say it's read only and you never send without asking, and offer an alternative (paste an email instead). Ask it as a question, like: want me to text you a link to connect it?. Do NOT call send_gmail_link until they say yes.",
+      "Give them one small, concrete piece of help about their situation (a tip, a first step, a reassurance). Do NOT mention gmail, email access, or a link: the system adds that question right after your words.",
   },
   askName: {
     id: "ask-name",
