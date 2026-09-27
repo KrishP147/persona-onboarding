@@ -5,7 +5,7 @@ import { RECAP_INSTRUCTION, SYSTEM_PROMPT } from "./prompt";
 import { mockReply } from "./mock";
 import { provider, quick, runToolLoop, type Part, type ToolDef, type Turn } from "./llm";
 import { DEMO_INBOX, recordOutcome, triageInbox } from "./triage";
-import { readInbox } from "./google";
+import { readInbox, saveDraft, sendDraft } from "./google";
 import { getSecret } from "./store";
 import { EVENT_MOVES, chooseMove, markUsed } from "./moves";
 import { GIF_MIN_GAP, GIF_MOODS, GIFS, gifUrl, type GifMood } from "./gifs";
@@ -67,6 +67,27 @@ const TOOLS: ToolDef[] = [
       required: ["query", "count"],
       additionalProperties: false,
     },
+  },
+  {
+    name: "save_draft",
+    description:
+      "Save an email as a draft in their Gmail (only after it's connected) and show it in the chat. Call again with the full new version when they ask for changes (it replaces the same draft). Never say it was sent.",
+    schema: {
+      type: "object",
+      properties: {
+        to: { type: "string", description: "Recipient email address, or empty string if they haven't given one" },
+        subject: { type: "string" },
+        body: { type: "string", description: "The full email text, signed off with their name if you know it" },
+      },
+      required: ["to", "subject", "body"],
+      additionalProperties: false,
+    },
+  },
+  {
+    name: "send_email",
+    description:
+      "Send the draft you last showed them, exactly as shown. Only after they clearly said to send it (\"send it\", \"yes send\"). If they asked for changes, save_draft again first and get a fresh yes.",
+    schema: NO_ARGS,
   },
   {
     name: "web_search",
@@ -243,6 +264,7 @@ export interface Ctx {
   pending?: Promise<void>[];
   offeredCall?: boolean;
   allowEnd?: boolean; // the system decided to end the call (silence, skip setup, outage)
+  sentEmail?: boolean; // send_email actually went out this turn
 }
 
 const WANTS_OUT = /\b(skip|not now|later|no more questions|stop asking|just (help|do|get)|let'?s (just )?(start|go)|that'?s (it|all)|i'?m good|i'?m done|enough setup|just let me (use|try)|stop)\b/i;
@@ -260,7 +282,7 @@ const ASKED_LINK = /\b(link|gmail|connect your)\b/i;
 const GMAIL_ASK_MARK = "text you a link to connect your gmail";
 function gmailAsk(s: Session) {
   const need = shortNeed(s);
-  return `want me to ${GMAIL_ASK_MARK}?${need ? ` then i can help with ${need} for real.` : ""} it's read only, and i never send anything without asking. or you can just paste an email here.`;
+  return `want me to ${GMAIL_ASK_MARK}?${need ? ` then i can help with ${need} for real.` : ""} i never send anything without your ok. or you can just paste an email here.`;
 }
 // Gmail pitches the model slips into other turns (help first, ask later).
 const GMAIL_PITCH = /\b(gmail|link|connect (your|my) (email|inbox|account)|read[- ]only|paste an email|without asking|pull up (your|the|those) (emails|inbox))\b/i;
@@ -375,8 +397,11 @@ async function runTool(ctx: Ctx, name: string, input: Record<string, unknown>): 
       return "ringing the user";
     }
     case "send_gmail_link": {
-      if (s.slots.gmail.status === "filled") return `already connected as ${s.gmailEmail}`;
-      if (!gmailConsent(s)) return "error: not yet. give them a bit of help first, then ask if they'd like the link; send it only after they say yes";
+      // Connected read-only (before drafts existed, or they unticked it): the link again adds draft access.
+      const upgrading = s.slots.gmail.status === "filled" && (await getSecret(`gscope:${s.id}`).catch(() => null)) === "read";
+      if (s.slots.gmail.status === "filled" && !upgrading) return `already connected as ${s.gmailEmail}`;
+      if (upgrading) ctx.resendOk = true;
+      else if (!gmailConsent(s)) return "error: not yet. give them a bit of help first, then ask if they'd like the link; send it only after they say yes";
       const lastLink = s.transcript.map((m) => m.kind).lastIndexOf("gmail_link");
       const lastFail = s.transcript.findLastIndex((m) => m.kind === "event" && /^Gmail connection/.test(m.text));
       if (lastLink >= 0 && lastLink > lastFail && !ctx.resendOk) return "already sent; it's still in their texts. don't send another, just point to it";
@@ -384,7 +409,7 @@ async function runTool(ctx: Ctx, name: string, input: Record<string, unknown>): 
       if (ctx.channel === "voice") {
         // On a call the ask still lands in the chat, in writing, right above the link.
         const need = shortNeed(s);
-        const ask = msg("agent", "text", `here's the link to connect your gmail${need ? ` so i can help with ${need}` : ""}. it's read only, and i never send anything without asking you first.`);
+        const ask = msg("agent", "text", `here's the link to connect your gmail${need ? ` so i can help with ${need}` : ""}. i never send anything without your ok.`);
         ctx.newMessages.push(ask);
         s.transcript.push(ask);
       }
@@ -418,6 +443,10 @@ async function runTool(ctx: Ctx, name: string, input: Record<string, unknown>): 
         .map((m, i) => `${i + 1}. from ${m.fromName} | ${m.subject || "(no subject)"} | ${new Date(m.date).toLocaleDateString("en-US", { month: "short", day: "numeric" })} | ${m.snippet.slice(0, 140)}`)
         .join("\n");
     }
+    case "save_draft":
+      return saveDraftTool(ctx, input);
+    case "send_email":
+      return sendEmailTool(ctx);
     case "web_search":
       return webSearch(String(input.query ?? "").trim() || "news", Math.min(Math.max(Number(input.count ?? 5) || 5, 1), 8));
     case "read_page":
@@ -639,9 +668,9 @@ async function turn(
     if (ctx.move?.id === "ask-gmail") text = `${help}${help ? "\n\n" : ""}${gmailAsk(s)}`.trim();
     else if (!raisedIt && help) text = help;
   }
-  // It can't send email (gmail access is read only, and setup can't act for them yet). Never claim it did.
-  if (SEND_REQUEST.test(lastUserText(s)) && CLAIMS_SENT.test(text)) {
-    text = "i can't send it for you yet, i only have read access during setup. copy the draft above and send it from your email, it'll take a sec.";
+  // "sent!" only if send_email actually went out this turn.
+  if (!ctx.sentEmail && SEND_REQUEST.test(lastUserText(s)) && CLAIMS_SENT.test(text)) {
+    text = s.draft && !s.draft.sent ? "i haven't sent it yet. want me to send the draft above as is?" : "i haven't sent anything. want me to write it up as a draft first?";
   }
   const sentences = text.split(/(?<=[.!?])\s+|\n+/);
   // An offer to call made in words counts as an offer (so it isn't repeated next turn).
@@ -1071,4 +1100,82 @@ async function handleEventInner(s: Session, e: SessionEvent): Promise<TurnResult
 
 function keepFillIns(m: string, inner: string) {
   return PLACEHOLDER.test(inner) && !STAGE_VERB.test(inner) ? m : " ";
+}
+
+// --- email drafts and sending (gmail.compose) ---
+
+const EMAIL_RE = /^[^\s@<>]+@[^\s@<>]+\.[^\s@<>]+$/;
+// A send needs their explicit ok, after they've seen the exact draft.
+const SEND_OK = /\b(send( it| that| this| the (email|draft|message)| away)?|ship it|fire (it )?(off|away)|go ahead|yes|yeah|yep|yup|sure|do it|ok(ay)?|looks good|perfect)\b/i;
+const SEND_HOLD = /\b(don'?t|do not|not yet|wait|hold|change|edit|fix|but|instead|actually|no)\b/i;
+
+type GmailAccess = { token: string } | { demo: true } | { error: string };
+
+async function gmailAccess(s: Session): Promise<GmailAccess> {
+  if (s.slots.gmail.status !== "filled") return { error: "error: gmail isn't connected. write the draft right in your message instead, and offer the link if they want it saved or sent" };
+  const token = await getSecret(`gtoken:${s.id}`).catch(() => null);
+  if (!token) {
+    if (s.gmailEmail === "demo.user@gmail.com" || process.env.ALLOW_TEST_EVENTS === "1") return { demo: true };
+    return { error: "error: your gmail access has expired. tell them honestly and offer to send the link again to reconnect" };
+  }
+  if ((await getSecret(`gscope:${s.id}`).catch(() => null)) === "read") {
+    return { error: "error: their gmail connection only allows reading, not drafts or sending. show the draft in the chat anyway, and ask if they want the link again to allow drafts (one tap)" };
+  }
+  return { token };
+}
+
+const scopeError = (reason: "expired" | "no_scope" | "failed", what: string) =>
+  reason === "expired"
+    ? "error: your gmail access has expired. tell them honestly and offer to send the link again to reconnect"
+    : reason === "no_scope"
+      ? "error: their gmail connection doesn't allow drafts or sending. ask if they want the link again to allow it (one tap)"
+      : `error: gmail didn't ${what}. tell them honestly; never say it worked`;
+
+async function saveDraftTool(ctx: Ctx, input: Record<string, unknown>): Promise<string> {
+  const { s } = ctx;
+  const d = { to: String(input.to ?? "").trim().slice(0, 200), subject: String(input.subject ?? "").trim().slice(0, 200), body: String(input.body ?? "").trim().slice(0, 5000) };
+  if (!d.body) return "error: the draft is empty";
+  if (d.to && !EMAIL_RE.test(d.to)) return `error: "${d.to}" isn't an email address. ask them for it, or save with an empty "to"`;
+  const access = await gmailAccess(s);
+  if ("error" in access) return access.error;
+  const prevId = s.draft && !s.draft.sent ? s.draft.id : undefined;
+  let id: string | undefined;
+  if ("token" in access) {
+    const r = await saveDraft(access.token, d, prevId);
+    if (!r.ok) return scopeError(r.reason, "save the draft");
+    id = r.value.id;
+  }
+  const shown = msg("agent", "text", `to: ${d.to || "(who's it going to?)"}\nsubject: ${d.subject || "(no subject)"}\n\n${d.body}`);
+  ctx.newMessages.push(shown);
+  s.transcript.push(shown);
+  s.draft = { id, ...d, shownAt: s.transcript.length };
+  const where = "token" in access ? "saved in their gmail drafts" : "saved (demo account, not a real gmail)";
+  return `${where} and shown in the chat. don't repeat the draft. ask if they want to send it${d.to ? "" : " (and who to)"} or change anything. never say it was sent`;
+}
+
+async function sendEmailTool(ctx: Ctx): Promise<string> {
+  const { s } = ctx;
+  const d = s.draft;
+  if (!d || d.sent) return "error: there's no draft to send. write it with save_draft first and let them read it";
+  if (!d.to) return "error: the draft has no recipient. ask who it goes to, then save_draft again with it";
+  // Their ok has to come after they saw this exact version, and be a clear yes.
+  const lastUserIdx = s.transcript.findLastIndex((m) => m.role === "user");
+  const last = lastUserText(s);
+  const prevAgent = s.transcript.slice(0, lastUserIdx).reverse().find((m) => m.role === "agent" && (!m.kind || m.kind === "text"));
+  const sayingSend = /\bsend\b/i.test(last) || (!!prevAgent && /\bsend\b/i.test(prevAgent.text));
+  if (lastUserIdx < d.shownAt || !SEND_OK.test(last) || SEND_HOLD.test(last) || !sayingSend) {
+    return `error: they haven't clearly said to send this version (they said "${last.slice(0, 60)}"). ask "want me to send it to ${d.to}?" and wait`;
+  }
+  const access = await gmailAccess(s);
+  if ("error" in access) return access.error;
+  if ("demo" in access) {
+    if (process.env.ALLOW_TEST_EVENTS !== "1") return "error: this is a demo account, so nothing can really be sent. tell them honestly; the draft is in the chat to copy";
+  } else {
+    if (!d.id) return "error: the draft isn't saved in gmail yet. save_draft again first";
+    const r = await sendDraft(access.token, d.id);
+    if (!r.ok) return scopeError(r.reason, "send it");
+  }
+  d.sent = true;
+  ctx.sentEmail = true;
+  return `sent to ${d.to}. tell them in a few words`;
 }

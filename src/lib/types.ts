@@ -76,6 +76,7 @@ export interface Session {
   contactSaved?: boolean; // user tapped Save on the contact card: calls show the name, not a number
   pendingVoice?: VoiceStyle; // agent renamed mid-call: applies from the next call
   gmailEmail?: string;
+  draft?: { id?: string; to: string; subject: string; body: string; shownAt: number; sent?: boolean }; // latest email draft (gmail drafts id when saved there)
   gmailUnread?: number; // small value moment at connect time; tokens are never stored
   gmailVerified?: { email: string; unread?: number; demo?: boolean; inbox?: InboxItem[] }; // set by the oauth callback, consumed by the gmail_connected event
   alerts?: Alert[];

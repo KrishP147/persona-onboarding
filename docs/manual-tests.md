@@ -22,7 +22,7 @@ each step says **type** (in the text box), **say** (out loud on the call), or **
    - **expect:** at most one follow-up about the last time it happened, or a playback of what you said. no pitch, no list of features.
 8. **expect:** first a bit of real help or comfort about your problem, **then** a question like "want me to text you a link to connect your gmail?". no link appears before you say yes.
 9. **say:** `yeah sure`
-   - **expect:** "sent it to our texts". the text thread shows the written ask ("read only, i never send anything without asking") plus the google card.
+   - **expect:** "sent it to our texts". the text thread shows the written ask ("i never send anything without your ok") plus the google card.
 10. **say** something else, then wait: it should **not** hang up on its own while you're still talking to it.
 11. **say:** `ok sounds good, bye`
    - **expect:** a real goodbye with your name, then it hangs up. a short text follows that remembers what you talked about.
@@ -141,3 +141,23 @@ each step says **type** (in the text box), **say** (out loud on the call), or **
    - **expect:** a voice note bubble (play button, length) with your words written under it, then a normal reply to what you said.
 2. tap play on the note. **expect:** your recording plays back (this device only; after a reload the transcript stays but the audio doesn't).
 3. record a note and say nothing. **expect:** "couldn't make out any words in that one. try again?", and nothing is sent.
+
+## 20. drafts and sending (gmail)
+
+needs gmail connected with the new draft permission: if you connected before today, ask it to `write an email` and it offers the link again (one tap to allow drafts).
+
+1. **type:** `write an email to <your other address> saying i'll be 10 min late to our 3pm`
+   - **expect:** the draft shows in the chat (to, subject, body), it's in your gmail drafts folder, and it asks if it should send it. it never says "sent".
+2. **type:** `haha`
+   - **expect:** nothing is sent.
+3. **type:** `make it 15 min`
+   - **expect:** an updated draft in the chat; gmail drafts still has one draft, not two.
+4. **type:** `send it`
+   - **expect:** "sent" and the email arrives; the draft is gone from drafts.
+5. **type:** `write one to my boss` (no address)
+   - **expect:** it asks for the address before it can send.
+
+## 21. web lookups
+
+1. skip setup and **type:** `find me a sushi place` then your city.
+   - **expect:** real places from a search, a few words on where it's from, no made up hours or prices.

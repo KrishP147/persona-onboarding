@@ -25,7 +25,10 @@ export async function GET(req: Request) {
     }
     const who = await fetchIdentity(tok.access_token);
     // Kept server side only (never in the session the browser receives), for reading their inbox on request.
-    await setSecret(`gtoken:${sessionId}`, tok.access_token, (tok.expires_in ?? 3600) - 60).catch(() => {});
+    const ttl = (tok.expires_in ?? 3600) - 60;
+    await setSecret(`gtoken:${sessionId}`, tok.access_token, ttl).catch(() => {});
+    // Drafts and sending need gmail.compose; they may have unticked it on Google's screen.
+    await setSecret(`gscope:${sessionId}`, tok.scope?.includes("gmail.compose") ? "compose" : "read", ttl).catch(() => {});
     await withSession(sessionId, async (s) => {
       s.gmailVerified = { email: who.email, unread: who.unread, inbox: who.inbox };
     });

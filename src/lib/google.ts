@@ -4,7 +4,7 @@ import type { InboxItem } from "./types";
 // We read the email, the unread count, and headers + previews of recent unread mail once
 // (for triage), then drop the token. Message bodies are never fetched.
 
-export const GMAIL_SCOPES = ["openid", "email", "https://www.googleapis.com/auth/gmail.readonly"];
+export const GMAIL_SCOPES = ["openid", "email", "https://www.googleapis.com/auth/gmail.readonly", "https://www.googleapis.com/auth/gmail.compose"];
 
 export function googleConfig() {
   const clientId = process.env.GOOGLE_CLIENT_ID;
@@ -104,4 +104,40 @@ async function fetchMessages(auth: { headers: Record<string, string> }, query: s
     }),
   );
   return got.filter((x): x is InboxItem => x !== null);
+}
+
+// Drafts and sending (gmail.compose). A draft is always shown to them before it can be sent.
+export type Draft = { to: string; subject: string; body: string };
+
+function rawMessage(d: Draft) {
+  const subject = /^[\x20-\x7e]*$/.test(d.subject) ? d.subject : `=?UTF-8?B?${Buffer.from(d.subject, "utf8").toString("base64")}?=`;
+  const lines = [...(d.to ? [`To: ${d.to}`] : []), `Subject: ${subject}`, "MIME-Version: 1.0", 'Content-Type: text/plain; charset="UTF-8"', "", d.body.replace(/\r?\n/g, "\r\n")];
+  return Buffer.from(lines.join("\r\n"), "utf8").toString("base64url");
+}
+
+type GmailResult<T> = { ok: true; value: T } | { ok: false; reason: "expired" | "no_scope" | "failed" };
+
+async function gmailPost<T>(accessToken: string, path: string, body: object, method = "POST"): Promise<GmailResult<T>> {
+  const res = await fetch(`https://gmail.googleapis.com/gmail/v1/users/me/${path}`, {
+    method,
+    headers: { Authorization: `Bearer ${accessToken}`, "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  });
+  if (res.status === 401) return { ok: false, reason: "expired" };
+  if (res.status === 403) return { ok: false, reason: "no_scope" };
+  if (!res.ok) {
+    console.error(`gmail ${path} ${res.status}: ${(await res.text()).slice(0, 200)}`);
+    return { ok: false, reason: "failed" };
+  }
+  return { ok: true, value: (await res.json()) as T };
+}
+
+// Creates a draft, or replaces the one we already made (so edits don't pile up in their drafts folder).
+export function saveDraft(accessToken: string, d: Draft, draftId?: string) {
+  const body = { ...(draftId ? { id: draftId } : {}), message: { raw: rawMessage(d) } };
+  return gmailPost<{ id: string }>(accessToken, draftId ? `drafts/${draftId}` : "drafts", body, draftId ? "PUT" : "POST");
+}
+
+export function sendDraft(accessToken: string, draftId: string) {
+  return gmailPost<{ id: string }>(accessToken, "drafts/send", { id: draftId });
 }
