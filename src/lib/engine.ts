@@ -531,7 +531,8 @@ async function captureAgentName(s: Session, channel: Channel, text: string): Pro
     }
     return; // the model re-asks what to call the assistant (prompt covers it)
   }
-  const m = text.trim().match(/^(?:(?:i'?ll |let'?s |i wanna |i want to )?call (?:you|yourself) |how about |go with |name(?: you)?(?: is)? )?([\p{L}][\p{L}'-]{0,19}(?: [\p{L}][\p{L}'-]{0,19})?)[.!]?$/iu);
+  // Typos like "Ju.lia" or "Ju_lia": drop stray punctuation between letters.
+  const m = text.trim().replace(/(\p{L})[.·_*,](?=\p{L})/gu, "$1").match(/^(?:(?:i'?ll |let'?s |i wanna|i want to )?call (?:you|yourself) |how about |go with |name(?: you)?(?: is)? )?([\p{L}][\p{L}'-]{0,19}(?: [\p{L}][\p{L}'-]{0,19})?)[.!]?$/iu);
   if (!m || NOT_A_NAME.test(m[1])) return;
   const value = m[1].replace(/\b\p{L}/gu, (c) => c.toUpperCase());
   const ctx: Ctx = { s, channel, actions: [], newMessages: [] };
@@ -586,8 +587,12 @@ export async function handleUserMessage(
   }
   // They said yes to our call offer: ring now, the way persona does ("calling you now."), no model needed.
   const prevText = [...s.transcript].slice(0, -1).reverse().find((m) => m.role === "agent" && (!m.kind || m.kind === "text"));
-  const saysCallMe = /\bcall me\b/i.test(clean) && !NEGATED_CALL.test(clean);
-  if (channel === "text" && !s.call.active && prevText && OFFERED_CALL.test(prevText.text) && (YES.test(clean) || saysCallMe) && !CALL_NO.test(clean)) {
+  // Asking for a call is the answer; no need to confirm it back ("could we call?" -> ring).
+  const asksForCall =
+    /\b(call me|(can|could|should|shall) (we|you) (call|hop on a call|do a call)|let'?s (call|hop on a call|do a call)|give me a (call|ring)|ring me|phone me|hop on a (quick )?call)\b/i.test(clean) &&
+    !NEGATED_CALL.test(clean);
+  const saidYesToOffer = !!prevText && OFFERED_CALL.test(prevText.text) && YES.test(clean);
+  if (channel === "text" && !s.call.active && s.slots.agentName.status !== "missing" && (asksForCall || saidYesToOffer) && !CALL_NO.test(clean)) {
     const ctx: Ctx = { s, channel, actions: [], newMessages: [], move: EVENT_MOVES.callNow };
     const out = await runTool(ctx, "start_call", {});
     if (!out.startsWith("error")) {
@@ -786,10 +791,17 @@ async function handleEventInner(s: Session, e: SessionEvent): Promise<TurnResult
         { move: EVENT_MOVES.silence },
       );
     }
-    case "contact_saved":
-      // Quiet bookkeeping, no reply: saving a contact isn't something to chat about.
+    case "contact_saved": {
+      if (s.contactSaved) return idle();
       s.contactSaved = true;
-      return idle();
+      // Saving the card is them doing what we asked; if the call offer is still unanswered, pick it back up.
+      const lastOffer = s.transcript.findLastIndex((m) => m.role === "agent" && (!m.kind || m.kind === "text") && OFFERED_CALL.test(m.text));
+      const answered = lastOffer >= 0 && s.transcript.slice(lastOffer + 1).some((m) => m.role === "user");
+      if (lastOffer < 0 || answered || s.call.active || s.callDeclinedAt !== undefined || s.phase === "graduated") return idle();
+      const ctx: Ctx = { s, channel: "text", actions: [], newMessages: [], move: EVENT_MOVES.named };
+      emitAgentText(ctx, "saved, now you'll know it's me. want me to call now?");
+      return { session: s, newMessages: ctx.newMessages, chips: computeDirective(s, "text").chips, actions: [] };
+    }
     case "mic_denied":
       eventMsg(s, "Microphone unavailable");
       s.callOffers = MAX_CALL_OFFERS; // no mic: don't keep offering calls
