@@ -115,6 +115,7 @@ export interface Ctx {
   actions: ClientAction[];
   newMessages: Msg[];
   resendOk?: boolean;
+  newCard?: Msg;
 }
 
 const WANTS_OUT = /\b(skip|not now|later|no more questions|stop asking|just (help|do|get)|let'?s (just )?(start|go)|that'?s (it|all)|i'?m good|enough setup)\b/i;
@@ -142,13 +143,12 @@ async function runTool(ctx: Ctx, name: string, input: Record<string, unknown>): 
         if (s.call.active) s.pendingVoice = style;
         else s.voice = style;
         // One contact card per session, updated in place (client upserts by id): no duplicates on rename.
-        let card = s.transcript.find((m) => m.kind === "contact_card");
-        if (card) card.text = value;
-        else {
-          card = msg("agent", "text", value, { kind: "contact_card" });
-          s.transcript.push(card);
-        }
-        ctx.newMessages.push(card);
+        const card = s.transcript.find((m) => m.kind === "contact_card");
+        if (card) {
+          card.text = value;
+          ctx.newMessages.push(card);
+        } else ctx.newCard = msg("agent", "text", value, { kind: "contact_card" }); // sent after the text, like persona
+
         return `saved. voice set to ${s.voice}.${renamed ? " contact card updated in place." : ""}`;
       }
       return "saved";
@@ -296,6 +296,10 @@ async function turn(
   const after = computeDirective(s, channel);
   recordAsk(s, text.includes("?") && after.mayAsk ? after.nextSlot : null);
   emitAgentText(ctx, text);
+  if (ctx.newCard) {
+    s.transcript.push(ctx.newCard);
+    ctx.newMessages.push(ctx.newCard);
+  }
   const final = computeDirective(s, channel);
   return { session: s, newMessages: ctx.newMessages, chips: final.chips, actions: ctx.actions };
 }
@@ -329,6 +333,7 @@ export type SessionEvent =
   | { type: "call_declined" }
   | { type: "call_ended"; reason: "user_hangup" | "agent_ended" | "error" }
   | { type: "silence" }
+  | { type: "contact_saved" }
   | { type: "mic_denied" }
   | { type: "gmail_connected"; email?: string }
   | { type: "gmail_failed"; error: string };
@@ -417,6 +422,10 @@ export async function handleEvent(s: Session, e: SessionEvent): Promise<TurnResu
         s.call.silenceStrikes === 1 ? "take your time. want me to say that again?" : "no pressure. i can also just text you if that's easier.",
       );
     }
+    case "contact_saved":
+      // Quiet bookkeeping, no reply: saving a contact isn't something to chat about.
+      s.contactSaved = true;
+      return idle();
     case "mic_denied":
       eventMsg(s, "Microphone unavailable");
       s.call = { ...s.call, active: false, endedReason: "error" };

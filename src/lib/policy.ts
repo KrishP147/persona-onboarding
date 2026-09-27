@@ -164,6 +164,7 @@ export function directiveText(s: Session, d: Directive, channel: Channel): strin
     moodLine,
     `CHANNEL: ${channel === "voice" ? "live phone call (speak: 1-2 short sentences per turn, then let them talk; no emoji, no lists)" : "text messages"}`,
     `PHASE: ${s.phase}`,
+    s.slots.agentName.status === "filled" ? `CONTACT CARD: ${s.contactSaved ? "saved by the user" : "sent, not saved yet (a call from you shows up as an unknown number)"}` : "",
     `SLOTS:\n${slotLines}`,
     d.nextSlot && d.mayAsk ? `NEXT TO GATHER (gently, woven in): ${SLOT_LABEL[d.nextSlot]}` : "NEXT TO GATHER: nothing this turn",
     d.offerCall ? "You may offer a quick call (call offer_call) if it fits naturally." : "",

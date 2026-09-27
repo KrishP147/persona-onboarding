@@ -62,6 +62,7 @@ export interface Session {
   consecutiveAsks: number; // asks in a row without giving value
   lastAskedSlot?: SlotKey;
   voice: VoiceStyle;
+  contactSaved?: boolean; // user tapped Save on the contact card: calls show the name, not a number
   pendingVoice?: VoiceStyle; // agent renamed mid-call: applies from the next call
   gmailEmail?: string;
   gmailUnread?: number; // small value moment at connect time; tokens are never stored

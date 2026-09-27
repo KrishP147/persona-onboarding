@@ -4,6 +4,7 @@ import type { Attachment, ClientAction, Msg, Session, TurnResult } from "@/lib/t
 import { useVoiceCall } from "./useVoiceCall";
 
 const LS_KEY = "persona-onboarding-session";
+const AGENT_NUMBER = "+1 (650) 555-0142";
 
 function readStoredId(): string | null {
   try {
@@ -252,14 +253,36 @@ export default function Home() {
     if (!w) setError("your browser blocked the google window. allow popups for this page and tap the link again.");
   };
 
-  const named = !!session?.slots.agentName.value;
-  const agentName = session?.slots.agentName.value ?? "+1 (650) 555-0142";
+  // Until the card is saved, the thread and incoming calls show a bare number, like a real phone.
+  const saved = !!session?.contactSaved && !!session?.slots.agentName.value;
+  const agentName = saved ? session!.slots.agentName.value! : AGENT_NUMBER;
+
+  const saveContact = () => {
+    if (!session || session.contactSaved) return;
+    setSession({ ...session, contactSaved: true }); // instant, the server catches up
+    void sendEvent({ type: "contact_saved" });
+  };
+
+  // Start over with a fresh session (keeps the old one server side, just forgets it here).
+  const restart = () => {
+    if (call.status === "active" || call.status === "connecting") call.hangUp("user_hangup");
+    try {
+      localStorage.removeItem(LS_KEY);
+    } catch {}
+    window.location.replace(window.location.pathname);
+  };
   const onCall = call.status === "active" || call.status === "connecting";
   const thread = messages.filter((m) => m.channel !== "voice");
   const lastSaid = [...messages].reverse().find((m) => m.channel === "voice" && m.role === "agent" && (!call.startedAt || m.ts >= call.startedAt))?.text ?? "";
 
   return (
     <main className="min-h-dvh bg-neutral-950 flex items-center justify-center gap-8 p-0 sm:p-6">
+      <button
+        onClick={restart}
+        className="fixed top-3 right-3 z-30 text-xs text-neutral-300 bg-neutral-800/90 hover:bg-neutral-700 border border-white/10 rounded-full px-3 py-1.5"
+      >
+        Restart
+      </button>
       <div className="relative w-full sm:w-[390px] h-dvh sm:h-[800px] sm:rounded-[44px] sm:border-[10px] border-neutral-800 bg-[#16171b] text-neutral-100 overflow-hidden flex flex-col shadow-2xl">
         {/* status bar (desktop frame only) */}
         <div className="hidden sm:flex justify-between px-7 pt-2 text-[11px] text-neutral-300 bg-[#1e1f24]">
@@ -271,7 +294,7 @@ export default function Home() {
           <span className="text-neutral-300 text-xl px-1" aria-hidden>
             ←
           </span>
-          {named ? (
+          {saved ? (
             <div className="w-10 h-10 rounded-full bg-white text-black flex items-center justify-center" aria-hidden>
               <LoopMark />
             </div>
@@ -318,6 +341,8 @@ export default function Home() {
                   reaction={typing && m.id === lastUserId ? "👀" : undefined}
                   onConnect={connectGmail}
                   connected={session?.slots.gmail.status === "filled"}
+                  contactSaved={!!session?.contactSaved}
+                  onSaveContact={saveContact}
                 />
               </div>
             );
@@ -454,6 +479,8 @@ function Bubble({
   reaction,
   onConnect,
   connected,
+  contactSaved,
+  onSaveContact,
 }: {
   m: Msg;
   first: boolean;
@@ -461,6 +488,8 @@ function Bubble({
   reaction?: string;
   onConnect: () => void;
   connected: boolean;
+  contactSaved: boolean;
+  onSaveContact: () => void;
 }) {
   if (m.kind === "event") {
     if (m.text === "Call started") return null; // the "Call ended" row carries the duration
@@ -507,8 +536,15 @@ function Bubble({
           <div className="w-10 h-10 rounded-full bg-[#e8665a] flex items-center justify-center font-semibold text-white">{m.text.charAt(0).toUpperCase()}</div>
           <div>
             <div className="text-sm font-medium">{m.text}</div>
-            <div className="text-[11px] text-neutral-400">Contact card · stays in sync if you rename me</div>
+            <div className="text-[11px] text-neutral-400">{AGENT_NUMBER}</div>
           </div>
+          <button
+            onClick={onSaveContact}
+            disabled={contactSaved}
+            className="ml-2 text-xs rounded-full px-3 py-1 bg-[#3b4a6b] hover:bg-[#4a5b80] disabled:bg-transparent disabled:text-emerald-400"
+          >
+            {contactSaved ? "Saved ✓" : "Save"}
+          </button>
         </div>
       </div>
     );
