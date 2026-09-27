@@ -6,9 +6,15 @@ import path from "path";
 import { PERSONAS, type Persona, type ScriptEvent } from "./personas";
 import type { Msg, TurnResult, Session } from "../src/lib/types";
 import { spendSince } from "../src/lib/usage";
+import { DEMO_INBOX } from "../src/lib/triage";
 import { json, quick } from "../src/lib/llm";
 
 const BASE = process.env.HARNESS_BASE_URL ?? "http://localhost:3000";
+// Simulated users and the grader run on Claude when a key is present (stricter, and it keeps
+// Gemini's free per-minute quota for the agent under test). One persona at a time, paced.
+const VIA = process.env.ANTHROPIC_API_KEY && process.env.HARNESS_VIA !== "gemini" ? ("anthropic" as const) : undefined;
+const CONCURRENCY = Number(process.env.HARNESS_CONCURRENCY ?? 1);
+const TURN_GAP_MS = Number(process.env.HARNESS_TURN_GAP_MS ?? 6000);
 
 async function api<T>(p: string, body?: unknown): Promise<T> {
   const res = await fetch(BASE + p, body ? { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) } : undefined);
@@ -26,6 +32,7 @@ function render(m: Msg) {
 async function simulateUser(p: Persona, transcript: Msg[], onCall: boolean): Promise<string> {
   const convo = transcript.filter((m) => m.kind !== "event").map(render).join("\n");
   const text = await quick({
+    via: VIA,
     maxTokens: 200,
     tag: "sim",
     system: `You are role-playing a user testing a new AI assistant's onboarding over ${onCall ? "a PHONE CALL (speak casually, short)" : "text messages (short, casual, like real texts)"}. Persona: ${p.brief}\nStay consistent with the conversation: never claim you already said something unless it appears above, never write the assistant's part (no invented search results), and never describe actions like *accepts call*: calls, silence, hangups and link taps happen automatically. Reply with ONLY the user's next message, nothing else.`,
@@ -95,6 +102,7 @@ async function runPersona(p: Persona) {
         s = (await api<TurnResult>("/api/session", { sessionId: id, event: { type: "call_ended", reason: "agent_ended" } })).session;
       }
     }
+    await new Promise((r) => setTimeout(r, TURN_GAP_MS)); // stay under the agent's rate limit
     const text = await simulateUser(p, s.transcript, s.call.active);
     const r = await api<TurnResult>("/api/chat", { sessionId: id, channel: s.call.active ? "voice" : "text", text });
     s = r.session;
@@ -120,7 +128,13 @@ async function judge(p: Persona, s: Session) {
   const m = marks.get(p.id);
   const transcript = s.transcript.flatMap((x, i) => (m?.has(i) ? [m.get(i)!, render(x)] : [render(x)])).join("\n");
   const slots = JSON.stringify(Object.fromEntries(Object.entries(s.slots).map(([k, v]) => [k, `${v.status}:${v.value ?? ""}`])));
+  // The grader can't see the (test) inbox the agent triaged, so it would call real items made up.
+  const inboxNote =
+    s.slots.gmail.status === "filled"
+      ? `\n\nThe connected inbox is test data; its unread items are real to the agent: ${DEMO_INBOX.map((x) => `"${x.subject}" from ${x.fromName}`).join("; ")}.`
+      : "";
   return json<{ score: number; passed: string[]; failed: string[]; formLike: boolean; brokeCharacter: boolean; worstMoment: string }>({
+    via: VIA,
     tag: "judge",
     schema: {
       type: "object",
@@ -137,7 +151,7 @@ async function judge(p: Persona, s: Session) {
     },
     system:
       "You grade onboarding conversations for a personal-assistant product. Be strict and specific. USER lines come from a simulator: don't blame the agent for the simulated user's own inconsistencies, and only grade what the transcript shows. Setup items can stay open when the user never completed them; judge how the agent handled it. Calibrate: 10 means flawless and is rare; typical good runs score 6-8. Any score below 10 must list concrete misses in failed (e.g. long call turns, false claims of doing work, re-asking, goodbye without hanging up).",
-    user: `Persona under test: ${p.brief}\nExpected behaviors:\n- ${p.expect.join("\n- ")}\n\nFinal slot state: ${slots}\nFinal phase: ${s.phase}\n\nTranscript:\n${transcript}`,
+    user: `Persona under test: ${p.brief}\nExpected behaviors:\n- ${p.expect.join("\n- ")}\n\nFinal slot state: ${slots}\nFinal phase: ${s.phase}${inboxNote}\n\nTranscript:\n${transcript}`,
   });
 }
 
@@ -151,7 +165,7 @@ async function main() {
   // Small concurrency: fast, but gentle on rate limits.
   const queue = [...personas];
   await Promise.all(
-    Array.from({ length: 3 }, async () => {
+    Array.from({ length: CONCURRENCY }, async () => {
       for (let p = queue.shift(); p; p = queue.shift()) {
         try {
           const s = await runPersona(p);

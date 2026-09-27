@@ -324,7 +324,7 @@ export default function Home() {
         {/* status bar (desktop frame only) */}
         <div className="hidden sm:flex justify-between px-7 pt-2 text-[11px] text-neutral-300 bg-[#1e1f24]">
           <Clock />
-          <span className="tracking-widest">▂▄▆ ▮</span>
+          <StatusIcons />
         </div>
         {/* header */}
         <header className="flex items-center gap-3 px-3 pt-3 pb-3 bg-[#1e1f24]">
@@ -412,7 +412,7 @@ export default function Home() {
           <input
             ref={fileRef}
             type="file"
-            accept="image/*,audio/*,video/*"
+            accept="image/*"
             multiple
             hidden
             onChange={async (e) => {
@@ -496,6 +496,27 @@ function WhyPanel({ messages }: { messages: Msg[] }) {
         <div ref={endRef} />
       </div>
     </aside>
+  );
+}
+
+function StatusIcons() {
+  return (
+    <span className="flex items-center gap-1.5" aria-hidden>
+      <svg width="14" height="10" viewBox="0 0 14 10" fill="currentColor">
+        <rect x="0" y="7" width="2.5" height="3" rx=".5" />
+        <rect x="3.8" y="5" width="2.5" height="5" rx=".5" />
+        <rect x="7.6" y="2.5" width="2.5" height="7.5" rx=".5" />
+        <rect x="11.4" y="0" width="2.5" height="10" rx=".5" />
+      </svg>
+      <svg width="13" height="10" viewBox="0 0 24 18" fill="currentColor">
+        <path d="M12 18l3.5-4.2a5.5 5.5 0 0 0-7 0zM4.2 9.9l2.3 2.7a8.5 8.5 0 0 1 11 0l2.3-2.7a12 12 0 0 0-15.6 0zM0 4.8l2.3 2.7a15 15 0 0 1 19.4 0L24 4.8a18.6 18.6 0 0 0-24 0z" />
+      </svg>
+      <svg width="20" height="10" viewBox="0 0 20 10" fill="none">
+        <rect x=".5" y=".5" width="17" height="9" rx="2" stroke="currentColor" opacity=".6" />
+        <rect x="2" y="2" width="12" height="6" rx="1" fill="currentColor" />
+        <rect x="18.3" y="3.2" width="1.4" height="3.6" rx=".5" fill="currentColor" opacity=".6" />
+      </svg>
+    </span>
   );
 }
 

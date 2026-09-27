@@ -277,7 +277,9 @@ const INTRO_CAPABILITIES = [
   "By continuing to text or use Persona, you agree to our Terms of Service and SMS Terms, and acknowledge our Privacy Policy: yourpersona.com/legal",
 ].join("\n");
 
-const GOODBYE = /\b(bye|goodbye|talk (soon|later)|take care|catch you|ciao|see ya|i'?ll let you go|call me (back )?(whenever|anytime)|good talking)\b/i;
+const GOODBYE = /\b(bye|goodbye|talk (to you )?(soon|later)|take care|catch you|ciao|see ya|i'?ll let you go|call me (back )?(whenever|anytime)|good talking|have a good one)\b/i;
+// "i just sent you a link" said without actually sending one.
+const CLAIMS_LINK = /\b(sent|dropped|texted|shared|popped)\b[^.?!]{0,40}\blink\b|\blink\b[^.?!]{0,30}\b(your texts|our texts|the chat|the thread)\b/i;
 
 function shortNeed(s: Session) {
   const n = s.slots.helpNeed.value;
@@ -349,6 +351,10 @@ async function turn(
   }
   if (channel === "voice" && ctx.actions.some((a) => a.type === "end_call") && !GOODBYE.test(text)) {
     text = `${text.trim()} ${goodbyeLine(s)}`.trim();
+  }
+  // Keep words and actions in sync: if it says the link is in their texts, it is.
+  if (CLAIMS_LINK.test(text) && s.slots.gmail.status === "missing" && !ctx.newMessages.some((m) => m.kind === "gmail_link")) {
+    await runTool(ctx, "send_gmail_link", {});
   }
   const after = computeDirective(s, channel);
   recordAsk(s, text.includes("?") && after.mayAsk ? after.nextSlot : null);
