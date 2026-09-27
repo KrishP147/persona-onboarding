@@ -105,6 +105,7 @@ export default function Home() {
 
   const call = useVoiceCall({
     voice: session?.voice ?? "neutral",
+    sessionId: session?.id ?? null,
     onUtterance: async (text, interrupted) => {
       if (!idRef.current) return;
       try {

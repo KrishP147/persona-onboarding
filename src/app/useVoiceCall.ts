@@ -2,8 +2,9 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { VoiceStyle } from "@/lib/types";
 
-// Interim voice layer on browser Web Speech APIs (free, Chrome/Edge).
-// A streaming STT/TTS pipeline can replace this later; the server contract stays the same.
+// Voice layer. Speech in: Deepgram streaming (short-lived token from /api/voice/token), else
+// browser Web Speech. Speech out: Cartesia via /api/voice/tts, else browser speechSynthesis.
+// Either way the server contract is the same: text in, text + actions out.
 //
 // Turn-taking rules (see docs/journal/04-voice-and-edge-cases.md):
 // - the user's turn ends after a pause whose length depends on whether they sound finished:
@@ -79,6 +80,28 @@ async function lockVoice(style: VoiceStyle): Promise<SpeechSynthesisVoice | unde
   return pick;
 }
 
+async function fetchClip(sessionId: string, text: string, style: VoiceStyle): Promise<string | null> {
+  try {
+    const r = await fetch("/api/voice/tts", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ sessionId, text, style }) });
+    if (!r.ok) return null;
+    return URL.createObjectURL(await r.blob());
+  } catch {
+    return null;
+  }
+}
+
+function speakBrowser(text: string, voice?: SpeechSynthesisVoice) {
+  return new Promise<void>((resolve) => {
+    if (!window.speechSynthesis) return resolve();
+    const u = new SpeechSynthesisUtterance(text);
+    if (voice) u.voice = voice;
+    u.rate = 1.03;
+    u.onend = () => resolve();
+    u.onerror = () => resolve();
+    window.speechSynthesis.speak(u);
+  });
+}
+
 const words = (t: string) => t.toLowerCase().replace(/[^a-z0-9' ]/g, " ").split(/\s+/).filter(Boolean);
 
 // Speakers without headphones feed the agent's voice back into the mic.
@@ -92,12 +115,84 @@ function looksLikeEcho(heard: string, speaking: string) {
 
 export type CallStatus = "idle" | "ringing" | "connecting" | "active" | "ended";
 
+// Split a reply into sentences so the first one can start playing while the rest synthesize.
+function sentences(text: string) {
+  const parts = text.match(/[^.!?]+[.!?]+["')]*\s*|[^.!?]+$/g) ?? [text];
+  const out: string[] = [];
+  for (const p of parts.map((x) => x.trim()).filter(Boolean)) {
+    // Glue very short fragments ("okay.") onto the next so prosody stays natural.
+    if (out.length && out[out.length - 1].length < 25) out[out.length - 1] += " " + p;
+    else out.push(p);
+  }
+  return out;
+}
+
+type Heard = (finals: string, interim: string) => void;
+
+// Deepgram live transcription straight from the browser. Resolves to a stop function, or null
+// if it can't start (no token, blocked socket): the caller falls back to Web Speech.
+async function startDeepgram(sessionId: string, stream: MediaStream, onHeard: Heard, onDrop: () => void): Promise<(() => void) | null> {
+  try {
+    const r = await fetch(`/api/voice/token?s=${encodeURIComponent(sessionId)}`, { cache: "no-store" });
+    if (!r.ok) return null;
+    const { token } = (await r.json()) as { token: string };
+    const lang = (navigator.language || "en").toLowerCase().startsWith("en") ? "en" : "multi";
+    const q = new URLSearchParams({ model: "nova-3", language: lang, interim_results: "true", smart_format: "true", endpointing: "300" });
+    const ws = new WebSocket(`wss://api.deepgram.com/v1/listen?${q}`, ["bearer", token]);
+    const opened = await new Promise<boolean>((resolve) => {
+      ws.onopen = () => resolve(true);
+      ws.onerror = () => resolve(false);
+      setTimeout(() => resolve(false), 4000);
+    });
+    if (!opened) {
+      ws.close();
+      return null;
+    }
+    const mime = ["audio/webm;codecs=opus", "audio/webm", "audio/mp4"].find((m) => MediaRecorder.isTypeSupported(m));
+    const rec = new MediaRecorder(stream, mime ? { mimeType: mime } : undefined);
+    rec.ondataavailable = (e) => {
+      if (e.data.size && ws.readyState === WebSocket.OPEN) ws.send(e.data);
+    };
+    rec.start(250);
+    const keepAlive = setInterval(() => ws.readyState === WebSocket.OPEN && ws.send(JSON.stringify({ type: "KeepAlive" })), 8000);
+    let stopped = false;
+    ws.onmessage = (ev) => {
+      try {
+        const m = JSON.parse(String(ev.data));
+        if (m.type !== "Results") return;
+        const t = String(m.channel?.alternatives?.[0]?.transcript ?? "");
+        if (!t.trim()) return;
+        if (m.is_final) onHeard(t, "");
+        else onHeard("", t);
+      } catch {}
+    };
+    ws.onclose = () => {
+      clearInterval(keepAlive);
+      if (!stopped) onDrop();
+    };
+    return () => {
+      stopped = true;
+      clearInterval(keepAlive);
+      try {
+        rec.stop();
+      } catch {}
+      try {
+        if (ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify({ type: "CloseStream" }));
+        ws.close();
+      } catch {}
+    };
+  } catch {
+    return null;
+  }
+}
+
 export function useVoiceCall(opts: {
   onUtterance: (text: string, interrupted: boolean) => Promise<void>;
   onSilence: () => void;
   onEnded: (reason: "user_hangup" | "agent_ended" | "error") => void;
   onMicDenied: () => void;
   voice: VoiceStyle;
+  sessionId: string | null;
 }) {
   const [status, setStatus] = useState<CallStatus>("idle");
   const [speaking, setSpeaking] = useState(false);
@@ -119,6 +214,13 @@ export function useVoiceCall(opts: {
   const fillerTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const fillerIdx = useRef(0);
   const patienceRef = useRef<number | null>(null); // one-shot longer silence window
+  const streamRef = useRef<MediaStream | null>(null);
+  const stopDeepgramRef = useRef<(() => void) | null>(null);
+  const styleRef = useRef<VoiceStyle>("neutral"); // locked when the call connects
+  const cloudTtsRef = useRef(true); // flips off for the rest of the call after a failure
+  const genRef = useRef(0); // bumps on barge-in/hangup so queued audio is dropped
+  const chainRef = useRef<Promise<void>>(Promise.resolve());
+  const audioRef = useRef<{ el: HTMLAudioElement; done: () => void } | null>(null);
   const optsRef = useRef(opts);
   useEffect(() => {
     optsRef.current = opts;
@@ -128,6 +230,32 @@ export function useVoiceCall(opts: {
     if (t.current) clearTimeout(t.current);
     t.current = null;
   };
+
+  // Stop whatever is playing and drop anything queued.
+  const stopAudio = () => {
+    genRef.current += 1;
+    const a = audioRef.current;
+    audioRef.current = null;
+    if (a) {
+      a.el.pause();
+      a.done();
+    }
+    window.speechSynthesis?.cancel();
+  };
+
+  const playUrl = (url: string) =>
+    new Promise<void>((resolve) => {
+      const el = new Audio(url);
+      const done = () => {
+        URL.revokeObjectURL(url);
+        if (audioRef.current?.el === el) audioRef.current = null;
+        resolve();
+      };
+      audioRef.current = { el, done };
+      el.onended = done;
+      el.onerror = done;
+      el.play().catch(done);
+    });
 
   const armSilence = useCallback(() => {
     clear(silenceTimer);
@@ -165,7 +293,11 @@ export function useVoiceCall(opts: {
       recRef.current?.abort();
     } catch {}
     recRef.current = null;
-    window.speechSynthesis?.cancel();
+    stopDeepgramRef.current?.();
+    stopDeepgramRef.current = null;
+    streamRef.current?.getTracks().forEach((t) => t.stop());
+    streamRef.current = null;
+    stopAudio();
     queueRef.current = 0;
     bufferRef.current = "";
     setListening(false);
@@ -190,13 +322,10 @@ export function useVoiceCall(opts: {
       if (!isFiller) clear(fillerTimer);
       clear(silenceTimer);
       queueRef.current += 1;
-      const u = new SpeechSynthesisUtterance(text);
-      if (voiceRef.current) u.voice = voiceRef.current;
-      u.rate = 1.03;
-      u.onstart = () => {
-        speakingTextRef.current = text;
-        setSpeaking(true);
-      };
+      const gen = genRef.current;
+      const parts = sentences(text);
+      // Start synthesizing every sentence now; play them in order.
+      const clips = parts.map((p) => (cloudTtsRef.current && optsRef.current.sessionId ? fetchClip(optsRef.current.sessionId, p, styleRef.current) : Promise.resolve(null)));
       const done = () => {
         queueRef.current = Math.max(0, queueRef.current - 1);
         if (queueRef.current > 0) return;
@@ -207,15 +336,31 @@ export function useVoiceCall(opts: {
           setTimeout(() => hangUp("agent_ended"), 400); // a beat after "bye", like a person
         } else if (!waitingRef.current) armSilence();
       };
-      u.onend = done;
-      u.onerror = done;
-      window.speechSynthesis.speak(u);
+      chainRef.current = chainRef.current
+        .then(async () => {
+          for (let i = 0; i < parts.length; i++) {
+            if (gen !== genRef.current || !activeRef.current) return;
+            speakingTextRef.current = text;
+            setSpeaking(true);
+            const url = await clips[i];
+            if (gen !== genRef.current || !activeRef.current) return;
+            if (url) await playUrl(url);
+            else {
+              cloudTtsRef.current = false;
+              await speakBrowser(parts[i], voiceRef.current);
+            }
+          }
+        })
+        .catch(() => {})
+        .finally(() => {
+          if (gen === genRef.current) done();
+        });
     },
     [armSilence, hangUp],
   );
 
   const endAfterSpeaking = useCallback(() => {
-    if (queueRef.current > 0 || window.speechSynthesis.speaking) pendingEndRef.current = true;
+    if (queueRef.current > 0 || window.speechSynthesis?.speaking) pendingEndRef.current = true;
     else hangUp("agent_ended");
   }, [hangUp]);
 
@@ -244,35 +389,25 @@ export function useVoiceCall(opts: {
     const Ctor = W.SpeechRecognition ?? W.webkitSpeechRecognition;
     setStatus("connecting");
     try {
-      if (!Ctor || !window.speechSynthesis) throw new Error("unsupported");
-      const stream = await navigator.mediaDevices.getUserMedia({ audio: { echoCancellation: true, noiseSuppression: true } });
-      stream.getTracks().forEach((t) => t.stop());
+      streamRef.current = await navigator.mediaDevices.getUserMedia({ audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true } });
     } catch {
       setStatus("idle");
       optsRef.current.onMicDenied();
       return false;
     }
-    voiceRef.current = await lockVoice(optsRef.current.voice);
+    styleRef.current = optsRef.current.voice;
+    cloudTtsRef.current = true;
+    genRef.current += 1;
+    if (window.speechSynthesis) voiceRef.current = await lockVoice(styleRef.current);
 
-    const rec = new Ctor();
-    rec.continuous = true;
-    rec.interimResults = true;
-    rec.lang = navigator.language || "en-US";
-    rec.onresult = (e) => {
-      let interim = "";
-      let finals = "";
-      for (let i = e.resultIndex; i < e.results.length; i++) {
-        const t = e.results[i][0].transcript;
-        if (e.results[i].isFinal) finals += t;
-        else interim += t;
-      }
+    const onHeard: Heard = (finals, interim) => {
       const latest = (finals || interim).trim();
       if (!latest) return;
       // While the agent talks, ignore its own voice coming back through the mic.
       if (queueRef.current > 0 && looksLikeEcho(latest, speakingTextRef.current)) return;
       // Real speech over the agent: stop talking and listen (barge-in).
       if (queueRef.current > 0 && words(latest).length >= 2) {
-        window.speechSynthesis.cancel();
+        stopAudio();
         queueRef.current = 0;
         pendingEndRef.current = false;
         speakingTextRef.current = "";
@@ -291,25 +426,56 @@ export function useVoiceCall(opts: {
         flushTurn();
       }, turnEndDelay(`${bufferRef.current} ${interim}`));
     };
-    rec.onend = () => {
-      // Chrome ends recognition on its own every so often; keep the line open.
-      if (activeRef.current) setTimeout(startRec, 150);
-      else setListening(false);
+
+    // Prefer Deepgram; fall back to the browser recognizer if it can't start or drops mid-call.
+    const startWebSpeech = () => {
+      if (!Ctor) return false;
+      const rec = new Ctor();
+      rec.continuous = true;
+      rec.interimResults = true;
+      rec.lang = navigator.language || "en-US";
+      rec.onresult = (e) => {
+        let interim = "";
+        let finals = "";
+        for (let i = e.resultIndex; i < e.results.length; i++) {
+          const t = e.results[i][0].transcript;
+          if (e.results[i].isFinal) finals += t;
+          else interim += t;
+        }
+        onHeard(finals, interim);
+      };
+      rec.onend = () => {
+        // Chrome ends recognition on its own every so often; keep the line open.
+        if (activeRef.current && recRef.current === rec) setTimeout(startRec, 150);
+        else setListening(false);
+      };
+      rec.onerror = (e) => {
+        if (e.error === "not-allowed" || e.error === "service-not-allowed") {
+          teardown();
+          setStatus("idle");
+          optsRef.current.onMicDenied();
+        }
+        // "no-speech", "network", "aborted": onend restarts; silence is handled by our own timer.
+      };
+      recRef.current = rec;
+      startRec();
+      return true;
     };
-    rec.onerror = (e) => {
-      if (e.error === "not-allowed" || e.error === "service-not-allowed") {
-        teardown();
-        setStatus("idle");
-        optsRef.current.onMicDenied();
-      }
-      // "no-speech", "network", "aborted": onend restarts; silence is handled by our own timer.
-    };
-    recRef.current = rec;
+    const stream = streamRef.current;
+    const sid = optsRef.current.sessionId;
     activeRef.current = true;
+    const stopDg = stream && sid ? await startDeepgram(sid, stream, onHeard, () => void (activeRef.current && startWebSpeech())) : null;
+    if (stopDg) stopDeepgramRef.current = stopDg;
+    else if (!startWebSpeech()) {
+      teardown();
+      setStatus("idle");
+      optsRef.current.onMicDenied();
+      return false;
+    }
     waitingRef.current = true; // the agent greets first
     setStartedAt(Date.now());
     setStatus("active");
-    startRec();
+    setListening(true);
     return true;
   }, [flushTurn, startRec, teardown]);
 
