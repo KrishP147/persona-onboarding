@@ -328,7 +328,7 @@ export type SessionEvent =
   | { type: "call_ended"; reason: "user_hangup" | "agent_ended" | "error" }
   | { type: "silence" }
   | { type: "mic_denied" }
-  | { type: "gmail_connected"; email: string }
+  | { type: "gmail_connected"; email?: string }
   | { type: "gmail_failed"; error: string };
 
 function eventMsg(s: Session, text: string): Msg {
@@ -414,17 +414,32 @@ export async function handleEvent(s: Session, e: SessionEvent): Promise<TurnResu
         "The call couldn't start because their microphone isn't available. No problem: carry on over text.",
         "looks like your mic isn't available, no problem. we can do this over text.",
       );
-    case "gmail_connected":
-      s.slots.gmail = { value: e.email, status: "filled", asks: s.slots.gmail.asks, source: "text", updatedAt: Date.now() };
-      s.gmailEmail = e.email;
-      eventMsg(s, `Gmail connected: ${e.email}`);
-      return turn(s, s.call.active ? "voice" : "text", "Their Gmail just connected. Acknowledge in a few words and, if you know what they need, offer one concrete thing you can now do with their inbox.",
-        "gmail's connected, thanks.",
+    case "gmail_connected": {
+      // Only trust what the oauth callback verified (test runs may pass an email explicitly).
+      const v = s.gmailVerified ?? (process.env.ALLOW_TEST_EVENTS === "1" && e.email ? { email: e.email, unread: 7 } : null);
+      if (!v) return idle();
+      s.gmailVerified = undefined;
+      if (s.slots.gmail.status === "filled" && s.gmailEmail === v.email) return idle();
+      s.slots.gmail = { value: v.email, status: "filled", asks: s.slots.gmail.asks, source: s.call.active ? "voice" : "text", updatedAt: Date.now() };
+      s.gmailEmail = v.email;
+      s.gmailUnread = v.unread;
+      eventMsg(s, `Gmail connected: ${v.email}`);
+      const unreadNote = typeof v.unread === "number" ? ` Their inbox shows ${v.unread} unread, which you can mention lightly as a first useful observation.` : "";
+      return turn(s, s.call.active ? "voice" : "text", `Their Gmail just connected.${unreadNote} Acknowledge in a few words and, if you know what they need, offer one concrete thing you can now do with their inbox. Don't claim you've read specific emails.`,
+        typeof v.unread === "number" ? `gmail's connected. i see ${v.unread} unread in there, want me to help sort through them?` : "gmail's connected, thanks.",
       );
-    case "gmail_failed":
-      eventMsg(s, "Gmail connection didn't finish");
-      return turn(s, s.call.active ? "voice" : "text", `Connecting Gmail didn't complete (${e.error.slice(0, 80)}). Reassure them it's optional and they can retry anytime; don't push.`,
-        "looks like that didn't go through, totally fine. it's optional, and the link works whenever.",
+    }
+    case "gmail_failed": {
+      const cancelled = /access_denied|cancel/i.test(e.error);
+      eventMsg(s, cancelled ? "Gmail connection cancelled" : "Gmail connection didn't finish");
+      return turn(
+        s,
+        s.call.active ? "voice" : "text",
+        cancelled
+          ? "They closed the Google screen without connecting. That's a choice, not an error: acknowledge lightly, no pressure, and carry on with whatever they need."
+          : `Connecting Gmail didn't complete (${e.error.slice(0, 80)}). Own it lightly, reassure them it's optional and they can retry anytime; don't push.`,
+        cancelled ? "no worries, we can skip gmail for now." : "looks like that didn't go through, my bad. it's optional, and the link works whenever.",
       );
+    }
   }
 }

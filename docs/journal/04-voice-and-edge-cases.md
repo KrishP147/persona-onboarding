@@ -77,3 +77,22 @@ things i wanted:
 ## what's next for voice
 
 the current voice uses the browser's built in speech tools, which are free and good enough to test turn taking. the plan is to swap in streaming speech to text and a better text to speech voice without changing anything on the server, since the server only ever sees text and events.
+
+## gmail without breaking the call
+
+the brief wants gmail attempted during the call, which creates an awkward problem: google sign in is a web page, and if it takes over the tab, it kills the call. so the connect link opens google in a small popup instead. the call keeps going in the main tab, and when the popup finishes it tells the main tab and closes itself.
+
+a few choices in there i care about:
+
+- the server only trusts what google verified. the page can't just claim "gmail connected, here's an email". the callback records the verified address, and the connect event only works if that record exists.
+- it asks for read only gmail, reads the email address and the inbox unread count once, and throws the token away. the unread count is the smallest possible "value moment": "i see 14 unread in there, want help sorting through them?" it's a real observation about their life, not a feature pitch (fitzpatrick would approve).
+- closing google's screen without connecting is treated as a choice, not an error. "no worries, we can skip gmail for now." an actual failure gets owned lightly ("my bad") and it never pushes.
+- if popups are blocked, it says so in plain words instead of silently doing nothing.
+- when no google client is configured (like right now, before i've made one), the popup offers a clearly labeled demo account instead of a dead end, so the whole flow can still be tried.
+
+## the boring resilience stuff
+
+- **offline:** a banner says nothing's lost, the unsent message stays in the box, and it sends itself when the connection comes back.
+- **two tabs:** tabs of the same session tell each other when something changes, and any tab that becomes visible again pulls the latest from the server.
+- **coming back after a hangup:** a "call me back" chip shows up if something's still missing, and tapping it connects right away. you placing the call is consent enough, so there's no fake ringing.
+- **deploying:** sessions live in a local file in dev and in upstash redis when deployed, with a per session lock that works across serverless instances.

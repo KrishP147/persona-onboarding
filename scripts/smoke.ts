@@ -1,5 +1,5 @@
 // Keyless smoke test of the engine's safety nets (mock mode). Run: pnpm tsx scripts/smoke.ts
-import { newSession } from "../src/lib/store";
+import { loadSession, newSession, saveSession, withSession } from "../src/lib/store";
 import { handleEvent, handleUserMessage } from "../src/lib/engine";
 import { readMood } from "../src/lib/mood";
 import type { TurnResult } from "../src/lib/types";
@@ -51,6 +51,28 @@ async function main() {
   // refresh: open on existing session doesn't re-greet
   const again = await handleEvent(s, { type: "open" });
   check("no duplicate greeting on reopen", again.newMessages.length === 0);
+
+  // gmail: unverified connect is ignored, verified connect fills the slot once
+  const g = newSession();
+  const fake = await handleEvent(g, { type: "gmail_connected", email: "attacker@evil.com" });
+  check("unverified gmail event ignored", fake.newMessages.length === 0 && g.slots.gmail.status === "missing");
+  g.gmailVerified = { email: "me@gmail.com", unread: 12 };
+  const ok = await handleEvent(g, { type: "gmail_connected" });
+  check("verified gmail fills slot", g.slots.gmail.status === "filled" && g.gmailEmail === "me@gmail.com");
+  check("gmail value moment mentions unread", said(ok).includes("12"), said(ok));
+  const cancel = await handleEvent(newSession(), { type: "gmail_failed", error: "access_denied" });
+  check("oauth cancel treated as a choice", /no worries/.test(said(cancel)), said(cancel));
+
+  // post-call chip offers a call back when something is still missing
+  check("call me back chip after call", end.chips.includes("Call me back"), end.chips.join("|"));
+
+  // concurrent turns on one session are serialized, nothing lost
+  const c = newSession();
+  await saveSession(c);
+  await Promise.all(["one", "two", "three"].map((t) => withSession(c.id, (x) => handleUserMessage(x, "text", t))));
+  const after = await loadSession(c.id);
+  const userTexts = after?.transcript.filter((m) => m.role === "user").map((m) => m.text) ?? [];
+  check("parallel sends all persisted", ["one", "two", "three"].every((t) => userTexts.includes(t)), userTexts.join(","));
 
   // mood
   const m = (text: string) => readMood([{ id: "x", role: "user", channel: "text", text, ts: 0 }]).mood;

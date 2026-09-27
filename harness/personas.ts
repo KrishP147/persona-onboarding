@@ -8,7 +8,9 @@ export type ScriptEvent =
   | { atTurn: number; event: "silence"; times: number }
   | { atTurn: number; event: "mic_denied" }
   | { atTurn: number; event: "connect_gmail" }
-  | { atTurn: number; event: "gmail_fail" };
+  | { atTurn: number; event: "gmail_fail" }
+  | { atTurn: number; event: "reopen" } // refresh / new tab mid-flow
+  | { atTurn: number; event: "double_send"; texts: [string, string] };
 
 export interface Persona {
   id: string;
@@ -95,5 +97,26 @@ export const PERSONAS: Persona[] = [
     maxTurns: 8,
     script: [{ atTurn: 4, event: "gmail_fail" }],
     expect: ["reassures after failure", "doesn't push Gmail again immediately", "still delivers value"],
+  },
+  {
+    id: "rambler",
+    brief: "On the call you ramble: long, meandering answers with your name (Theo) and your need (keeping track of your kid's school stuff and your work calendar) buried in the middle of unrelated stories.",
+    maxTurns: 8,
+    script: [{ atTurn: 1, event: "accept_call" }],
+    expect: ["extracts name and need from long rambling turns", "summarizes back briefly to confirm", "keeps its own turns short"],
+  },
+  {
+    id: "double-texter",
+    brief: "You text in bursts. You're Mia. You want help planning a friend's birthday dinner.",
+    maxTurns: 7,
+    script: [{ atTurn: 1, event: "double_send", texts: ["wait", "actually call me mimi not mia"] }],
+    expect: ["handles two messages sent at once without duplicate or crossed replies", "uses Mimi afterwards"],
+  },
+  {
+    id: "comes-back",
+    brief: "You start (you're Ben), then leave mid-way (the page reloads), then come back and continue as if nothing happened. You want help cancelling unused subscriptions.",
+    maxTurns: 8,
+    script: [{ atTurn: 3, event: "reopen" }],
+    expect: ["no duplicate greeting after reload", "remembers everything from before", "picks up where it left off"],
   },
 ];

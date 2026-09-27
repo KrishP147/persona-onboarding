@@ -53,6 +53,7 @@ the short version of the philosophy: the model talks, code decides. anything tha
 - [x] silence ladder, guaranteed goodbye and recap, interruptions, locked voice, mood gauge
 - [x] keyless smoke test, stress harness
 - [ ] run the harness with a real key and tune from the results
-- [ ] real google sign in for gmail (the button is a stand in right now)
+- [x] google sign in for gmail in a popup so the call survives it (demo account when no client is configured)
+- [x] offline retry, multi tab sync, call me back, deploy ready session store
 - [ ] better voice (streaming speech to text, nicer text to speech)
 - [ ] deploy

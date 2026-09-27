@@ -64,6 +64,8 @@ export interface Session {
   voice: VoiceStyle;
   pendingVoice?: VoiceStyle; // agent renamed mid-call: applies from the next call
   gmailEmail?: string;
+  gmailUnread?: number; // small value moment at connect time; tokens are never stored
+  gmailVerified?: { email: string; unread?: number; demo?: boolean }; // set by the oauth callback, consumed by the gmail_connected event
   graduatedReason?: string;
   transcript: Msg[];
 }

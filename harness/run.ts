@@ -52,6 +52,12 @@ async function runEvent(sessionId: string, e: ScriptEvent): Promise<TurnResult[]
       return [await ev({ type: "gmail_connected", email: "test.user@gmail.com" })];
     case "gmail_fail":
       return [await ev({ type: "gmail_failed", error: "access_denied" })];
+    case "reopen":
+      return [await ev({ type: "open" })];
+    case "double_send": {
+      const [a, b] = await Promise.all(e.texts.map((text) => api<TurnResult>("/api/chat", { sessionId, channel: "text", text })));
+      return [a, b].sort((x, y) => x.session.updatedAt - y.session.updatedAt);
+    }
     case "silence": {
       const out: TurnResult[] = [];
       for (let i = 0; i < e.times; i++) {

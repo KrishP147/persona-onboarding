@@ -46,6 +46,9 @@ export default function Home() {
   const [typing, setTyping] = useState(false);
   const [mock, setMock] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [offline, setOffline] = useState(false);
+  const retryRef = useRef<(() => void) | null>(null);
+  const chanRef = useRef<BroadcastChannel | null>(null);
   const bottomRef = useRef<HTMLDivElement>(null);
   const fileRef = useRef<HTMLInputElement>(null);
   const idRef = useRef<string | null>(null);
@@ -69,9 +72,22 @@ export default function Home() {
       setChips(r.chips);
       upsert(r.newMessages);
       actionsRef.current(r.actions);
+      chanRef.current?.postMessage("sync");
     },
     [upsert],
   );
+
+  // Pull the latest server state (other tab, popup, or coming back online).
+  const resync = useCallback(async () => {
+    if (!idRef.current) return;
+    try {
+      const res = await fetch(`/api/session?id=${encodeURIComponent(idRef.current)}`, { cache: "no-store" });
+      const data = (await res.json()) as { session: Session; chips: string[] };
+      setSession(data.session);
+      setMessages(data.session.transcript);
+      setChips(data.chips);
+    } catch {}
+  }, []);
 
   const sendEvent = useCallback(
     async (event: Record<string, unknown>) => {
@@ -111,6 +127,41 @@ export default function Home() {
     };
   });
 
+  // Other tabs, visibility, connectivity: keep every view in step with the server.
+  useEffect(() => {
+    const onOnline = () => {
+      setOffline(false);
+      const retry = retryRef.current;
+      retryRef.current = null;
+      if (retry) retry();
+      else void resync();
+    };
+    const onOffline = () => setOffline(true);
+    const onVisible = () => {
+      if (document.visibilityState === "visible") void resync();
+    };
+    if (!navigator.onLine) queueMicrotask(onOffline);
+    window.addEventListener("online", onOnline);
+    window.addEventListener("offline", onOffline);
+    document.addEventListener("visibilitychange", onVisible);
+    return () => {
+      window.removeEventListener("online", onOnline);
+      window.removeEventListener("offline", onOffline);
+      document.removeEventListener("visibilitychange", onVisible);
+    };
+  }, [resync]);
+
+  // Gmail popup reports back here; the server already holds the verified result.
+  useEffect(() => {
+    const onMsg = (e: MessageEvent) => {
+      if (e.origin !== window.location.origin || e.data?.type !== "persona-gmail") return;
+      if (e.data.ok) void sendEvent({ type: "gmail_connected" });
+      else void sendEvent({ type: "gmail_failed", error: String(e.data.error ?? "unknown") });
+    };
+    window.addEventListener("message", onMsg);
+    return () => window.removeEventListener("message", onMsg);
+  }, [sendEvent]);
+
   // Boot: resume the stored session (refresh-safe) or create one.
   useEffect(() => {
     (async () => {
@@ -119,6 +170,11 @@ export default function Home() {
       const data = (await res.json()) as { session: Session; chips: string[]; mock: boolean };
       idRef.current = data.session.id;
       storeId(data.session.id);
+      try {
+        chanRef.current?.close();
+        chanRef.current = new BroadcastChannel(`persona-${data.session.id}`);
+        chanRef.current.onmessage = () => void resync();
+      } catch {}
       setSession(data.session);
       setMessages(data.session.transcript);
       setChips(data.chips);
@@ -131,7 +187,7 @@ export default function Home() {
         setTyping(false);
       }
     })().catch(() => setError("couldn't reach the server"));
-  }, [sendEvent]);
+  }, [sendEvent, resync]);
 
   useEffect(() => bottomRef.current?.scrollIntoView({ behavior: "smooth" }), [messages, typing]);
 
@@ -145,24 +201,37 @@ export default function Home() {
       apply(await post<TurnResult>("/api/chat", { sessionId: idRef.current, channel: "text", text, attachments: atts }));
       setError(null);
     } catch {
-      setError("message didn't send, tap to retry");
       setDraft(text);
       setPending(atts);
+      if (!navigator.onLine) {
+        setError("you're offline. i'll send it when you're back.");
+        retryRef.current = () => void send(text);
+      } else setError("that didn't send, hit send to try again");
     } finally {
       setTyping(false);
     }
   };
 
+  // The user placing the call is consent enough: connect straight away, no ringing.
+  const startUserCall = async () => {
+    if (call.status !== "idle") return;
+    if (await call.accept()) {
+      await sendEvent({ type: "call_started" });
+      call.greeted();
+    }
+  };
+
   const onChip = (c: string) => {
     if (c === "Call me") return void send("sure, call me");
+    if (c === "Call me back") return void startUserCall();
     if (c === "Connect Gmail") return void send("connect gmail");
     void send(c);
   };
 
   const connectGmail = () => {
-    // Placeholder until the Google OAuth lane lands.
-    const email = "demo.user@gmail.com";
-    void sendEvent({ type: "gmail_connected", email });
+    if (!idRef.current) return;
+    const w = window.open(`/api/auth/google/start?s=${idRef.current}`, "persona-gmail", "width=480,height=680");
+    if (!w) setError("your browser blocked the google window. allow popups for this page and tap the link again.");
   };
 
   const agentName = session?.slots.agentName.value ?? "New assistant";
@@ -178,12 +247,15 @@ export default function Home() {
           </div>
           <div className="flex-1 min-w-0">
             <div className="font-medium truncate">{agentName}</div>
-            <div className="text-xs text-neutral-400">{mock ? "mock mode" : onCall ? "on a call" : "Persona"}</div>
+            <div className="text-xs text-neutral-400">
+              {onCall ? "on a call" : session?.phase === "graduated" ? "all set" : "Persona"}
+              {mock ? " · mock mode" : ""}
+            </div>
           </div>
           <button
             aria-label="Call"
             disabled={onCall}
-            onClick={() => call.setStatus("ringing")}
+            onClick={() => void startUserCall()}
             className="w-10 h-10 rounded-full hover:bg-white/10 disabled:opacity-40 flex items-center justify-center"
           >
             <PhoneIcon />
@@ -195,10 +267,19 @@ export default function Home() {
           {messages.map((m) => (
             <Bubble key={m.id} m={m} onConnect={connectGmail} connected={session?.slots.gmail.status === "filled"} />
           ))}
-          {typing && <div className="text-neutral-500 text-sm px-2">typing…</div>}
+          {typing && (
+            <div className="flex justify-start">
+              <div className="bg-[#23252b] rounded-2xl px-4 py-3 flex gap-1" aria-label="typing">
+                {[0, 1, 2].map((i) => (
+                  <span key={i} className="w-1.5 h-1.5 rounded-full bg-neutral-400 animate-bounce" style={{ animationDelay: `${i * 120}ms` }} />
+                ))}
+              </div>
+            </div>
+          )}
           <div ref={bottomRef} />
         </div>
 
+        {offline && <div className="mx-3 mb-1 text-xs text-neutral-300 bg-white/10 rounded-lg px-3 py-1.5">you&apos;re offline. nothing&apos;s lost, it&apos;ll pick up when you&apos;re back.</div>}
         {error && (
           <div className="mx-3 mb-1 text-xs text-amber-300 bg-amber-900/30 rounded-lg px-3 py-1.5">{error}</div>
         )}

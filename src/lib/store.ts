@@ -4,9 +4,16 @@ import { nanoid } from "nanoid";
 import type { Session, SlotKey, Slot } from "./types";
 import { SLOT_KEYS } from "./types";
 
-// Dev store: one JSON file per session under .data/. Swap for Upstash on deploy
-// (Vercel's filesystem is read-only).
-const DIR = path.join(process.cwd(), ".data", "sessions");
+// Two backends behind one interface:
+// - local dev: one JSON file per session under .data/
+// - deployed: Upstash Redis over its REST API (serverless has no writable disk and many instances)
+interface Backend {
+  get(id: string): Promise<string | null>;
+  set(id: string, value: string): Promise<void>;
+  lock(id: string): Promise<() => Promise<void>>;
+}
+
+const TTL_SECONDS = 60 * 60 * 24 * 7;
 
 function emptySlot(): Slot {
   return { value: null, status: "missing", asks: 0 };
@@ -33,9 +40,78 @@ function safeId(id: string) {
   return id;
 }
 
+// ---- file backend ----
+const DIR = path.join(process.cwd(), ".data", "sessions");
+const memLocks = new Map<string, Promise<unknown>>();
+
+const fileBackend: Backend = {
+  async get(id) {
+    try {
+      return await fs.readFile(path.join(DIR, `${id}.json`), "utf8");
+    } catch {
+      return null;
+    }
+  },
+  async set(id, value) {
+    await fs.mkdir(DIR, { recursive: true });
+    const file = path.join(DIR, `${id}.json`);
+    // write-then-rename so a crash mid-write never leaves a torn session
+    await fs.writeFile(`${file}.tmp`, value);
+    await fs.rename(`${file}.tmp`, file);
+  },
+  async lock(id) {
+    const prev = memLocks.get(id) ?? Promise.resolve();
+    let release!: () => void;
+    const mine = new Promise<void>((r) => (release = r));
+    memLocks.set(id, prev.then(() => mine));
+    await prev;
+    return async () => release();
+  },
+};
+
+// ---- upstash backend ----
+function upstash(url: string, token: string): Backend {
+  async function cmd<T>(...args: (string | number)[]): Promise<T> {
+    const res = await fetch(url, {
+      method: "POST",
+      headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
+      body: JSON.stringify(args),
+      cache: "no-store",
+    });
+    if (!res.ok) throw new Error(`upstash ${res.status}`);
+    return ((await res.json()) as { result: T }).result;
+  }
+  return {
+    get: (id) => cmd<string | null>("GET", `session:${id}`),
+    async set(id, value) {
+      await cmd("SET", `session:${id}`, value, "EX", TTL_SECONDS);
+    },
+    async lock(id) {
+      // Per-session mutex across serverless instances. Expires on its own if a request dies.
+      const key = `lock:${id}`;
+      const owner = nanoid(8);
+      for (let i = 0; i < 100; i++) {
+        if ((await cmd<string | null>("SET", key, owner, "NX", "PX", 20000)) === "OK") {
+          return async () => {
+            if ((await cmd<string | null>("GET", key)) === owner) await cmd("DEL", key);
+          };
+        }
+        await new Promise((r) => setTimeout(r, 150));
+      }
+      throw new Error("session busy");
+    },
+  };
+}
+
+const backend: Backend =
+  process.env.UPSTASH_REDIS_REST_URL && process.env.UPSTASH_REDIS_REST_TOKEN
+    ? upstash(process.env.UPSTASH_REDIS_REST_URL, process.env.UPSTASH_REDIS_REST_TOKEN)
+    : fileBackend;
+
 export async function loadSession(id: string): Promise<Session | null> {
+  const raw = await backend.get(safeId(id));
+  if (!raw) return null;
   try {
-    const raw = await fs.readFile(path.join(DIR, `${safeId(id)}.json`), "utf8");
     return JSON.parse(raw) as Session;
   } catch {
     return null;
@@ -44,23 +120,18 @@ export async function loadSession(id: string): Promise<Session | null> {
 
 export async function saveSession(s: Session): Promise<void> {
   s.updatedAt = Date.now();
-  await fs.mkdir(DIR, { recursive: true });
-  const file = path.join(DIR, `${safeId(s.id)}.json`);
-  // write-then-rename so a crash mid-write never leaves a torn session
-  await fs.writeFile(`${file}.tmp`, JSON.stringify(s, null, 2));
-  await fs.rename(`${file}.tmp`, file);
+  await backend.set(safeId(s.id), JSON.stringify(s));
 }
 
-// Serialize turns per session: rapid double-sends must not race each other.
-const locks = new Map<string, Promise<unknown>>();
+// Serialize turns per session: rapid double-sends and overlapping events must not race.
 export async function withSession<T>(id: string, fn: (s: Session) => Promise<T>): Promise<T> {
-  const prev = locks.get(id) ?? Promise.resolve();
-  const run = prev.then(async () => {
+  const release = await backend.lock(safeId(id));
+  try {
     const s = (await loadSession(id)) ?? { ...newSession(), id };
     const out = await fn(s);
     await saveSession(s);
     return out;
-  });
-  locks.set(id, run.catch(() => {}));
-  return run;
+  } finally {
+    await release();
+  }
 }

@@ -104,6 +104,8 @@ function chipsFor(s: Session, channel: Channel, offerCall: boolean): string[] {
   const chips: string[] = [];
   if (offerCall) chips.push("Call me");
   if (offerCall) chips.push("Text is fine");
+  const callWorthIt = isOpen(s, "userName") || isOpen(s, "helpNeed") || isOpen(s, "gmail");
+  if (s.phase === "post_call" && callWorthIt) chips.push("Call me back");
   if (isOpen(s, "gmail") && s.slots.agentName.status !== "missing") chips.push("Connect Gmail");
   if (isOpen(s, "helpNeed")) chips.push("I know what I need");
   chips.push("Skip setup");
