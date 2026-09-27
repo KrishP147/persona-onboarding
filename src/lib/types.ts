@@ -62,6 +62,7 @@ export interface Session {
   consecutiveAsks: number; // asks in a row without giving value
   lastAskedSlot?: SlotKey;
   voice: VoiceStyle;
+  pendingVoice?: VoiceStyle; // agent renamed mid-call: applies from the next call
   gmailEmail?: string;
   graduatedReason?: string;
   transcript: Msg[];

@@ -1,4 +1,5 @@
 import type { Channel, Session, SlotKey } from "./types";
+import { MOOD_GUIDANCE, readMood } from "./mood";
 
 // Deterministic onboarding policy. The LLM writes the words; this decides
 // what the next move is, so behavior stays consistent under adversarial users.
@@ -86,6 +87,9 @@ export function computeDirective(s: Session, channel: Channel): Directive {
   if (s.phase === "post_call") {
     notes.push("The call has ended. Continue over text without re-asking anything already collected.");
   }
+  if (readMood(s.transcript).mood === "rushed" && !canGraduate && s.phase !== "on_call") {
+    notes.push("They seem in a hurry: offer to skip the setup and just start with whatever they need.");
+  }
   if (canGraduate) {
     notes.push(
       "The user has told you what they need. Help with it now (a concrete mini-task), then call graduate. Leftover items get deferred.",
@@ -127,7 +131,10 @@ export function directiveText(s: Session, d: Directive, channel: Channel): strin
       return `- ${k}: ${sl.status}${sl.value ? ` = "${sl.value}"` : ""} (asked ${sl.asks}x)`;
     })
     .join("\n");
+  const mood = readMood(s.transcript);
+  const moodLine = `USER SEEMS: ${mood.mood}${mood.signals.length ? ` (${mood.signals.join(", ")})` : ""}. ${MOOD_GUIDANCE[mood.mood]}`;
   return [
+    moodLine,
     `CHANNEL: ${channel === "voice" ? "live phone call (speak; short sentences; no emoji, no lists)" : "text messages"}`,
     `PHASE: ${s.phase}`,
     `SLOTS:\n${slotLines}`,

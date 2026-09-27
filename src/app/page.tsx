@@ -88,10 +88,10 @@ export default function Home() {
 
   const call = useVoiceCall({
     voice: session?.voice ?? "neutral",
-    onUtterance: async (text) => {
+    onUtterance: async (text, interrupted) => {
       if (!idRef.current) return;
       try {
-        apply(await post<TurnResult>("/api/chat", { sessionId: idRef.current, channel: "voice", text }));
+        apply(await post<TurnResult>("/api/chat", { sessionId: idRef.current, channel: "voice", text, interrupted }));
       } catch {
         setError("lost you for a sec");
       }
@@ -257,10 +257,14 @@ export default function Home() {
             name={agentName}
             status={call.status}
             speaking={call.speaking}
+            heard={call.heard}
             listening={call.listening}
             startedAt={call.startedAt}
             onAccept={async () => {
-              if (await call.accept()) await sendEvent({ type: "call_started" });
+              if (await call.accept()) {
+                await sendEvent({ type: "call_started" });
+                call.greeted();
+              }
             }}
             onDecline={() => {
               call.setStatus("idle");
@@ -322,6 +326,7 @@ function CallScreen(p: {
   status: string;
   speaking: boolean;
   listening: boolean;
+  heard: string;
   startedAt: number | null;
   onAccept: () => void;
   onDecline: () => void;
@@ -347,6 +352,7 @@ function CallScreen(p: {
           {p.status === "active" && `${timer} · ${p.speaking ? "speaking" : p.listening ? "listening" : "…"}`}
           {p.status === "ended" && "call ended"}
         </div>
+        {p.status === "active" && p.heard && <div className="mt-6 px-8 text-neutral-300 text-sm italic">&ldquo;{p.heard}&rdquo;</div>}
       </div>
       {p.status === "ringing" ? (
         <div className="flex gap-16">

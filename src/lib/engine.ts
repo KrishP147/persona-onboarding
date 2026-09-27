@@ -147,7 +147,10 @@ async function runTool(ctx: Ctx, name: string, input: Record<string, unknown>): 
       const renamed = slot === "agentName" && s.slots.agentName.value && s.slots.agentName.value !== value;
       s.slots[slot] = { ...s.slots[slot], value, status: "filled", source: ctx.channel, updatedAt: Date.now() };
       if (slot === "agentName") {
-        s.voice = await classifyVoice(value);
+        const style = await classifyVoice(value);
+        // Keep one voice per call: a rename mid-call applies from the next call.
+        if (s.call.active) s.pendingVoice = style;
+        else s.voice = style;
         // One contact card per session, updated in place (client upserts by id): no duplicates on rename.
         let card = s.transcript.find((m) => m.kind === "contact_card");
         if (card) card.text = value;
@@ -199,7 +202,7 @@ async function runTool(ctx: Ctx, name: string, input: Record<string, unknown>): 
 
 async function generate(ctx: Ctx, extraInstruction?: string): Promise<string> {
   const { s, channel } = ctx;
-  if (!client) return mockReply(ctx, runTool);
+  if (!client) return extraInstruction ? "" : mockReply(ctx, runTool);
 
   const messages = toApiMessages(s);
   let finalText = "";
@@ -233,6 +236,37 @@ async function generate(ctx: Ctx, extraInstruction?: string): Promise<string> {
   return finalText;
 }
 
+const GOODBYE = /\b(bye|goodbye|talk (soon|later)|take care|catch you|ciao|see ya)\b/i;
+
+function shortNeed(s: Session) {
+  const n = s.slots.helpNeed.value;
+  return n && n.length <= 60 ? n : null;
+}
+
+// Never vanish from a call: a hangup the agent initiates always carries a real goodbye.
+export function goodbyeLine(s: Session) {
+  const name = s.slots.userName.value;
+  const need = shortNeed(s);
+  return `okay${name ? ` ${name}` : ""}, i'll let you go${need ? ` and get started on ${need}` : ""}. i'll text you a quick recap, and you can call me back anytime. bye for now.`;
+}
+
+// Used only if the model produced nothing: the post-call text must always arrive.
+export function recapFallback(s: Session, reason: string) {
+  const name = s.slots.userName.value;
+  const got: string[] = [];
+  if (s.slots.userName.status === "filled") got.push(`i'll call you ${name}`);
+  if (shortNeed(s)) got.push(`you want help with ${shortNeed(s)}`);
+  if (s.slots.gmail.status === "filled") got.push("gmail's connected");
+  const open = (["helpNeed", "gmail", "userName"] as SlotKey[]).find((k) => s.slots[k].status === "missing");
+  const nudge: Record<string, string> = {
+    helpNeed: "what's one thing you'd love off your plate this week?",
+    gmail: "whenever you want, the gmail link is right here.",
+    userName: "also, what should i call you?",
+  };
+  const opener = reason === "user_hangup" || reason === "error" ? "looks like we got cut off, no worries." : "thanks for the chat!";
+  return [opener, got.length ? `so far: ${got.join(", ")}.` : "", open ? nudge[open] : "reply here anytime, or call me back."].filter(Boolean).join("\n\n");
+}
+
 function emitAgentText(ctx: Ctx, text: string) {
   const bubbles = ctx.channel === "voice" ? [text.replace(/\n+/g, " ").trim()] : text.split(/\n\s*\n/).map((b) => b.trim());
   for (const b of bubbles.filter(Boolean)) {
@@ -243,9 +277,20 @@ function emitAgentText(ctx: Ctx, text: string) {
   if (ctx.channel === "voice" && text.trim()) ctx.actions.push({ type: "speak", text: text.replace(/\n+/g, " ").trim() });
 }
 
-async function turn(s: Session, channel: Channel, extraInstruction?: string): Promise<TurnResult> {
+async function turn(
+  s: Session,
+  channel: Channel,
+  extraInstruction?: string,
+  fallback?: string,
+  opts: { forceEnd?: boolean } = {},
+): Promise<TurnResult> {
   const ctx: Ctx = { s, channel, actions: [], newMessages: [] };
-  const text = await generate(ctx, extraInstruction);
+  let text = await generate(ctx, extraInstruction);
+  if (!text.trim() && fallback) text = fallback;
+  if (opts.forceEnd && !ctx.actions.some((a) => a.type === "end_call")) ctx.actions.push({ type: "end_call" });
+  if (channel === "voice" && ctx.actions.some((a) => a.type === "end_call") && !GOODBYE.test(text)) {
+    text = `${text.trim()} ${goodbyeLine(s)}`.trim();
+  }
   const after = computeDirective(s, channel);
   recordAsk(s, text.includes("?") && after.mayAsk ? after.nextSlot : null);
   emitAgentText(ctx, text);
@@ -253,7 +298,13 @@ async function turn(s: Session, channel: Channel, extraInstruction?: string): Pr
   return { session: s, newMessages: ctx.newMessages, chips: final.chips, actions: ctx.actions };
 }
 
-export async function handleUserMessage(s: Session, channel: Channel, text: string, attachments?: Attachment[]): Promise<TurnResult> {
+export async function handleUserMessage(
+  s: Session,
+  channel: Channel,
+  text: string,
+  attachments?: Attachment[],
+  interrupted?: boolean,
+): Promise<TurnResult> {
   const clean = text.slice(0, 4000);
   const userMsg = msg("user", channel, clean, attachments?.length ? { attachments } : {});
   s.transcript.push(userMsg);
@@ -261,7 +312,11 @@ export async function handleUserMessage(s: Session, channel: Channel, text: stri
   if (/^\s*skip setup\s*$/i.test(clean) && s.phase !== "graduated") {
     return turn(s, channel, "The user tapped 'Skip setup'. Respect it: call graduate, then ask what they want to get done first.");
   }
-  const r = await turn(s, channel);
+  const r = await turn(
+    s,
+    channel,
+    interrupted ? "They talked over you mid-sentence. Drop what you were saying and respond to what they just said; don't repeat your cut-off line unless they ask." : undefined,
+  );
   r.newMessages.unshift(userMsg);
   return r;
 }
@@ -287,49 +342,89 @@ export async function handleEvent(s: Session, e: SessionEvent): Promise<TurnResu
   switch (e.type) {
     case "open":
       if (s.transcript.length > 0) return idle(); // resume after refresh: no duplicate greeting
-      return turn(s, "text", "The user just opened the chat for the first time. Introduce yourself in one or two short bubbles, say what you can help with in a line, and ask what they'd like to call you.");
+      return turn(
+        s,
+        "text",
+        "The user just opened the chat for the first time. Introduce yourself in one or two short bubbles, say what you can help with in a line, and ask what they'd like to call you.",
+        "hey! i'm your new personal assistant.\n\ni can make calls for you, handle email and calendar, shop, and book stuff.\n\nfirst things first, what do you want to call me?",
+      );
     case "call_started":
       if (s.call.active) return idle();
       s.call = { active: true, startedAt: Date.now(), silenceStrikes: 0 };
       s.phase = "on_call";
       eventMsg(s, "Call started");
-      return turn(s, "voice", "The call just connected. Greet them by your name if you have one, and say this will take about a minute.");
+      return turn(
+        s,
+        "voice",
+        "The call just connected. Greet them warmly by your name if you have one, pick up where the texts left off (never re-ask anything already known), and say this'll take about a minute and they can hang up anytime.",
+        "hey, it's me. thanks for picking up, this'll only take a minute.",
+      );
     case "call_declined":
       s.call = { ...s.call, active: false, endedReason: "declined" };
       s.callOffers = Math.max(s.callOffers, 1);
       if (s.phase === "call_offered") s.phase = "intro";
       eventMsg(s, "Call declined");
-      return turn(s, "text", "The user declined the call. Totally fine: continue over text, no pressure, don't offer the call again this turn.");
+      return turn(
+        s,
+        "text",
+        "The user declined the call. Totally fine: continue over text, no pressure, don't offer the call again this turn.",
+        "no worries, texting works great.",
+      );
     case "call_ended": {
       if (!s.call.active) return idle(); // duplicate hangup events
       s.call = { ...s.call, active: false, endedAt: Date.now(), endedReason: e.reason };
+      if (s.pendingVoice) {
+        s.voice = s.pendingVoice;
+        s.pendingVoice = undefined;
+      }
       s.phase = s.phase === "graduated" ? "graduated" : "post_call";
       const secs = Math.round(((s.call.endedAt ?? 0) - (s.call.startedAt ?? 0)) / 1000);
       eventMsg(s, `Call ended (${secs}s)`);
-      return turn(s, "text", `${RECAP_INSTRUCTION} Reason: ${e.reason}. Call lasted ${secs}s.`);
+      return turn(s, "text", `${RECAP_INSTRUCTION} Reason: ${e.reason}. Call lasted ${secs}s.`, recapFallback(s, e.reason));
     }
     case "silence": {
       if (!s.call.active) return idle();
       s.call.silenceStrikes += 1;
       if (s.call.silenceStrikes >= MAX_SILENCE_STRIKES) {
-        const r = await turn(s, "voice", "The user has been silent for a while. Say you'll text them instead, warmly, in one sentence, then call end_call.");
-        if (!r.actions.some((a) => a.type === "end_call")) r.actions.push({ type: "end_call" });
+        const r = await turn(
+          s,
+          "voice",
+          "The user has been silent for a while. Say it seems like now isn't a great time, which is totally fine, that you'll text them instead, and say goodbye by name if you know it. Then call end_call.",
+          goodbyeLine(s),
+          { forceEnd: true },
+        );
         return r;
       }
-      return turn(s, "voice", `The user has gone quiet (${s.call.silenceStrikes}x). Check in briefly ("still there?") or rephrase your last question more simply.`);
+      return turn(
+        s,
+        "voice",
+        s.call.silenceStrikes === 1
+          ? `The user has gone quiet. Check in gently in a few words ("you still there?" or "no rush, take your time").`
+          : `Still quiet (${s.call.silenceStrikes}x). Rephrase your last question much more simply, or offer to just text instead.`,
+        s.call.silenceStrikes === 1 ? "you still there? no rush." : "i can also just text you if that's easier.",
+      );
     }
     case "mic_denied":
       eventMsg(s, "Microphone unavailable");
       s.call = { ...s.call, active: false, endedReason: "error" };
       if (s.phase === "on_call" || s.phase === "call_offered") s.phase = "intro";
-      return turn(s, "text", "The call couldn't start because their microphone isn't available. No problem: carry on over text.");
+      return turn(
+        s,
+        "text",
+        "The call couldn't start because their microphone isn't available. No problem: carry on over text.",
+        "looks like your mic isn't available, no problem. we can do this over text.",
+      );
     case "gmail_connected":
       s.slots.gmail = { value: e.email, status: "filled", asks: s.slots.gmail.asks, source: "text", updatedAt: Date.now() };
       s.gmailEmail = e.email;
       eventMsg(s, `Gmail connected: ${e.email}`);
-      return turn(s, s.call.active ? "voice" : "text", "Their Gmail just connected. Acknowledge in a few words and, if you know what they need, offer one concrete thing you can now do with their inbox.");
+      return turn(s, s.call.active ? "voice" : "text", "Their Gmail just connected. Acknowledge in a few words and, if you know what they need, offer one concrete thing you can now do with their inbox.",
+        "gmail's connected, thanks.",
+      );
     case "gmail_failed":
       eventMsg(s, "Gmail connection didn't finish");
-      return turn(s, s.call.active ? "voice" : "text", `Connecting Gmail didn't complete (${e.error.slice(0, 80)}). Reassure them it's optional and they can retry anytime; don't push.`);
+      return turn(s, s.call.active ? "voice" : "text", `Connecting Gmail didn't complete (${e.error.slice(0, 80)}). Reassure them it's optional and they can retry anytime; don't push.`,
+        "looks like that didn't go through, totally fine. it's optional, and the link works whenever.",
+      );
   }
 }

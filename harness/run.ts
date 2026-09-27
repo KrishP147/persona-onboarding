@@ -144,7 +144,7 @@ async function main() {
         try {
           const s = await runPersona(p);
           const v = await judge(p, s);
-          await fs.writeFile(path.join(outDir, `${p.id}.md`), `# ${p.id} — ${v.score}/10\n\n${JSON.stringify(v, null, 2)}\n\n## Transcript\n\n${s.transcript.map(render).join("\n")}\n`);
+          await fs.writeFile(path.join(outDir, `${p.id}.md`), `# ${p.id}: ${v.score}/10\n\n${JSON.stringify(v, null, 2)}\n\n## Transcript\n\n${s.transcript.map(render).join("\n")}\n`);
           rows.push(`| ${p.id} | ${v.score} | ${v.failed.length ? v.failed.join("; ") : "-"} | ${v.formLike ? "yes" : ""} | ${v.brokeCharacter ? "yes" : ""} |`);
           console.log(`${p.id}: ${v.score}/10`);
         } catch (err) {
