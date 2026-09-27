@@ -184,7 +184,7 @@ export default function Home() {
       if (!idRef.current) return;
       const turn = ++voiceTurnRef.current;
       // Speaking again before the reply lands means they moved on; say so to the server.
-      const body = { sessionId: idRef.current, channel: "voice", text, interrupted: interrupted || turn > 1 && busyRef.current > 0, ...(interrupted && heardBefore !== undefined ? { heardBefore } : {}) };
+      const body = { sessionId: idRef.current, channel: "voice", tz: localTz(), text, interrupted: interrupted || turn > 1 && busyRef.current > 0, ...(interrupted && heardBefore !== undefined ? { heardBefore } : {}) };
       busyRef.current++;
       try {
         const r = await post<TurnResult>("/api/chat", body).catch(async () => {
@@ -330,7 +330,7 @@ export default function Home() {
     if (call.status === "idle") clearRing();
     busyRef.current++;
     try {
-      const reply = await post<TurnResult>("/api/chat", { sessionId: idRef.current, channel: "text", text, attachments: atts, clientId });
+      const reply = await post<TurnResult>("/api/chat", { sessionId: idRef.current, channel: "text", text, attachments: atts, clientId, tz: localTz() });
       clearTimeout(deliveredTimer);
       setReceipt(clientId, "seen"); // the agent has read it; its reply follows at a human pace
       apply(reply, sentAt);
@@ -1146,4 +1146,13 @@ function MicIcon({ off, size = 20 }: { off?: boolean; size?: number }) {
       {off && <path d="M4 4l16 16" />}
     </svg>
   );
+}
+
+// Their time zone, so "what day is it?" is answered from their clock, not the model's guess.
+function localTz() {
+  try {
+    return Intl.DateTimeFormat().resolvedOptions().timeZone;
+  } catch {
+    return undefined;
+  }
 }

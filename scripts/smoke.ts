@@ -1,6 +1,6 @@
 // Keyless smoke test of the engine's safety nets (mock mode). Run: pnpm tsx scripts/smoke.ts
 import { loadSession, newSession, saveSession, withSession } from "../src/lib/store";
-import { cleanModelText, handleEvent, handleUserMessage, parseTypedEmail } from "../src/lib/engine";
+import { cleanModelText, handleEvent, handleUserMessage, nowLine, parseTypedEmail } from "../src/lib/engine";
 import { readMood } from "../src/lib/mood";
 import { DEMO_INBOX, scoreItem } from "../src/lib/triage";
 import type { TurnResult } from "../src/lib/types";
@@ -90,6 +90,8 @@ async function main() {
   check("\"lol\" is not a name for the assistant", filler.slots.agentName.status === "missing");
   await handleUserMessage(filler, "text", "can you write an email for me");
   const cmd = await handleUserMessage(filler, "text", "send");
+  const now = nowLine("America/New_York", new Date("2026-09-28T02:30:00Z"));
+  check("agent knows the real date, in their zone", now.includes("September 27, 2026") && now.includes("America/New_York") && now.includes("September 28, 2026"), now);
   const leak = cleanModelText('The system is being strict about the most recent message context. The message "got it, krish." is already sent.');
   check("meta talk about its own setup never goes out", leak === "", leak);
   const keep = cleanModelText("got it, krish. i'll keep an eye out. i have two time slots open tuesday.");

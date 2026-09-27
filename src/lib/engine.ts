@@ -507,6 +507,7 @@ async function generate(ctx: Ctx, extraInstruction?: string): Promise<string> {
       state += "\nNot this turn: don't bring up gmail or a link.";
     }
   }
+  state += `\n${nowLine(s.tz)}`;
   if (!webEnabled()) state += "\nNo web access right now: help from memory and say so.";
   const tools = webEnabled() ? TOOLS : TOOLS.filter((t) => !WEB_TOOLS.has(t.name));
   const r = await runToolLoop({ system: SYSTEM_PROMPT, state, turns: toTurns(s), tools, maxRounds: MAX_TOOL_ROUNDS, lookup: LOOKUP_TOOLS }, (c) => runTool(ctx, c.name, c.input));
@@ -1373,4 +1374,11 @@ const WAITING_ON_THEM = /\b(i'?ll (let you know|check (back )?(in )?with you|get
 // as a dozen separate messages.
 function capBubbles(bubbles: string[], max: number) {
   return bubbles.length <= max ? bubbles : [...bubbles.slice(0, max - 1), bubbles.slice(max - 1).join("\n\n")];
+}
+
+// The model has no clock: without this it guessed "january 2025" for today's date.
+export function nowLine(tz?: string, now = new Date()) {
+  const fmt = (zone: string) =>
+    now.toLocaleString("en-US", { timeZone: zone, weekday: "long", year: "numeric", month: "long", day: "numeric", hour: "numeric", minute: "2-digit" });
+  return `NOW: ${fmt("UTC")} UTC${tz ? `; their local time: ${fmt(tz)} (${tz})` : ""}. Use this for any question about today's date, the day, or the time anywhere (convert time zones from it); never guess the date.`;
 }
