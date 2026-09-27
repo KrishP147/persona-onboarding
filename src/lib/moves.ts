@@ -108,6 +108,7 @@ export const EVENT_MOVES = {
   intro: { id: "intro", label: "a small first yes: name me", source: "cialdini (1984): commitment; eyal, hooked (2014): investment" },
   named: { id: "named", label: "their name choice, then the call ask (persona's own line)", source: "persona's real flow (journal 02); brown & levinson (1987): permission with a reason" },
   callNow: { id: "call-now", label: "they said yes: do it right away", source: "dixon et al. (2013): low effort" },
+  honest: { id: "honest-status", label: "say exactly what did and didn't happen", source: "grice (1975): maxim of quality" },
   greet: { id: "greet", label: "pick up where the texts left off", source: "dixon et al. (2013): never make them repeat themselves" },
 } satisfies Record<string, Move>;
 

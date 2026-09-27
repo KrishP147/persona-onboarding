@@ -1,6 +1,6 @@
 // Keyless smoke test of the engine's safety nets (mock mode). Run: pnpm tsx scripts/smoke.ts
 import { loadSession, newSession, saveSession, withSession } from "../src/lib/store";
-import { handleEvent, handleUserMessage } from "../src/lib/engine";
+import { handleEvent, handleUserMessage, parseTypedEmail } from "../src/lib/engine";
 import { readMood } from "../src/lib/mood";
 import { DEMO_INBOX, scoreItem } from "../src/lib/triage";
 import type { TurnResult } from "../src/lib/types";
@@ -90,6 +90,8 @@ async function main() {
   check("\"lol\" is not a name for the assistant", filler.slots.agentName.status === "missing");
   await handleUserMessage(filler, "text", "can you write an email for me");
   const cmd = await handleUserMessage(filler, "text", "send");
+  const typed = parseTypedEmail("here's a draft:\n\nto: a@b.com\nsubject: late\n\nhi,\n\nrunning 10 min late.\n\nbest,\nkrish\n\nlet me know if you'd like any changes, or if you'd like me to send it.");
+  check("typed email parsed, assistant chatter left out", typed?.to === "a@b.com" && typed.subject === "late" && typed.body === "hi,\n\nrunning 10 min late.\n\nbest,\nkrish", JSON.stringify(typed));
   check("a later \"send\" is not a name", filler.slots.agentName.status === "missing" && !cmd.newMessages.some((m) => m.kind === "contact_card"), said(cmd));
 
   // "no, text is fine" after a call offer means no more calls

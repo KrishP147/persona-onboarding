@@ -265,6 +265,7 @@ export interface Ctx {
   offeredCall?: boolean;
   allowEnd?: boolean; // the system decided to end the call (silence, skip setup, outage)
   sentEmail?: boolean; // send_email actually went out this turn
+  shownDraft?: string; // a draft was posted this turn (the reply shouldn't repeat it)
 }
 
 const WANTS_OUT = /\b(skip|not now|later|no more questions|stop asking|just (help|do|get)|let'?s (just )?(start|go)|that'?s (it|all)|i'?m good|i'?m done|enough setup|just let me (use|try)|stop)\b/i;
@@ -507,7 +508,46 @@ async function generate(ctx: Ctx, extraInstruction?: string): Promise<string> {
   const tools = webEnabled() ? TOOLS : TOOLS.filter((t) => !WEB_TOOLS.has(t.name));
   const r = await runToolLoop({ system: SYSTEM_PROMPT, state, turns: toTurns(s), tools, maxRounds: MAX_TOOL_ROUNDS, lookup: LOOKUP_TOOLS }, (c) => runTool(ctx, c.name, c.input));
   if (r.refused) return "hmm, i can't help with that one. anything else on your mind?";
-  return r.text;
+  // It typed an email out instead of using save_draft: save it for it, so "send" has something real to send.
+  if (!ctx.shownDraft && ctx.channel === "text") {
+    const typed = parseTypedEmail(r.text);
+    if (typed) await saveDraftTool(ctx, typed);
+  }
+  return ctx.shownDraft ? dropDraftEcho(r.text, ctx.shownDraft) : r.text;
+}
+
+export function parseTypedEmail(text: string): { to: string; subject: string; body: string } | null {
+  const lines = text.replace(/\*\*/g, "").split("\n");
+  const si = lines.findIndex((l) => /^\s*subject:/i.test(l));
+  if (si < 0) return null;
+  const to = text.match(/^\s*to:\s*<?([^\s<>@]+@[^\s<>]+?)>?\s*$/im)?.[1] ?? "";
+  const subject = lines[si].replace(/^\s*subject:\s*/i, "").trim();
+  const paras = lines.slice(si + 1).join("\n").replace(/^\s*-{3,}\s*$/gm, "").split(/\n\s*\n/).map((p) => p.trim()).filter(Boolean);
+  // Trailing questions ("want me to send it?") are the assistant talking, not the email.
+  // The email ends at its sign-off ("best,\nkrish"); anything after is the assistant talking.
+  const signoff = paras.findLastIndex((p) => /^(best|thanks|thank you|cheers|regards|kind regards|best regards|sincerely|warmly|talk soon|see you)\b/im.test(p));
+  if (signoff >= 0) paras.splice(signoff + 1);
+  while (paras.length > 1 && (/\?\s*$/.test(paras[paras.length - 1]) || /\b(let me know|want me to|would you like|should i|any changes)\b/i.test(paras[paras.length - 1]))) paras.pop();
+  const body = paras.join("\n\n").trim();
+  return body ? { to, subject, body } : null;
+}
+
+// The draft already went out as its own message: drop any retyped copy of it from the reply.
+function dropDraftEcho(text: string, draft: string) {
+  const norm = (x: string) => x.toLowerCase().replace(/[^a-z0-9]+/g, " ").trim();
+  const d = norm(draft);
+  const keep = (line: string) => {
+    const n = norm(line);
+    if (!n || /^\s*\[[^\]]*\]\s*$/.test(line)) return false;
+    if (/^\s*(to|subject):|^\s*here'?s (a |the |your )?(email |)draft/i.test(line)) return false;
+    return !(n.length >= 4 && d.includes(n));
+  };
+  return text
+    .split(/\n\s*\n/)
+    .map((p) => p.split("\n").filter(keep).join("\n"))
+    .filter((p) => p.trim())
+    .join("\n\n")
+    .trim();
 }
 
 const INTRO_CAPABILITIES = [
@@ -680,7 +720,7 @@ async function turn(
     else if (!raisedIt && help) text = help;
   }
   // "sent!" only if send_email actually went out this turn.
-  if (!ctx.sentEmail && SEND_REQUEST.test(lastUserText(s)) && CLAIMS_SENT.test(text)) {
+  if (!ctx.sentEmail && !s.draft?.sent && SEND_REQUEST.test(lastUserText(s)) && CLAIMS_SENT.test(text)) {
     text = s.draft && !s.draft.sent ? "i haven't sent it yet. want me to send the draft above as is?" : "i haven't sent anything. want me to write it up as a draft first?";
   }
   const sentences = text.split(/(?<=[.!?])\s+|\n+/);
@@ -835,6 +875,35 @@ export async function handleUserMessage(
       emitAgentText(ctx, "calling you now.");
       return { session: s, newMessages: [userMsg, ...ctx.newMessages], chips: computeDirective(s, channel).chips, actions: ctx.actions };
     }
+  }
+  // "send" / "did you send it?" with a draft waiting: answered in code, so it's never vague about what happened.
+  const pendingDraft = channel === "text" && !s.call.active && s.draft && !s.draft.sent ? s.draft : null;
+  if (channel === "text" && s.draft?.sent && SENT_Q.test(clean)) {
+    const ctx: Ctx = { s, channel, actions: [], newMessages: [], move: EVENT_MOVES.honest };
+    emitAgentText(ctx, `yep, it went to ${s.draft.to}.`);
+    return { session: s, newMessages: [userMsg, ...ctx.newMessages], chips: computeDirective(s, channel).chips, actions: [] };
+  }
+  // "yes" right after "want me to send the draft to x?" counts too.
+  const sendCmd = SEND_CMD.test(clean) || (YES.test(clean) && clean.split(/\s+/).length <= 4 && !!prevAgent && /\bsend\b[^?]*\?/i.test(prevAgent.text));
+  if (pendingDraft && (sendCmd || SENT_Q.test(clean))) {
+    const ctx: Ctx = { s, channel, actions: [], newMessages: [], move: EVENT_MOVES.honest };
+    if (s.slots.gmail.status !== "filled") {
+      const hasCard = s.transcript.some((m) => m.kind === "gmail_link");
+      emitAgentText(ctx, `${sendCmd ? "not sent yet" : "no, not yet"}: i need your gmail connected to send it. ${hasCard ? "tap the \"connect your google account\" card" : "here's the link, one tap"} and i'll send it right after.`);
+      if (!hasCard) {
+        ctx.resendOk = true;
+        const link = msg("agent", "text", "Connect your Google account", { kind: "gmail_link" });
+        ctx.newMessages.push(link);
+        s.transcript.push(link);
+      }
+    } else if (sendCmd) {
+      const out = await sendEmailTool(ctx);
+      emitAgentText(ctx, out.startsWith("sent") ? `sent to ${pendingDraft.to}.` : pendingDraft.to ? `couldn't send it: ${out.replace(/^error: /, "").split(".")[0]}.` : "who should it go to? send me their email address.");
+    } else {
+      emitAgentText(ctx, `no, not yet. want me to send it to ${pendingDraft.to || "them"}?`);
+    }
+    recordAsk(s, null);
+    return { session: s, newMessages: [userMsg, ...ctx.newMessages], chips: computeDirective(s, channel).chips, actions: ctx.actions };
   }
   // They said yes to the link: send it now (not left to the model), then let the reply mention it.
   let linkSent: Msg[] = [];
@@ -1089,6 +1158,12 @@ async function handleEventInner(s: Session, e: SessionEvent): Promise<TurnResult
       s.gmailEmail = v.email;
       s.gmailUnread = v.unread;
       eventMsg(s, `Gmail connected: ${v.email}`);
+      // They connected to send a draft: that's the next step, the inbox can wait.
+      if (s.draft && !s.draft.sent && !s.call.active) {
+        const ctx: Ctx = { s, channel: "text", actions: [], newMessages: [], move: EVENT_MOVES.callNow };
+        emitAgentText(ctx, s.draft.to ? `connected. want me to send the draft to ${s.draft.to} now?` : "connected. who should the draft go to? send me their email address.");
+        return { session: s, newMessages: ctx.newMessages, chips: computeDirective(s, "text").chips, actions: [] };
+      }
       // Interrupt only if waiting would cost them something; everything else is a digest line.
       const t = await triageInbox(s, v.inbox ?? []);
       let inboxNote: string;
@@ -1156,6 +1231,10 @@ async function saveDraftTool(ctx: Ctx, input: Record<string, unknown>): Promise<
   const { s } = ctx;
   const d = { to: String(input.to ?? "").trim().slice(0, 200), subject: String(input.subject ?? "").trim().slice(0, 200), body: String(input.body ?? "").trim().slice(0, 5000) };
   if (!d.body) return "error: the draft is empty";
+  // "[your name]" when we know their name is just a gap we can fill.
+  if (s.slots.userName.value) d.body = d.body.replace(/\[(your|my|sender'?s?) (full )?name\]/gi, s.slots.userName.value);
+  // They gave the address in their message but it didn't make it into the draft.
+  if (!d.to) d.to = lastUserText(s).match(/[^\s@<>(),;:]+@[^\s@<>(),;:]+\.[a-z]{2,}/i)?.[0] ?? "";
   if (d.to && !EMAIL_RE.test(d.to)) return `error: "${d.to}" isn't an email address. ask them for it, or save with an empty "to"`;
   // Connected or not, the draft always shows as one clean message in the chat.
   const access: GmailAccess = s.slots.gmail.status === "filled" ? await gmailAccess(s) : { error: "" };
@@ -1173,6 +1252,7 @@ async function saveDraftTool(ctx: Ctx, input: Record<string, unknown>): Promise<
   const shown = msg("agent", "text", `to: ${d.to || "(who's it going to?)"}\nsubject: ${d.subject || "(no subject)"}\n\n${d.body}`);
   ctx.newMessages.push(shown);
   s.transcript.push(shown);
+  ctx.shownDraft = shown.text;
   s.draft = { id, ...d, shownAt: s.transcript.length };
   return `${where}. don't repeat the draft. ask if they want to send it${d.to ? "" : " (and who to)"} or change anything. never say it was sent`;
 }
@@ -1231,5 +1311,9 @@ async function nameFirst(s: Session, channel: Channel, text: string, heard: Retu
     s.transcript.push(ctx.newCard);
     msgs.push(ctx.newCard);
   }
-  return { msgs, note: `You just said "${value} it is" and sent your contact card. Don't say that again; go straight to the rest of their message.` };
+  return { msgs, note: `You just said "${value} it is" and sent your contact card. Don't mention your name, the contact card, or saving it again this turn. Answer the rest of their message; if there is nothing else, just greet them by name if they gave one.` };
 }
+
+// A bare "send it" (not "send me the link"), and "did you send it?".
+const SEND_CMD = /^\s*(ok(ay)?,? |yes,? |yeah,? |yep,? )?(please )?(send|send it|send that|send the (email|draft|message)|send it now|go ahead and send( it)?|ship it)( now| please)?[.! ]*$/i;
+const SENT_Q = /\b(did (u|you) (send|sent)|was it sent|is it sent|has it (been )?sent|did it (go|send))\b/i;
