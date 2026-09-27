@@ -82,4 +82,5 @@ export type ClientAction =
   | { type: "start_call" }
   | { type: "end_call" }
   | { type: "speak"; text: string }
-  | { type: "graduate" };
+  | { type: "graduate" }
+  | { type: "patience"; ms: number }; // user is doing a task (e.g. gmail sign-in): stretch the next silence window

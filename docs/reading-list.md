@@ -23,7 +23,11 @@ the books and papers behind the design choices. notes on how each one shows up a
 - cathy pearl, *designing voice user interfaces: principles of conversational experiences* (o'reilly, 2016)
 - clifford nass and scott brave, *wired for speech: how voice activates and advances the human-computer relationship* (mit press, 2005)
 
-**still to read, my research queue**
-- customer service de-escalation and redirection
-- politeness theory (brown and levinson)
-- reading intent from short messages
+**politeness, tone, and timing** (papers and links in [journal/05-research.md](journal/05-research.md))
+- penelope brown and stephen c. levinson, *politeness: some universals in language usage* (cambridge university press, 1987)
+- tan et al., permission request explanations (chi 2014)
+- kruger et al., egocentrism over e-mail (2005)
+- houghton, upadhyay and klin, periods in text replies (2018); gunraj et al., exclamation marks (2016)
+- brody and diakopoulos, word lengthening (2011); miller et al., emoji interpretation (2016)
+- stivers et al., turn-taking across ten languages (pnas, 2009); kendrick and torreira (2015); jefferson, standard maximum silence
+- koudenburg et al., four seconds of silence (2011)

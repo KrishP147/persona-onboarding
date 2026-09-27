@@ -183,6 +183,8 @@ async function runTool(ctx: Ctx, name: string, input: Record<string, unknown>): 
       const link = msg("agent", "text", "Connect your Google account", { kind: "gmail_link" });
       ctx.newMessages.push(link);
       s.transcript.push(link);
+      // They're off doing a task: silence is expected, don't nag with check-ins.
+      if (s.call.active) ctx.actions.push({ type: "patience", ms: 30000 });
       return "link sent to their texts";
     }
     case "end_call":
@@ -399,9 +401,9 @@ export async function handleEvent(s: Session, e: SessionEvent): Promise<TurnResu
         s,
         "voice",
         s.call.silenceStrikes === 1
-          ? `The user has gone quiet. Check in gently in a few words ("you still there?" or "no rush, take your time").`
-          : `Still quiet (${s.call.silenceStrikes}x). Rephrase your last question much more simply, or offer to just text instead.`,
-        s.call.silenceStrikes === 1 ? "you still there? no rush." : "i can also just text you if that's easier.",
+          ? `The user has gone quiet. Don't say "still there?". Offer help instead: "take your time. want me to say that again?" or restate your last question more simply.`
+          : `Still quiet (${s.call.silenceStrikes}x). Offer an easy out: you can just text them instead if that's easier.`,
+        s.call.silenceStrikes === 1 ? "take your time. want me to say that again?" : "no pressure. i can also just text you if that's easier.",
       );
     }
     case "mic_denied":

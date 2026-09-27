@@ -6,8 +6,11 @@ import type { VoiceStyle } from "@/lib/types";
 // A streaming STT/TTS pipeline can replace this later; the server contract stays the same.
 //
 // Turn-taking rules (see docs/journal/04-voice-and-edge-cases.md):
-// - the user's turn ends after END_OF_TURN_MS of no new speech, so long prompts aren't chopped up
-// - silence only counts when nobody is talking and nothing is pending
+// - the user's turn ends after a pause whose length depends on whether they sound finished:
+//   ~0.7s when complete, longer mid-phrase or while spelling things out (humans gap ~0-200ms,
+//   and gaps past ~600-700ms start to read as hesitation: Stivers et al. 2009, Kendrick & Torreira 2015)
+// - silence only counts when nobody is talking and nothing is pending; first reprompt at ~6s,
+//   and much longer while the user is off doing a task like the gmail sign-in
 // - the user can talk over the agent (barge-in); echoes of the agent's own words are ignored
 // - one voice per style, picked once and remembered, so it never flips mid-call
 
@@ -24,8 +27,20 @@ type Rec = {
   onerror: ((e: { error: string }) => void) | null;
 };
 
-const SILENCE_MS = 10000;
-const END_OF_TURN_MS = 1300;
+const SILENCE_MS = 6000;
+const TURN_END_COMPLETE_MS = 700;
+const TURN_END_MIDPHRASE_MS = 1500;
+const TURN_END_SPELLING_MS = 2000;
+const TRAILING = /\b(and|but|or|so|because|the|a|an|my|is|are|to|of|with|for|um+|uh+|like|then|if|at|dot)$/i;
+const SPELLING = /(\d\s*){3,}$|@|\bdot\b|\bat\b\s*$|\bemail is\b|\bnumber is\b|\baddress is\b/i;
+
+// How long to wait before deciding the user is done talking.
+function turnEndDelay(text: string) {
+  const t = text.trim();
+  if (SPELLING.test(t)) return TURN_END_SPELLING_MS;
+  if (TRAILING.test(t) || /,$/.test(t)) return TURN_END_MIDPHRASE_MS;
+  return TURN_END_COMPLETE_MS;
+}
 const FILLER_AFTER_MS = 1800;
 const FILLERS = ["mm, one sec.", "okay, give me a second.", "got it, one sec.", "mhm, let me think."];
 const VOICE_KEY = "persona-voice-";
@@ -103,6 +118,7 @@ export function useVoiceCall(opts: {
   const turnTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const fillerTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const fillerIdx = useRef(0);
+  const patienceRef = useRef<number | null>(null); // one-shot longer silence window
   const optsRef = useRef(opts);
   useEffect(() => {
     optsRef.current = opts;
@@ -115,11 +131,22 @@ export function useVoiceCall(opts: {
 
   const armSilence = useCallback(() => {
     clear(silenceTimer);
+    const wait = patienceRef.current ?? SILENCE_MS;
     silenceTimer.current = setTimeout(() => {
+      patienceRef.current = null;
       const idle = activeRef.current && !waitingRef.current && queueRef.current === 0 && !bufferRef.current;
       if (idle) optsRef.current.onSilence();
-    }, SILENCE_MS);
+    }, wait);
   }, []);
+
+  // The user is doing something (e.g. signing in to google): don't nag them while they do.
+  const patience = useCallback(
+    (ms: number) => {
+      patienceRef.current = ms;
+      if (silenceTimer.current) armSilence();
+    },
+    [armSilence],
+  );
 
   const startRec = useCallback(() => {
     if (!activeRef.current) return;
@@ -255,12 +282,14 @@ export function useVoiceCall(opts: {
       clear(silenceTimer);
       if (finals.trim()) bufferRef.current += ` ${finals.trim()}`;
       setHeard((bufferRef.current + " " + interim).trim());
-      // End of turn = a pause, not the first final result. Long prompts stay whole.
+      // End of turn = a pause, not the first final result. Long prompts stay whole,
+      // and the pause we wait for depends on whether they sound finished.
       clear(turnTimer);
+      patienceRef.current = null; // they're back
       turnTimer.current = setTimeout(() => {
         if (interim.trim() && !finals.trim()) bufferRef.current += ` ${interim.trim()}`;
         flushTurn();
-      }, END_OF_TURN_MS);
+      }, turnEndDelay(`${bufferRef.current} ${interim}`));
     };
     rec.onend = () => {
       // Chrome ends recognition on its own every so often; keep the line open.
@@ -299,5 +328,5 @@ export function useVoiceCall(opts: {
     return () => window.removeEventListener("pagehide", onHide);
   }, []);
 
-  return { status, setStatus, speaking, listening, heard, startedAt, accept, hangUp, speak, endAfterSpeaking, greeted };
+  return { status, setStatus, speaking, listening, heard, startedAt, accept, hangUp, speak, endAfterSpeaking, greeted, patience };
 }

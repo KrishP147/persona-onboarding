@@ -123,6 +123,7 @@ export default function Home() {
         if (a.type === "start_call") call.setStatus("ringing");
         if (a.type === "speak") call.speak(a.text);
         if (a.type === "end_call") call.endAfterSpeaking();
+        if (a.type === "patience") call.patience(a.ms);
       }
     };
   });

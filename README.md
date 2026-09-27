@@ -8,6 +8,7 @@ if you only read one thing, read the journal. it's how my understanding of this 
 - [02. trying their onboarding](docs/journal/02-trying-their-onboarding.md)
 - [03. principles: serve, don't sell](docs/journal/03-principles.md)
 - [04. voice, and all the ways people break things](docs/journal/04-voice-and-edge-cases.md)
+- [05. what the research changed](docs/journal/05-research.md)
 - [reading list](docs/reading-list.md)
 
 ## running it

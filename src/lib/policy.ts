@@ -134,7 +134,10 @@ export function directiveText(s: Session, d: Directive, channel: Channel): strin
     })
     .join("\n");
   const mood = readMood(s.transcript);
-  const moodLine = `USER SEEMS: ${mood.mood}${mood.signals.length ? ` (${mood.signals.join(", ")})` : ""}. ${MOOD_GUIDANCE[mood.mood]}`;
+  const moodLine =
+    mood.mood === "cooperative" && mood.signals.length === 0
+      ? `USER SEEMS: no strong signal. ${MOOD_GUIDANCE.cooperative}`
+      : `USER SEEMS (${mood.confidence} confidence guess${mood.intensity === "high" ? ", strong feeling" : ""}): ${mood.mood} (${mood.signals.join(", ")}). ${MOOD_GUIDANCE[mood.mood]} If their words say otherwise, trust the words.`;
   return [
     moodLine,
     `CHANNEL: ${channel === "voice" ? "live phone call (speak; short sentences; no emoji, no lists)" : "text messages"}`,

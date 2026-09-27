@@ -81,6 +81,13 @@ async function main() {
   check("mood confused", m("asdkjh qwrtp") === "confused");
   check("mood curious", m("can you facetime?") === "curious");
 
+  const conf = (text: string) => readMood([{ id: "x", role: "user", channel: "text", text, ts: 0 }]);
+  check("single emoji doesn't flip mood", conf("sure 🙂").mood === "cooperative");
+  check("acronym isn't shouting", conf("OK that's HUGE").mood === "cooperative");
+  check("lone ? reads confused", conf("?").mood === "confused");
+  check("weak signal stays low confidence", conf("nah").confidence === "low");
+  check("stretching raises intensity", conf("noooo").intensity === "high");
+
   console.log(fails ? `\n${fails} failed` : "\nall passed");
   process.exit(fails ? 1 : 0);
 }
