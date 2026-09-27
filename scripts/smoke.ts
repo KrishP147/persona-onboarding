@@ -88,6 +88,9 @@ async function main() {
   await handleEvent(filler, { type: "open" });
   await handleUserMessage(filler, "text", "lol");
   check("\"lol\" is not a name for the assistant", filler.slots.agentName.status === "missing");
+  await handleUserMessage(filler, "text", "can you write an email for me");
+  const cmd = await handleUserMessage(filler, "text", "send");
+  check("a later \"send\" is not a name", filler.slots.agentName.status === "missing" && !cmd.newMessages.some((m) => m.kind === "contact_card"), said(cmd));
 
   // "no, text is fine" after a call offer means no more calls
   const nocall = newSession();

@@ -547,7 +547,8 @@ function narratesAbout(x: string, userName?: string | null) {
 }
 
 function cleanModelText(t: string, userName?: string | null) {
-  const cleaned = t.replace(TOOL_NAMES, " ").replace(STAGE_BRACKETS, keepFillIns).replace(/^\s*\[|\]\s*$/gm, "").replace(/[ \t]{2,}/g, " ").trim();
+  // The chat shows plain text, like sms: markdown bold/headers would show as literal symbols.
+  const cleaned = t.replace(/\*\*([^*\n]+)\*\*/g, "$1").replace(/^#{1,4}\s+/gm, "").replace(TOOL_NAMES, " ").replace(STAGE_BRACKETS, keepFillIns).replace(/^\s*\[|\]\s*$/gm, "").replace(/[ \t]{2,}/g, " ").trim();
   return cleaned
     .split(/\n\s*\n/)
     .map((b) => b.split(/(?<=[.!?])\s+/).filter((x) => !META.test(x) && !EMPTY_PROMISE.test(x) && !narratesAbout(x, userName)).join(" "))
@@ -714,14 +715,19 @@ async function turn(
   return { session: s, newMessages: ctx.newMessages, chips: final.chips, actions: ctx.actions };
 }
 
+const NAME_ASK = /\b(what (do you want to|should i|would you like to|will you) (call me|go by)|what should i go by|name (for )?me)\b/i;
+// Commands and reactions are never names ("send" once became "Send it is").
 const NOT_A_NAME =
-  /^(no|nah|nope|idk|i don'?t know|dunno|you pick|you choose|up to you|surprise me|anything|whatever|skip|why|what|whats|who|whos|hi|hey|hello|yes|yeah|yep|ok|okay|sure|cool|nice|thanks|thank you|ty|lol|haha|lmao|hmm+|um+|uh+|idc|nothing|none|me|you|it|this|that|i|im)\b/i;
+  /^(send|write|draft|call|email|connect|help|stop|cancel|done|next|go|continue|start|test|link|gmail|reply|check|find|search|wait|what\?|no|nah|nope|idk|i don'?t know|dunno|you pick|you choose|up to you|surprise me|anything|whatever|skip|why|what|whats|who|whos|hi|hey|hello|yes|yeah|yep|ok|okay|sure|cool|nice|thanks|thank you|ty|lol|haha|lmao|hmm+|um+|uh+|idc|nothing|none|me|you|it|this|that|i|im)\b/i;
 // Answering "what do you want to call me?" with their own name is common: that's THEIR name.
 const OWN_NAME = /^(?:(?:hi|hey|hello)[,! ]+)?(?:i'?m|i am|my name(?:'s| is)|it'?s|this is|call me)\s+([\p{L}][\p{L}'-]{0,19})[.!]?\s*(?:btw|lol)?[.!]?$/iu;
 
 // Right after the agent asks for its name, a short reply like "Julia" or "call you Max" is the name.
 async function captureAgentName(s: Session, channel: Channel, text: string): Promise<{ card?: Msg; pending: Promise<void>[] } | undefined> {
   if (channel !== "text" || s.slots.agentName.status !== "missing" || s.lastAskedSlot !== "agentName") return;
+  // Only as the direct answer to the name question: a later "send" or "help" is never a name.
+  const prevAgent = [...s.transcript].slice(0, -1).reverse().find((m) => m.role === "agent" && (!m.kind || m.kind === "text"));
+  if (!prevAgent || !NAME_ASK.test(prevAgent.text)) return;
   const own = text.trim().match(OWN_NAME);
   if (own) {
     if (s.slots.userName.status !== "filled") {
@@ -781,6 +787,9 @@ export async function handleUserMessage(
   // Name reply safety net: models sometimes say "julia it is" without saving it.
   const named = await captureAgentName(s, channel, clean);
   // A second pass reads the message for names, needs and refusals while the reply is written.
+  const heard = extract(s, clean);
+  // "call you nova, and can you check my email": the name and its contact card come first, then the rest.
+  const early = named ? null : await nameFirst(s, channel, clean, heard);
   // Pure laughter or thanks, over text, when a gif is allowed: answer with one.
   if (channel === "text" && !s.call.active && (LAUGH.test(clean) || THANKS.test(clean)) && gifAllowed(s)) {
     const gif = makeGif(s, LAUGH.test(clean) ? "lol" : "ok");
@@ -835,7 +844,6 @@ export async function handleUserMessage(
   } else if (s.slots.gmail.status === "missing" && lastLinkAsk?.text.includes(GMAIL_ASK_MARK) && /^\s*(no|nah|nope|not now|later|no thanks)\b/i.test(clean)) {
     s.slots.gmail.status = "declined";
   }
-  const heard = extract(s, clean);
   // "skip all this, just find me sushi": setup ends now, in code, and the request gets answered.
   if (!s.call.active && s.phase !== "graduated" && SKIP_SETUP.test(clean)) {
     s.phase = "graduated";
@@ -867,7 +875,7 @@ export async function handleUserMessage(
   const r = await turn(
     s,
     replyChannel,
-    linkNote ?? sawText ?? (interrupted ? "They talked over you mid-sentence. Drop what you were saying and respond to what they just said; don't repeat your cut-off line unless they ask." : undefined),
+    [early?.note, linkNote ?? sawText].filter(Boolean).join(" ") || (interrupted ? "They talked over you mid-sentence. Drop what you were saying and respond to what they just said; don't repeat your cut-off line unless they ask." : undefined),
     linkNote ? (channel === "voice" ? "okay, i'm texting you the link right now. it's the card that says connect your google account, tap it whenever you're ready." : "here you go, it's the card right there. signing in takes a few seconds.") : channel === "voice" ? "sorry, i missed that. say it one more time?" : "sorry, i lost my train of thought for a sec. can you say that again?",
   );
   if (linkSent.length) {
@@ -875,6 +883,7 @@ export async function handleUserMessage(
     r.newMessages.unshift(...linkSent);
     if (s.call.active) r.actions.unshift({ type: "patience", ms: 30000 });
   }
+  if (early) r.newMessages.unshift(...early.msgs);
   r.newMessages.unshift(userMsg);
   // Image bytes were for this one reply; storing them would bloat every later read and write.
   if (userMsg.attachments?.some((a) => a.dataUrl)) {
@@ -1178,4 +1187,26 @@ async function sendEmailTool(ctx: Ctx): Promise<string> {
   d.sent = true;
   ctx.sentEmail = true;
   return `sent to ${d.to}. tell them in a few words`;
+}
+
+// They named the assistant inside a longer message ("call you nova, can you check my email?").
+// Answer the name first, with the contact card, before the link or the rest of the reply.
+const NAME_HINT = /\b(call (you|yourself)|your name('?s| is| will be)|name you|i'?ll call you|you'?re|you are|go by)\b/i;
+async function nameFirst(s: Session, channel: Channel, text: string, heard: ReturnType<typeof extract>): Promise<{ msgs: Msg[]; note: string } | null> {
+  if (channel !== "text" || s.call.active || s.slots.agentName.status !== "missing") return null;
+  if (s.lastAskedSlot !== "agentName" && !NAME_HINT.test(text)) return null;
+  const e = await heard.catch(() => null);
+  const value = e?.agentName?.trim().replace(/\b\p{L}/gu, (c) => c.toUpperCase());
+  if (!value || value.length > 30) return null;
+  const ctx: Ctx = { s, channel, actions: [], newMessages: [] };
+  if ((await runTool(ctx, "set_slot", { slot: "agentName", value })).startsWith("error")) return null;
+  await Promise.all(ctx.pending ?? []);
+  const ack = msg("agent", "text", `${value} it is. here's my contact card so you know it's me.`);
+  s.transcript.push(ack);
+  const msgs = [ack];
+  if (ctx.newCard) {
+    s.transcript.push(ctx.newCard);
+    msgs.push(ctx.newCard);
+  }
+  return { msgs, note: `You just said "${value} it is" and sent your contact card. Don't say that again; go straight to the rest of their message.` };
 }
