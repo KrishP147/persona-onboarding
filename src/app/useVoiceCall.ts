@@ -102,6 +102,8 @@ function speakBrowser(text: string, voice: SpeechSynthesisVoice | undefined, onS
   });
 }
 
+const STOP_WORDS = /^(wait|stop|hold|hang|sorry|no|nope|hey|actually|um|excuse)$/i;
+
 const words = (t: string) => t.toLowerCase().replace(/[^a-z0-9' ]/g, " ").split(/\s+/).filter(Boolean);
 
 // Speakers without headphones feed the agent's voice back into the mic.
@@ -441,8 +443,9 @@ export function useVoiceCall(opts: {
       // While the agent talks, ignore its own voice coming back through the mic.
       if (queueRef.current > 0 && looksLikeEcho(latest, speakingTextRef.current)) return;
       // Real speech over the agent: stop talking and listen (barge-in).
-      // One real word (not an echo of its own voice) is enough to stop talking; a person would.
-      if (queueRef.current > 0 && words(latest).length >= 1) {
+      // Two real words, or one clear "wait"/"stop", stops it (a single stray word from noise doesn't).
+      const heardWords = words(latest);
+      if (queueRef.current > 0 && (heardWords.length >= 2 || STOP_WORDS.test(heardWords[0] ?? ""))) {
         stopAudio();
         queueRef.current = 0;
         pendingEndRef.current = false;

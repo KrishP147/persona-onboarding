@@ -374,6 +374,13 @@ const INTRO_CAPABILITIES = [
 const GOODBYE = /\b(bye|goodbye|talk (to you )?(soon|later)|take care|catch you|ciao|see ya|i'?ll let you go|call me (back )?(whenever|anytime)|good talking|have a (good|great|nice|lovely) (one|day|night|evening|weekend)|see (you|ya)|later!|i'?ll text you( instead)?)\b/i;
 // "i just sent you a link" said without actually sending one.
 const CLAIMS_LINK = /\b(sent|dropped|texted|shared|popped)\b[^.?!]{0,40}\b(link|it)\b|\blink\b[^.?!]{0,30}\b(your texts|our texts|the chat|the thread)\b|\b(it'?s|it is) (in|on) (your|our) texts\b/i;
+// Bracketed stage directions ("[starting call...]") are never said out loud or texted.
+const STAGE_BRACKETS = /\s*\[[^\]\n]{1,160}\]\s*/g;
+
+// Whatever the model wrapped its words in, keep only what a person would actually say.
+function cleanModelText(t: string) {
+  return t.replace(TOOL_NAMES, " ").replace(STAGE_BRACKETS, " ").replace(/^\s*\[|\]\s*$/gm, "").replace(/[ \t]{2,}/g, " ").trim();
+}
 // Tool names occasionally leak into the reply text ("[send_gmail_link] sent it..."): never say them.
 const TOOL_NAMES = /\s*\[?\b(set_slot|decline_slot|offer_call|start_call|send_gmail_link|end_call|graduate|send_gif)\b\]?\s*/gi;
 
@@ -417,7 +424,7 @@ function capSentences(text: string, max: number) {
 
 function emitAgentText(ctx: Ctx, raw: string) {
   // House style: no em dashes, no stage directions like "(waiting for reply)".
-  const text = stopAtRepeat(raw.replace(TOOL_NAMES, " ")).replace(/\s*[—]\s*/g, ", ").replace(/^\s*\(on call\)\s*/gim, "").replace(/^\s*\*?\([^)]*\)\*?\s*$/gm, "").trim();
+  const text = stopAtRepeat(raw.replace(TOOL_NAMES, " ").replace(STAGE_BRACKETS, " ")).replace(/\s*[—]\s*/g, ", ").replace(/^\s*\(on call\)\s*/gim, "").replace(/^\s*\*?\([^)]*\)\*?\s*$/gm, "").trim();
   // On a call, three sentences is already a lot to listen to; trim anything longer.
   const spoken = ctx.channel === "voice" ? capSentences(text.replace(/\n+/g, " ").trim(), 3) : text;
   const bubbles = ctx.channel === "voice" ? [spoken] : text.split(/\n\s*\n/).map((b) => b.trim());
@@ -441,7 +448,7 @@ async function turn(
   let text = "";
   let failed = false;
   try {
-    text = await generate(ctx, extraInstruction);
+    text = cleanModelText(await generate(ctx, extraInstruction));
   } catch (err) {
     // Provider down or overloaded: fall through to the scripted line rather than go quiet.
     console.error("llm turn failed", err);
@@ -576,6 +583,18 @@ export async function handleUserMessage(
     ctx.newMessages.push(named.card);
     await Promise.all(named.pending);
     return { session: s, newMessages: [userMsg, ...ctx.newMessages], chips: computeDirective(s, channel).chips, actions: [] };
+  }
+  // They said yes to our call offer: ring now, the way persona does ("calling you now."), no model needed.
+  const prevText = [...s.transcript].slice(0, -1).reverse().find((m) => m.role === "agent" && (!m.kind || m.kind === "text"));
+  const saysCallMe = /\bcall me\b/i.test(clean) && !NEGATED_CALL.test(clean);
+  if (channel === "text" && !s.call.active && prevText && OFFERED_CALL.test(prevText.text) && (YES.test(clean) || saysCallMe) && !CALL_NO.test(clean)) {
+    const ctx: Ctx = { s, channel, actions: [], newMessages: [], move: EVENT_MOVES.callNow };
+    const out = await runTool(ctx, "start_call", {});
+    if (!out.startsWith("error")) {
+      recordAsk(s, null);
+      emitAgentText(ctx, "calling you now.");
+      return { session: s, newMessages: [userMsg, ...ctx.newMessages], chips: computeDirective(s, channel).chips, actions: ctx.actions };
+    }
   }
   // They said yes to the link: send it now (not left to the model), then let the reply mention it.
   let linkSent: Msg[] = [];
