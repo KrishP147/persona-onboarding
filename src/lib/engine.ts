@@ -38,7 +38,7 @@ const TOOLS: ToolDef[] = [
       additionalProperties: false,
     },
   },
-  { name: "offer_call", description: "You are proposing a quick call in this message. Shows 'Call me' / 'Text is fine' buttons.", schema: NO_ARGS },
+  { name: "offer_call", description: "You are asking permission for a quick call in this message. If they say yes, call start_call next turn.", schema: NO_ARGS },
   { name: "start_call", description: "Ring the user now. Only after they agreed to a call.", schema: NO_ARGS },
   { name: "send_gmail_link", description: "Drop a secure 'Connect Gmail' link into the text thread. Works during a call.", schema: NO_ARGS },
   { name: "end_call", description: "Hang up after saying goodbye on the call.", schema: NO_ARGS },
@@ -209,6 +209,17 @@ async function generate(ctx: Ctx, extraInstruction?: string): Promise<string> {
   return r.text;
 }
 
+const INTRO_CAPABILITIES = [
+  "You can text me or call me anytime and I can help with:",
+  "📞 calling places on your behalf",
+  "💻 browsing the web",
+  "🛍️ shopping for you",
+  "📩 managing your email and calendar",
+  "🚗 finding DoorDash or Uber options",
+  "",
+  "By continuing to text or use Persona, you agree to our Terms of Service and SMS Terms, and acknowledge our Privacy Policy: yourpersona.com/legal",
+].join("\n");
+
 const GOODBYE = /\b(bye|goodbye|talk (soon|later)|take care|catch you|ciao|see ya|i'?ll let you go|call me (back )?(whenever|anytime)|good talking)\b/i;
 
 function shortNeed(s: Session) {
@@ -277,6 +288,8 @@ async function turn(
   let text = await generate(ctx, extraInstruction);
   if (!text.trim() && fallback) text = fallback;
   if (opts.forceEnd && !ctx.actions.some((a) => a.type === "end_call")) ctx.actions.push({ type: "end_call" });
+  // Placing a call: the text is just the heads up; the talking happens on the call.
+  if (channel === "text" && ctx.actions.some((a) => a.type === "start_call")) text = "calling you now.";
   if (channel === "voice" && ctx.actions.some((a) => a.type === "end_call") && !GOODBYE.test(text)) {
     text = `${text.trim()} ${goodbyeLine(s)}`.trim();
   }
@@ -329,14 +342,19 @@ function eventMsg(s: Session, text: string): Msg {
 export async function handleEvent(s: Session, e: SessionEvent): Promise<TurnResult> {
   const idle = (): TurnResult => ({ session: s, newMessages: [], chips: computeDirective(s, "text").chips, actions: [] });
   switch (e.type) {
-    case "open":
+    case "open": {
       if (s.transcript.length > 0) return idle(); // resume after refresh: no duplicate greeting
-      return turn(
-        s,
-        "text",
-        "The user just opened the chat for the first time. Introduce yourself in one or two short bubbles, say what you can help with in a line, and ask what they'd like to call you.",
-        "hey! i'm your new personal assistant.\n\ni can make calls for you, handle email and calendar, shop, and book stuff.\n\nfirst things first, what do you want to call me?",
-      );
+      // Scripted, like Persona's real first text: who it is, what it does, the legal line, then the one ask.
+      const intro = [
+        msg("agent", "text", "Hey! I'm your new personal assistant"),
+        msg("agent", "text", INTRO_CAPABILITIES),
+        msg("agent", "text", "yourpersona.com/legal", { kind: "link_preview" }),
+        msg("agent", "text", "What do you want to call me?"),
+      ];
+      s.transcript.push(...intro);
+      recordAsk(s, "agentName");
+      return { session: s, newMessages: intro, chips: computeDirective(s, "text").chips, actions: [] };
+    }
     case "call_started":
       if (s.call.active) return idle();
       s.call = { active: true, startedAt: Date.now(), silenceStrikes: 0 };

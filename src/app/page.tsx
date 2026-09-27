@@ -40,7 +40,6 @@ async function fileToAttachment(f: File): Promise<Attachment> {
 export default function Home() {
   const [session, setSession] = useState<Session | null>(null);
   const [messages, setMessages] = useState<Msg[]>([]);
-  const [chips, setChips] = useState<string[]>([]);
   const [draft, setDraft] = useState("");
   const [pending, setPending] = useState<Attachment[]>([]);
   const [typing, setTyping] = useState(false);
@@ -69,8 +68,8 @@ export default function Home() {
   const actionsRef = useRef<(a: ClientAction[]) => void>(() => {});
   const apply = useCallback(
     (r: TurnResult) => {
+      if (idRef.current && r.session.id !== idRef.current) return; // stale reply from another session
       setSession(r.session);
-      setChips(r.chips);
       upsert(r.newMessages);
       actionsRef.current(r.actions);
       chanRef.current?.postMessage("sync");
@@ -86,7 +85,6 @@ export default function Home() {
       const data = (await res.json()) as { session: Session; chips: string[] };
       setSession(data.session);
       setMessages(data.session.transcript);
-      setChips(data.chips);
     } catch {}
   }, []);
 
@@ -166,7 +164,11 @@ export default function Home() {
   }, [sendEvent]);
 
   // Boot: resume the stored session (refresh-safe) or create one.
+  const bootedRef = useRef(false);
   useEffect(() => {
+    // Once per page load (dev strict mode runs effects twice, which made two sessions).
+    if (bootedRef.current) return;
+    bootedRef.current = true;
     (async () => {
       const stored = readStoredId();
       const res = await fetch(`/api/session${stored ? `?id=${encodeURIComponent(stored)}` : ""}`);
@@ -180,7 +182,6 @@ export default function Home() {
       } catch {}
       setSession(data.session);
       setMessages(data.session.transcript);
-      setChips(data.chips);
       setMock(data.mock);
       // A call can't survive a reload: tell the server it dropped.
       if (data.session.call.active) await sendEvent({ type: "call_ended", reason: "error" });
@@ -229,13 +230,6 @@ export default function Home() {
     }
   };
 
-  const onChip = (c: string) => {
-    if (c === "Call me") return void send("sure, call me");
-    if (c === "Call me back") return void startUserCall();
-    if (c === "Connect Gmail") return void send("connect gmail");
-    void send(c);
-  };
-
   const connectGmail = () => {
     if (!idRef.current) return;
     const w = window.open(`/api/auth/google/start?s=${idRef.current}`, "persona-gmail", "width=480,height=680");
@@ -245,9 +239,11 @@ export default function Home() {
   const named = !!session?.slots.agentName.value;
   const agentName = session?.slots.agentName.value ?? "+1 (650) 555-0142";
   const onCall = call.status === "active" || call.status === "connecting";
+  const thread = messages.filter((m) => m.channel !== "voice");
+  const lastSaid = [...messages].reverse().find((m) => m.channel === "voice" && m.role === "agent" && (!call.startedAt || m.ts >= call.startedAt))?.text ?? "";
 
   return (
-    <main className="min-h-dvh bg-neutral-950 flex items-center justify-center p-0 sm:p-6">
+    <main className="min-h-dvh bg-neutral-950 flex items-center justify-center gap-8 p-0 sm:p-6">
       <div className="relative w-full sm:w-[390px] h-dvh sm:h-[800px] sm:rounded-[44px] sm:border-[10px] border-neutral-800 bg-[#16171b] text-neutral-100 overflow-hidden flex flex-col shadow-2xl">
         {/* status bar (desktop frame only) */}
         <div className="hidden sm:flex justify-between px-7 pt-2 text-[11px] text-neutral-300 bg-[#1e1f24]">
@@ -260,7 +256,9 @@ export default function Home() {
             ←
           </span>
           {named ? (
-            <div className="w-10 h-10 rounded-full bg-[#e8665a] text-white flex items-center justify-center font-semibold">{agentName.charAt(0).toUpperCase()}</div>
+            <div className="w-10 h-10 rounded-full bg-white text-black flex items-center justify-center" aria-hidden>
+              <LoopMark />
+            </div>
           ) : (
             <div className="w-10 h-10 rounded-full bg-[#f9c22e] text-neutral-900 flex items-center justify-center" aria-hidden>
               <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor">
@@ -288,12 +286,12 @@ export default function Home() {
 
         {/* thread */}
         <div className="flex-1 overflow-y-auto px-3 pb-4 bg-[#131316]">
-          {messages.map((m, i) => {
-            const prev = messages[i - 1];
-            const next = messages[i + 1];
+          {thread.map((m, i) => {
+            const prev = thread[i - 1];
+            const next = thread[i + 1];
             const side = (x?: Msg) => (!x || x.kind === "event" ? null : x.role);
             const showTime = !prev || m.ts - prev.ts > 10 * 60 * 1000;
-            const lastUserId = [...messages].reverse().find((x) => x.role === "user")?.id;
+            const lastUserId = [...thread].reverse().find((x) => x.role === "user")?.id;
             return (
               <div key={m.id}>
                 {showTime && <div className="text-center text-[11px] text-neutral-500 pt-3 pb-2">{stamp(m.ts)}</div>}
@@ -323,17 +321,6 @@ export default function Home() {
         {offline && <div className="mx-3 mb-1 text-xs text-neutral-300 bg-white/10 rounded-lg px-3 py-1.5">you&apos;re offline. nothing&apos;s lost, it&apos;ll pick up when you&apos;re back.</div>}
         {error && (
           <div className="mx-3 mb-1 text-xs text-amber-300 bg-amber-900/30 rounded-lg px-3 py-1.5">{error}</div>
-        )}
-
-        {/* chips */}
-        {chips.length > 0 && (
-          <div className="flex gap-2 overflow-x-auto px-3 pb-1 pt-2 bg-[#131316]">
-            {chips.map((c) => (
-              <button key={c} onClick={() => onChip(c)} className="shrink-0 text-sm rounded-full border border-[#8fa4d4]/40 text-[#c4d3f5] px-3.5 py-1.5 hover:bg-white/10">
-                {c}
-              </button>
-            ))}
-          </div>
         )}
 
         {/* composer */}
@@ -381,29 +368,32 @@ export default function Home() {
           </button>
         </form>
 
-        {/* call overlay */}
-        {call.status !== "idle" && (
-          <CallScreen
-            name={agentName}
-            status={call.status}
-            speaking={call.speaking}
-            heard={call.heard}
-            listening={call.listening}
-            startedAt={call.startedAt}
-            onAccept={async () => {
-              if (await call.accept()) {
-                await sendEvent({ type: "call_started" });
-                call.greeted();
-              }
-            }}
-            onDecline={() => {
-              call.setStatus("idle");
-              void sendEvent({ type: "call_declined" });
-            }}
-            onHangup={() => call.hangUp("user_hangup")}
-          />
-        )}
       </div>
+      {/* call: its own phone beside the chat on wide screens, full screen on small ones */}
+      {call.status !== "idle" && (
+        <div className="fixed inset-0 z-20 sm:static sm:z-auto w-full sm:w-[390px] h-dvh sm:h-[800px] sm:rounded-[44px] sm:border-[10px] border-neutral-800 overflow-hidden shadow-2xl">
+        <CallScreen
+          said={lastSaid}
+          name={agentName}
+          status={call.status}
+          speaking={call.speaking}
+          heard={call.heard}
+          listening={call.listening}
+          startedAt={call.startedAt}
+          onAccept={async () => {
+            if (await call.accept()) {
+              await sendEvent({ type: "call_started" });
+              call.greeted();
+            }
+          }}
+          onDecline={() => {
+            call.setStatus("idle");
+            void sendEvent({ type: "call_declined" });
+          }}
+          onHangup={() => call.hangUp("user_hangup")}
+        />
+        </div>
+      )}
     </main>
   );
 }
@@ -480,6 +470,20 @@ function Bubble({
         </div>
       </div>
     );
+  if (m.kind === "link_preview")
+    return (
+      <div className={`${gap} flex justify-start`}>
+        <a href={`https://${m.text}`} target="_blank" rel="noreferrer" className="w-[78%] rounded-3xl overflow-hidden bg-[#26272c] border border-white/10 hover:brightness-110">
+          <div className="h-20 bg-gradient-to-br from-[#e9ece8] to-[#c9d0c6] flex items-center gap-2 px-4 text-[#1f2420]">
+            <LoopMark /> <span className="font-medium">Persona</span>
+          </div>
+          <div className="px-4 py-2.5">
+            <div className="text-sm">Terms, SMS Terms and Privacy Policy</div>
+            <div className="text-[11px] text-neutral-400 mt-0.5">{m.text.split("/")[0]}</div>
+          </div>
+        </a>
+      </div>
+    );
   if (m.kind === "contact_card")
     return (
       <div className={`${gap} flex justify-start`}>
@@ -513,7 +517,7 @@ function Bubble({
             <div key={i} className="text-xs text-neutral-300 mb-1">📎 {a.name}</div>
           ),
         )}
-        {m.text}
+        {linkify(m.text)}
         {reaction && (
           <span className="absolute -bottom-3 right-2 text-xs bg-[#1e1f24] border border-[#131316] rounded-full w-6 h-6 flex items-center justify-center" aria-label="reaction">
             {reaction}
@@ -521,6 +525,27 @@ function Bubble({
         )}
       </div>
     </div>
+  );
+}
+
+function linkify(text: string) {
+  return text.split(/(yourpersona\.com\/legal)/).map((part, i) =>
+    part === "yourpersona.com/legal" ? (
+      <a key={i} href="https://yourpersona.com/legal" target="_blank" rel="noreferrer" className="underline">
+        {part}
+      </a>
+    ) : (
+      part
+    ),
+  );
+}
+
+// Stand-in for Persona's continuous-line logo.
+function LoopMark() {
+  return (
+    <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" aria-hidden>
+      <path d="M5 18c2.5 0 4-3 5-6s2-6 4-6 3 2 2 4-4 4-6 4-4-1-4-3 2-3 4-2 3 3 4 5 2 4 4 4" />
+    </svg>
   );
 }
 
@@ -536,6 +561,7 @@ function GoogleG() {
 }
 
 function CallScreen(p: {
+  said: string;
   name: string;
   status: string;
   speaking: boolean;
@@ -554,7 +580,7 @@ function CallScreen(p: {
   const secs = p.startedAt ? Math.max(0, Math.floor((now - p.startedAt) / 1000)) : 0;
   const timer = `${Math.floor(secs / 60)}:${String(secs % 60).padStart(2, "0")}`;
   return (
-    <div className="absolute inset-0 bg-gradient-to-b from-[#1d2433] to-[#0d0f14] flex flex-col items-center justify-between py-16 z-10">
+    <div className="h-full w-full bg-gradient-to-b from-[#1d2433] to-[#0d0f14] text-neutral-100 flex flex-col items-center justify-between py-16">
       <div className="text-center">
         <div className={`mx-auto w-24 h-24 rounded-full bg-amber-400 text-neutral-900 text-4xl font-semibold flex items-center justify-center ${p.speaking ? "ring-8 ring-amber-400/30 animate-pulse" : ""}`}>
           {p.name.charAt(0).toUpperCase()}
@@ -566,7 +592,12 @@ function CallScreen(p: {
           {p.status === "active" && `${timer} · ${p.speaking ? "speaking" : p.listening ? "listening" : "…"}`}
           {p.status === "ended" && "call ended"}
         </div>
-        {p.status === "active" && p.heard && <div className="mt-6 px-8 text-neutral-300 text-sm italic">&ldquo;{p.heard}&rdquo;</div>}
+        {p.status === "active" && (
+          <div className="mt-8 px-8 space-y-3 text-sm">
+            {p.said && <div className="text-neutral-200">{p.said}</div>}
+            {p.heard && <div className="text-neutral-400 italic">you: {p.heard}</div>}
+          </div>
+        )}
       </div>
       {p.status === "ringing" ? (
         <div className="flex gap-16">

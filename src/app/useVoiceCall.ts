@@ -42,8 +42,6 @@ function turnEndDelay(text: string) {
   if (TRAILING.test(t) || /,$/.test(t)) return TURN_END_MIDPHRASE_MS;
   return TURN_END_COMPLETE_MS;
 }
-const FILLER_AFTER_MS = 1800;
-const FILLERS = ["mm, one sec.", "okay, give me a second.", "got it, one sec.", "mhm, let me think."];
 const VOICE_KEY = "persona-voice-";
 
 const VOICE_HINTS: Record<VoiceStyle, RegExp> = {
@@ -212,7 +210,6 @@ export function useVoiceCall(opts: {
   const silenceTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const turnTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const fillerTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const fillerIdx = useRef(0);
   const patienceRef = useRef<number | null>(null); // one-shot longer silence window
   const streamRef = useRef<MediaStream | null>(null);
   const stopDeepgramRef = useRef<(() => void) | null>(null);
@@ -374,15 +371,12 @@ export function useVoiceCall(opts: {
     interruptedRef.current = false;
     waitingRef.current = true;
     clear(silenceTimer);
-    fillerTimer.current = setTimeout(() => {
-      if (waitingRef.current && queueRef.current === 0) speak(FILLERS[fillerIdx.current++ % FILLERS.length], true);
-    }, FILLER_AFTER_MS);
     optsRef.current.onUtterance(text, interrupted).finally(() => {
       waitingRef.current = false;
       clear(fillerTimer);
       if (queueRef.current === 0) armSilence();
     });
-  }, [armSilence, speak]);
+  }, [armSilence]);
 
   const accept = useCallback(async () => {
     const W = window as unknown as { SpeechRecognition?: new () => Rec; webkitSpeechRecognition?: new () => Rec };
