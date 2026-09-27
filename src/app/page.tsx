@@ -319,14 +319,14 @@ export default function Home() {
   const startUserCall = async () => {
     if (call.status !== "idle") return;
     clearRing();
-    await connectCall();
+    await connectCall(true);
   };
 
   // Mic is live: tell the server, or hang up if it can't hear us.
-  const connectCall = async () => {
+  const connectCall = async (byUser = false) => {
     setCallHidden(false);
     if (!(await call.accept())) return;
-    if (await sendEvent({ type: "call_started" })) call.greeted();
+    if (await sendEvent({ type: "call_started", byUser })) call.greeted();
     else call.hangUp("error");
   };
 

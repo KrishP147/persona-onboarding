@@ -56,6 +56,7 @@ export interface CallState {
   endedAt?: number;
   endedReason?: "user_hangup" | "agent_ended" | "silence" | "error" | "declined";
   silenceStrikes: number;
+  byUser?: boolean; // they called us: follow their lead, don't run our agenda
 }
 
 export interface Session {

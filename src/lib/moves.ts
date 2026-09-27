@@ -43,7 +43,7 @@ export const MOVES = {
     label: "mirror their words, reframe the real problem",
     source: "pink, to sell is human (2012): attunement + clarity; voss, never split the difference (2016): labeling",
     instruction:
-      "Play back what they said in THEIR words (short), name the real problem underneath it if there is one, and offer one concrete thing you'd do about it for them. Specific to them, not a feature list.",
+      "Play back what they said in THEIR words (short), name the real problem underneath it if there is one, and give one small piece of real advice or comfort they can use today. Specific to them, not a feature list. Don't ask for gmail in this same message.",
   },
   giveFirst: {
     id: "give-first",
@@ -57,7 +57,7 @@ export const MOVES = {
     label: "reason first, name the worry, easy no",
     source: "tan et al., chi 2014; voss (2016): accusation audit; brown & levinson (1987)",
     instruction:
-      "Ask to connect Gmail with the specific reason tied to their need, name the obvious worry before they have to (\"you might be wondering why i'd want your email\"), say it's read only and you never send without asking, and offer an alternative (paste an email instead). Call send_gmail_link if they agree or if you're on a call.",
+      "Ask to connect Gmail with the specific reason tied to their need, name the obvious worry before they have to (\"you might be wondering why i'd want your email\"), say it's read only and you never send without asking, and offer an alternative (paste an email instead). Ask it as a question, like: want me to text you a link to connect it?. Do NOT call send_gmail_link until they say yes.",
   },
   askName: {
     id: "ask-name",
@@ -116,6 +116,8 @@ export function chooseMove(s: Session, channel: Channel, opts: { callFirst: bool
   const need = s.slots.helpNeed;
   if (s.phase === "graduated") return MOVES.help;
   if (opts.callFirst && channel === "text") return MOVES.askCall;
+  // They called us: listen and follow their lead.
+  if (channel === "voice" && s.call.byUser) return STALL.test(text) ? MOVES.offramp : MOVES.answer;
   // On the call, the name comes first and naturally (the greeting asks it).
   if (channel === "voice" && s.slots.userName.status === "missing" && !used(s, "ask-name")) return MOVES.askName;
   if (OFF_TOPIC.test(text) && text.length > 3 && !/\b(call|gmail|email|link)\b/i.test(text)) return opts.mayAsk ? MOVES.bridge : MOVES.answer;

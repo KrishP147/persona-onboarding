@@ -131,13 +131,13 @@ type Heard = (finals: string, interim: string, speechFinal?: boolean) => void;
 
 // Deepgram live transcription straight from the browser. Resolves to a stop function, or null
 // if it can't start (no token, blocked socket): the caller falls back to Web Speech.
-async function startDeepgram(sessionId: string, stream: MediaStream, onHeard: Heard, onDrop: () => void): Promise<(() => void) | null> {
+async function startDeepgram(sessionId: string, stream: MediaStream, onHeard: Heard, onDrop: () => void, onSpeechStart: () => void): Promise<(() => void) | null> {
   try {
     const r = await fetch(`/api/voice/token?s=${encodeURIComponent(sessionId)}`, { cache: "no-store" });
     if (!r.ok) return null;
     const { token } = (await r.json()) as { token: string };
     const lang = (navigator.language || "en").toLowerCase().startsWith("en") ? "en" : "multi";
-    const q = new URLSearchParams({ model: "nova-3", language: lang, interim_results: "true", smart_format: "true", endpointing: "300" });
+    const q = new URLSearchParams({ model: "nova-3", language: lang, interim_results: "true", smart_format: "true", endpointing: "300", vad_events: "true" });
     const ws = new WebSocket(`wss://api.deepgram.com/v1/listen?${q}`, ["bearer", token]);
     const opened = await new Promise<boolean>((resolve) => {
       ws.onopen = () => resolve(true);
@@ -159,6 +159,7 @@ async function startDeepgram(sessionId: string, stream: MediaStream, onHeard: He
     ws.onmessage = (ev) => {
       try {
         const m = JSON.parse(String(ev.data));
+        if (m.type === "SpeechStarted") return onSpeechStart();
         if (m.type !== "Results") return;
         const t = String(m.channel?.alternatives?.[0]?.transcript ?? "");
         if (!t.trim()) return;
@@ -396,7 +397,7 @@ export function useVoiceCall(opts: {
   const flushTurn = useCallback(() => {
     const text = bufferRef.current.trim();
     bufferRef.current = "";
-    setHeard("");
+    if (text) setHeard(text); // keep their full sentence on screen until they speak again
     if (!text || !activeRef.current) return;
     const interrupted = interruptedRef.current;
     interruptedRef.current = false;
@@ -440,7 +441,8 @@ export function useVoiceCall(opts: {
       // While the agent talks, ignore its own voice coming back through the mic.
       if (queueRef.current > 0 && looksLikeEcho(latest, speakingTextRef.current)) return;
       // Real speech over the agent: stop talking and listen (barge-in).
-      if (queueRef.current > 0 && words(latest).length >= 2) {
+      // One real word (not an echo of its own voice) is enough to stop talking; a person would.
+      if (queueRef.current > 0 && words(latest).length >= 1) {
         stopAudio();
         queueRef.current = 0;
         pendingEndRef.current = false;
@@ -501,7 +503,16 @@ export function useVoiceCall(opts: {
     const stream = streamRef.current;
     const sid = optsRef.current.sessionId;
     activeRef.current = true;
-    const stopDg = stream && sid ? await startDeepgram(sid, stream, onHeard, () => void (activeRef.current && startWebSpeech())) : null;
+    // The moment they start talking over it, drop its volume; the first real word stops it.
+    const onSpeechStart = () => {
+      const a = audioRef.current;
+      if (!a || queueRef.current === 0) return;
+      a.el.volume = 0.3;
+      setTimeout(() => {
+        if (audioRef.current?.el === a.el) a.el.volume = 1; // just a noise: back to normal
+      }, 1500);
+    };
+    const stopDg = stream && sid ? await startDeepgram(sid, stream, onHeard, () => void (activeRef.current && startWebSpeech()), onSpeechStart) : null;
     if (cancelled()) {
       // Hung up while we were connecting: close everything we opened.
       stopDg?.();

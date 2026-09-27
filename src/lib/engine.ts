@@ -175,9 +175,28 @@ export interface Ctx {
   move?: Move;
   pending?: Promise<void>[];
   offeredCall?: boolean;
+  allowEnd?: boolean; // the system decided to end the call (silence, skip setup, outage)
 }
 
 const WANTS_OUT = /\b(skip|not now|later|no more questions|stop asking|just (help|do|get)|let'?s (just )?(start|go)|that'?s (it|all)|i'?m good|i'?m done|enough setup|just let me (use|try)|stop)\b/i;
+// They're wrapping up: only then does the agent hang up on its own.
+const USER_BYE = /\b(bye|goodbye|gotta go|got to go|have to go|need to go|talk (to you )?(soon|later)|that'?s (all|it)|i'?m (done|good|all set)|see (you|ya)|later|hang up|nothing else)\b/i;
+function userWrappingUp(s: Session) {
+  return USER_BYE.test(lastUserText(s));
+}
+
+// The gmail link goes out only after a yes: they asked for it, or said yes to our question about it.
+const WANTS_LINK = /\b(send (me )?(the |a )?link|connect (my )?(gmail|email|inbox)|hook (up )?my (gmail|email))\b/i;
+const ASKED_LINK = /\b(link|gmail|connect|inbox|email)\b[^?]*\?/i;
+function gmailConsent(s: Session) {
+  const text = lastUserText(s);
+  if (WANTS_LINK.test(text) && !/\b(don'?t|do not|no|not)\b/i.test(text)) return true;
+  const users = s.transcript.map((m, i) => (m.role === "user" ? i : -1)).filter((i) => i >= 0);
+  const lastUser = users[users.length - 1] ?? -1;
+  const prevAgent = s.transcript.slice(0, lastUser).reverse().find((m) => m.role === "agent" && (!m.kind || m.kind === "text"));
+  return !!prevAgent && ASKED_LINK.test(prevAgent.text) && YES.test(text);
+}
+
 const SKIP_OFFER = /\b(skip|jump (right )?in|get (right )?started|start (on|with))\b/i;
 const YES = /^\s*(yes|yeah|yep|yup|sure|ok(ay)?|do it|please|go ahead|let'?s do it|sounds good|perfect)\b/i;
 
@@ -255,6 +274,7 @@ async function runTool(ctx: Ctx, name: string, input: Record<string, unknown>): 
     }
     case "send_gmail_link": {
       if (s.slots.gmail.status === "filled") return `already connected as ${s.gmailEmail}`;
+      if (!gmailConsent(s)) return "error: not yet. give them a bit of help first, then ask if they'd like the link; send it only after they say yes";
       const lastLink = s.transcript.map((m) => m.kind).lastIndexOf("gmail_link");
       const lastFail = s.transcript.findLastIndex((m) => m.kind === "event" && /^Gmail connection/.test(m.text));
       if (lastLink >= 0 && lastLink > lastFail && !ctx.resendOk) return "already sent; it's still in their texts. don't send another, just point to it";
@@ -284,6 +304,7 @@ async function runTool(ctx: Ctx, name: string, input: Record<string, unknown>): 
     }
     case "end_call":
       if (!s.call.active) return "not on a call";
+      if (!ctx.allowEnd && !userWrappingUp(s)) return "error: they haven't said bye. don't hang up; ask if there's anything else";
       ctx.actions.push({ type: "end_call" });
       return "hanging up after this message";
     case "graduate": {
@@ -371,16 +392,23 @@ export function stopAtRepeat(text: string) {
   return out.trim();
 }
 
+function capSentences(text: string, max: number) {
+  const parts = text.match(/[^.!?]+[.!?]+["')]*\s*|[^.!?]+$/g) ?? [text];
+  return parts.length <= max ? text : parts.slice(0, max).join("").trim();
+}
+
 function emitAgentText(ctx: Ctx, raw: string) {
   // House style: no em dashes, no stage directions like "(waiting for reply)".
   const text = stopAtRepeat(raw).replace(/\s*[—]\s*/g, ", ").replace(/^\s*\(on call\)\s*/gim, "").replace(/^\s*\*?\([^)]*\)\*?\s*$/gm, "").trim();
-  const bubbles = ctx.channel === "voice" ? [text.replace(/\n+/g, " ").trim()] : text.split(/\n\s*\n/).map((b) => b.trim());
+  // On a call, three sentences is already a lot to listen to; trim anything longer.
+  const spoken = ctx.channel === "voice" ? capSentences(text.replace(/\n+/g, " ").trim(), 3) : text;
+  const bubbles = ctx.channel === "voice" ? [spoken] : text.split(/\n\s*\n/).map((b) => b.trim());
   for (const b of bubbles.filter(Boolean)) {
     const m = msg("agent", ctx.channel, b, ctx.move ? { move: ctx.move } : {});
     ctx.newMessages.push(m);
     ctx.s.transcript.push(m);
   }
-  if (ctx.channel === "voice" && text.trim()) ctx.actions.push({ type: "speak", text: text.replace(/\n+/g, " ").trim() });
+  if (ctx.channel === "voice" && spoken) ctx.actions.push({ type: "speak", text: spoken });
 }
 
 async function turn(
@@ -391,7 +419,7 @@ async function turn(
   opts: { forceEnd?: boolean; move?: Move; avoid?: RegExp } = {},
 ): Promise<TurnResult> {
   const resendOk = /\b(resend|send (it|the link) again|another link|new link|lost the link)\b/i.test(lastUserText(s));
-  const ctx: Ctx = { s, channel, actions: [], newMessages: [], resendOk, move: opts.move };
+  const ctx: Ctx = { s, channel, actions: [], newMessages: [], resendOk, move: opts.move, allowEnd: !!opts.forceEnd };
   let text = "";
   let failed = false;
   try {
@@ -424,7 +452,7 @@ async function turn(
     text = `${text.trim()} ${goodbyeLine(s)}`.trim();
   }
   // Said goodbye on a call but didn't hang up: hang up (a silence prompt after "bye" is the worst).
-  if (channel === "voice" && s.call.active && !failed && GOODBYE.test(text) && !ctx.actions.some((a) => a.type === "end_call")) {
+  if (channel === "voice" && s.call.active && !failed && GOODBYE.test(text) && userWrappingUp(s) && !ctx.actions.some((a) => a.type === "end_call")) {
     ctx.actions.push({ type: "end_call" });
   }
   const sentences = text.split(/(?<=[.!?])\s+|\n+/);
@@ -437,7 +465,9 @@ async function turn(
   // Keep words and actions in sync: if it SAYS the link is in their texts (not asks whether to send it), it is.
   const claimsLink = sentences.some((x) => CLAIMS_LINK.test(x) && !x.trim().endsWith("?") && !/\b(want me to|should i|can i|shall i)\b/i.test(x));
   if (claimsLink && s.slots.gmail.status === "missing" && !ctx.newMessages.some((m) => m.kind === "gmail_link")) {
-    await runTool(ctx, "send_gmail_link", {});
+    if (gmailConsent(s)) await runTool(ctx, "send_gmail_link", {});
+    // Never say it's sent when it isn't: drop the claim instead of sending a link they didn't ask for.
+    else text = sentences.filter((x) => !(CLAIMS_LINK.test(x) && !x.trim().endsWith("?"))).join(" ").trim() || text;
   }
   // Ask bookkeeping: credit a question to the slot this turn's move was about (never the fallback line).
   const isQuestion = !usedFallback && text.includes("?");
@@ -568,7 +598,7 @@ export async function handleUserMessage(
 
 export type SessionEvent =
   | { type: "open" }
-  | { type: "call_started" }
+  | { type: "call_started"; byUser?: boolean }
   | { type: "call_declined" }
   | { type: "call_ended"; reason: "user_hangup" | "agent_ended" | "error" }
   | { type: "silence" }
@@ -611,17 +641,28 @@ async function handleEventInner(s: Session, e: SessionEvent): Promise<TurnResult
     }
     case "call_started":
       if (s.call.active) return idle();
-      s.call = { active: true, startedAt: Date.now(), silenceStrikes: 0 };
+      s.call = { active: true, startedAt: Date.now(), silenceStrikes: 0, byUser: !!e.byUser };
       s.prePhase = s.phase;
       s.phase = "on_call";
       eventMsg(s, "Call started");
-      return turn(
-        s,
-        "voice",
-        "The call just connected. Two short spoken sentences, normal punctuation: a warm hello with your name, then one easy question that picks up where the texts left off (never re-ask anything already known). Like: \"hey, it's julia! what should i call you?\"",
-        `hey, it's ${s.slots.agentName.value ?? "me"}! thanks for picking up.${s.slots.userName.status === "missing" ? " what should i call you?" : ""}`,
-        { move: EVENT_MOVES.greet },
-      );
+      {
+        // Written by code so the first words come right away (no model wait on the line).
+        const ctx: Ctx = { s, channel: "voice", actions: [], newMessages: [], move: EVENT_MOVES.greet };
+        const who = s.slots.agentName.value ?? "me";
+        const name = s.slots.userName.value;
+        // They called us: answer like a person picking up ("what's up?"), no agenda.
+        const next = e.byUser
+          ? "what's up?"
+          : s.slots.userName.status === "missing"
+            ? "what should i call you?"
+            : s.slots.helpNeed.status === "missing"
+              ? "what's been taking up most of your time lately?"
+              : "how's it going?";
+        const line = e.byUser ? `hey${name ? ` ${name}` : ""}! ${next}` : `hey${name ? ` ${name}` : ""}, it's ${who}! ${next}`;
+        emitAgentText(ctx, line);
+        recordAsk(s, !e.byUser && s.slots.userName.status === "missing" ? "userName" : !e.byUser && s.slots.helpNeed.status === "missing" ? "helpNeed" : null, true);
+        return { session: s, newMessages: ctx.newMessages, chips: computeDirective(s, "voice").chips, actions: ctx.actions };
+      }
     case "call_declined":
       s.call = { ...s.call, active: false, endedReason: "declined" };
       s.callOffers = Math.max(s.callOffers, 1);

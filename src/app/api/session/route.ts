@@ -17,7 +17,7 @@ export async function GET(req: Request) {
 
 const Event = z.discriminatedUnion("type", [
   z.object({ type: z.literal("open") }),
-  z.object({ type: z.literal("call_started") }),
+  z.object({ type: z.literal("call_started"), byUser: z.boolean().optional() }),
   z.object({ type: z.literal("call_declined") }),
   z.object({ type: z.literal("call_ended"), reason: z.enum(["user_hangup", "agent_ended", "error"]) }),
   z.object({ type: z.literal("silence") }),

@@ -98,6 +98,9 @@ export function computeDirective(s: Session, channel: Channel): Directive {
   if (channel === "voice" && isOpen(s, "gmail") && nextSlot === "gmail") {
     notes.push("Gmail can't be connected by voice: call send_gmail_link and tell them the link is in their texts.");
   }
+  if (channel === "voice" && s.call.byUser) {
+    notes.push("They called you. Follow their lead: ask what's up, listen, and respond to what they bring. Don't steer to setup items unless it fits what they said.");
+  }
   if (s.phase === "post_call") {
     notes.push("The call has ended. Continue over text without re-asking anything already collected.");
   }
@@ -112,7 +115,7 @@ export function computeDirective(s: Session, channel: Channel): Directive {
   if (canGraduate) {
     notes.push(
       s.call.active
-        ? "Everything's gathered. Help with their need, then wrap up the call warmly (goodbye, you'll text a recap, end_call). Graduate after that."
+        ? "Everything's gathered. Help with their need, then let them know that's all you needed and ask if there's anything else. Don't hang up until they say bye."
         : "Everything's gathered. Help with their need and call graduate.",
     );
   }
