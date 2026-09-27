@@ -48,6 +48,17 @@ const TOOLS: ToolDef[] = [
   { name: "send_gmail_link", description: "Drop a secure 'Connect Gmail' link into the text thread. Works during a call.", schema: NO_ARGS },
   { name: "end_call", description: "Hang up after saying goodbye on the call.", schema: NO_ARGS },
   {
+    name: "text_them",
+    description:
+      "On a call: put something in the text chat (a draft email, a list, an address, anything easier to read than hear). Then just say briefly that it's in the chat.",
+    schema: {
+      type: "object",
+      properties: { text: { type: "string", description: "Exactly what should appear in the chat" } },
+      required: ["text"],
+      additionalProperties: false,
+    },
+  },
+  {
     name: "send_gif",
     description:
       "Rarely, over text only: send a GIF instead of a short reply, when your whole answer would just be okay / yes / no / nice / haha / on it. Don't add text that says the same thing.",
@@ -318,6 +329,14 @@ async function runTool(ctx: Ctx, name: string, input: Record<string, unknown>): 
       s.transcript.push(gif);
       return "gif sent. that's your whole reply unless you have something new to add";
     }
+    case "text_them": {
+      const body = String(input.text ?? "").trim().slice(0, 2000);
+      if (!body) return "error: nothing to post";
+      const posted = msg("agent", "text", body);
+      ctx.newMessages.push(posted);
+      s.transcript.push(posted);
+      return "it's in the chat now. tell them in a few words; don't read it out";
+    }
     case "end_call":
       if (!s.call.active) return "not on a call";
       if (!ctx.allowEnd && !userWrappingUp(s)) return "error: they haven't said bye. don't hang up; ask if there's anything else";
@@ -536,6 +555,15 @@ async function turn(
     if (gmailConsent(s)) await runTool(ctx, "send_gmail_link", {});
     // Never say it's sent when it isn't: drop the claim instead of sending a link they didn't ask for.
     else text = sentences.filter((x) => !(CLAIMS_LINK.test(x) && !x.trim().endsWith("?"))).join(" ").trim() || text;
+  }
+  // On a call, a draft (or anything long) is for reading, not listening: post it to the chat and say so.
+  const looksLikeDraft = /---|\bsubject:|\bdear\b|\bhi \[|\[(landlord|name|recipient)[^\]]*\]/i.test(text) || text.length > 320;
+  if (channel === "voice" && !extraInstruction && looksLikeDraft && !ctx.newMessages.some((m) => m.kind !== "gmail_link" && m.role === "agent" && m.channel === "text")) {
+    const draft = text.replace(/^[^\n]*?(here'?s (something|a draft|one)[^:\n]*:|---)\s*/i, "").replace(/---/g, "").trim();
+    const posted = msg("agent", "text", draft);
+    ctx.newMessages.push(posted);
+    s.transcript.push(posted);
+    text = "okay, i put it in our chat. take a look and tell me what to change.";
   }
   // On a call, if the link just went to their texts, say so (the written ask alone isn't enough).
   if (channel === "voice" && ctx.newMessages.some((m) => m.kind === "gmail_link") && !/\b(text|link)\b/i.test(text)) {

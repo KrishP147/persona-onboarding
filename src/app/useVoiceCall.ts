@@ -29,7 +29,7 @@ type Rec = {
 };
 
 const SILENCE_MS = 6000;
-const TURN_END_COMPLETE_MS = 350;
+const TURN_END_COMPLETE_MS = 700;
 const TURN_END_MIDPHRASE_MS = 850;
 const TURN_END_SPELLING_MS = 1400;
 const TRAILING = /\b(and|but|or|so|because|the|a|an|my|is|are|to|of|with|for|um+|uh+|like|then|if|at|dot)$/i;
@@ -40,8 +40,10 @@ function turnEndDelay(text: string, speechFinal = false) {
   const t = text.trim();
   if (SPELLING.test(t)) return TURN_END_SPELLING_MS;
   if (TRAILING.test(t) || /,$/.test(t)) return TURN_END_MIDPHRASE_MS;
-  // Deepgram already heard the pause: answer almost right away, like a person would.
-  return speechFinal ? 0 : TURN_END_COMPLETE_MS; // deepgram already heard the pause: answer now
+  // Deepgram heard a pause AND the sentence sounds finished: answer quickly. A pause mid-thought
+  // ("yes. can you type this...") gets the normal wait, so one sentence isn't chopped into three turns.
+  if (speechFinal && /[.?!]$/.test(t)) return 250;
+  return TURN_END_COMPLETE_MS;
 }
 const VOICE_KEY = "persona-voice-";
 
@@ -141,7 +143,7 @@ async function startDeepgram(sessionId: string, stream: MediaStream, onHeard: He
     if (!r.ok) return null;
     const { token } = (await r.json()) as { token: string };
     const lang = (navigator.language || "en").toLowerCase().startsWith("en") ? "en" : "multi";
-    const q = new URLSearchParams({ model: "nova-3", language: lang, interim_results: "true", smart_format: "true", endpointing: "250", utterance_end_ms: "1000", vad_events: "true" });
+    const q = new URLSearchParams({ model: "nova-3", language: lang, interim_results: "true", smart_format: "true", endpointing: "400", utterance_end_ms: "1000", vad_events: "true" });
     const ws = new WebSocket(`wss://api.deepgram.com/v1/listen?${q}`, ["bearer", token]);
     const opened = await new Promise<boolean>((resolve) => {
       ws.onopen = () => resolve(true);
@@ -221,6 +223,7 @@ export function useVoiceCall(opts: {
   const bufferRef = useRef(""); // finalized user speech not yet sent
   const interruptedRef = useRef(false);
   const pendingEndRef = useRef(false);
+  const usingDeepgramRef = useRef(false);
   const finalEndRef = useRef(false); // this hangup can't be talked out of (e.g. we can't reach the model)
   const silenceTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const turnTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -475,10 +478,17 @@ export function useVoiceCall(opts: {
       // and the pause we wait for depends on whether they sound finished.
       clear(turnTimer);
       patienceRef.current = null; // they're back
-      turnTimer.current = setTimeout(() => {
+      const fire = (tries: number) => {
+        // With deepgram, never send a draft transcript: its final version (same words, maybe more)
+        // is on the way, and sending both repeated the sentence. Wait a little for it instead.
+        if (usingDeepgramRef.current && interim.trim() && !finals.trim() && tries < 4) {
+          turnTimer.current = setTimeout(() => fire(tries + 1), 350);
+          return;
+        }
         if (interim.trim() && !finals.trim()) bufferRef.current += ` ${interim.trim()}`;
         flushTurn();
-      }, turnEndDelay(`${bufferRef.current} ${interim}`, speechFinal));
+      };
+      turnTimer.current = setTimeout(() => fire(0), turnEndDelay(`${bufferRef.current} ${interim}`, speechFinal));
     };
 
     // Prefer Deepgram; fall back to the browser recognizer if it can't start or drops mid-call.
@@ -539,6 +549,7 @@ export function useVoiceCall(opts: {
       return false;
     }
     connectingRef.current = false;
+    usingDeepgramRef.current = !!stopDg;
     if (stopDg) stopDeepgramRef.current = stopDg;
     else if (!startWebSpeech()) {
       teardown();
