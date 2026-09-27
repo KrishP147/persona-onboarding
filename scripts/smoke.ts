@@ -27,7 +27,7 @@ async function main() {
   const r3 = await handleEvent(s, { type: "silence" });
   check("3rd silence ends call", r3.actions.some((a) => a.type === "end_call"));
   const spoken = r3.actions.find((a) => a.type === "speak");
-  check("says goodbye before hanging up", !!spoken && /bye/i.test((spoken as { text: string }).text), said(r3));
+  check("says goodbye before hanging up", !!spoken && /bye|talk soon|text you/i.test((spoken as { text: string }).text), said(r3));
 
   const end = await handleEvent(s, { type: "call_ended", reason: "agent_ended" });
   check("text follow-up after call", end.newMessages.some((m) => m.role === "agent" && m.channel === "text"), said(end));

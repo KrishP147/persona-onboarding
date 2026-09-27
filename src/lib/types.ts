@@ -118,7 +118,7 @@ export interface TurnResult {
 
 export type ClientAction =
   | { type: "start_call" }
-  | { type: "end_call" }
+  | { type: "end_call"; final?: boolean } // final: hang up even if they talk over the goodbye
   | { type: "speak"; text: string }
   | { type: "graduate" }
   | { type: "patience"; ms: number }; // user is doing a task (e.g. gmail sign-in): stretch the next silence window

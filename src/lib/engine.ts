@@ -11,7 +11,7 @@ import { applyExtracted, extract } from "./extract";
 import type { Move } from "./types";
 
 const MAX_TOOL_ROUNDS = 3;
-const HISTORY_LIMIT = 40;
+const HISTORY_LIMIT = 16; // recent context is what matters; slots and STATE carry the rest (and it keeps each call small)
 
 export const usingMock = () => provider === null;
 
@@ -110,8 +110,10 @@ function toTurns(s: Session): Turn[] {
 // When the model is unreachable more than once in a row: own it plainly, keep what we know, set an expectation.
 function outageLine(s: Session, channel: Channel) {
   const name = s.slots.userName.value;
-  if (channel === "voice") return `sorry${name ? ` ${name}` : ""}, i'm having trouble on my end right now. i'll text you instead.`;
+  if (channel === "voice") return `sorry${name ? ` ${name}` : ""}, i'm having trouble on my end right now. i'll text you instead. talk soon!`;
   const need = s.slots.helpNeed.value;
+  // Don't repeat the same apology over and over: after the first, keep it short and different.
+  if ((s.llmFailures ?? 0) > 2) return (s.llmFailures ?? 0) % 2 ? "still catching up on my end, sorry. i'll be back to normal soon." : "still slow here, sorry about that. your messages are saved, nothing's lost.";
   return `sorry${name ? ` ${name}` : ""}, i'm running slow on my end right now.${need && need.length <= 60 ? ` i haven't forgotten about ${need}.` : ""} give me a few minutes and text me again?`;
 }
 
@@ -463,7 +465,12 @@ async function turn(
     // The same "say that again?" on repeat looks broken; after the first miss, be honest about it.
     text = failed && (s.llmFailures ?? 0) > 1 ? outageLine(s, channel) : fallback;
     // On a call, "i'll text you instead" means actually hanging up (with that line as the goodbye).
-    if (failed && channel === "voice" && (s.llmFailures ?? 0) > 1 && !ctx.actions.some((a) => a.type === "end_call")) ctx.actions.push({ type: "end_call" });
+    // On a call, one failure is a hiccup ("say that again?"); a second means we genuinely can't talk
+    // right now: say so once and hang up for real (a final hangup: talking over it can't restart the loop).
+    if (failed && channel === "voice" && (s.llmFailures ?? 0) > 1) {
+      ctx.actions = ctx.actions.filter((a) => a.type !== "end_call");
+      ctx.actions.push({ type: "end_call", final: true });
+    }
   }
   // Some things must never be said in this moment (e.g. "got cut off" after we hung up ourselves).
   if (opts.avoid && fallback && opts.avoid.test(text)) text = fallback;

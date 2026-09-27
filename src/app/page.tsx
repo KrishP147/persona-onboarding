@@ -198,7 +198,7 @@ export default function Home() {
           }, 3000);
         }
         if (a.type === "speak") call.speak(a.text);
-        if (a.type === "end_call") call.endAfterSpeaking();
+        if (a.type === "end_call") call.endAfterSpeaking(!!a.final);
         if (a.type === "patience") call.patience(a.ms);
       }
     };

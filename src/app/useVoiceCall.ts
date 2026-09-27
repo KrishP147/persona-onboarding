@@ -217,6 +217,7 @@ export function useVoiceCall(opts: {
   const bufferRef = useRef(""); // finalized user speech not yet sent
   const interruptedRef = useRef(false);
   const pendingEndRef = useRef(false);
+  const finalEndRef = useRef(false); // this hangup can't be talked out of (e.g. we can't reach the model)
   const silenceTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const turnTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const fillerTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -390,10 +391,14 @@ export function useVoiceCall(opts: {
     [armSilence, hangUp],
   );
 
-  const endAfterSpeaking = useCallback(() => {
-    if (queueRef.current > 0 || window.speechSynthesis?.speaking) pendingEndRef.current = true;
-    else hangUp("agent_ended");
-  }, [hangUp]);
+  const endAfterSpeaking = useCallback(
+    (final = false) => {
+      finalEndRef.current = final;
+      if (queueRef.current > 0 || window.speechSynthesis?.speaking) pendingEndRef.current = true;
+      else hangUp("agent_ended");
+    },
+    [hangUp],
+  );
 
   // User finished a turn: send it, with a spoken filler if the reply is slow.
   const flushTurn = useCallback(() => {
@@ -448,6 +453,11 @@ export function useVoiceCall(opts: {
       if (queueRef.current > 0 && (heardWords.length >= 2 || STOP_WORDS.test(heardWords[0] ?? ""))) {
         stopAudio();
         queueRef.current = 0;
+        if (finalEndRef.current) {
+          // They talked over a goodbye we can't take back: hang up now rather than loop.
+          setTimeout(() => hangUp("agent_ended"), 300);
+          return;
+        }
         pendingEndRef.current = false;
         speakingTextRef.current = "";
         setSpeaking(false);
@@ -535,7 +545,7 @@ export function useVoiceCall(opts: {
     setStatus("active");
     setListening(true);
     return true;
-  }, [flushTurn, startRec, teardown]);
+  }, [flushTurn, startRec, teardown, hangUp]);
 
   // Greeting arrived (or failed): release the "waiting" hold.
   const greeted = useCallback(() => {

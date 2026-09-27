@@ -15,6 +15,11 @@ const EMPTY: Extracted = { agentName: null, userName: null, helpNeed: null, decl
 
 export async function extract(s: Session, userText: string): Promise<Extracted> {
   if (!provider || !userText.trim()) return EMPTY;
+  // Every call counts against a small free quota: skip when there's nothing it could find.
+  const open = s.slots.userName.status !== "filled" || s.slots.helpNeed.status !== "filled" || s.slots.agentName.status !== "filled";
+  const renaming = /\b(call (me|you|yourself)|my name|rename|actually)\b/i.test(userText);
+  if (!open && !renaming) return EMPTY;
+  if (userText.trim().split(/\s+/).length < 2 && !renaming) return EMPTY; // "ok", "yes", "Julia" (names are caught in code)
   const lastAgent = [...s.transcript].reverse().find((m) => m.role === "agent" && m.kind !== "event" && m.kind !== "contact_card")?.text ?? "";
   try {
     return await json<Extracted>({
