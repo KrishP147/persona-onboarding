@@ -28,7 +28,9 @@ type Rec = {
   onerror: ((e: { error: string }) => void) | null;
 };
 
-const SILENCE_MS = 6000;
+// People tolerate a lot more quiet on a call with someone who is there for them than a form does;
+// the first check-in waits 10s (journal 10), later ones longer (the server sends patience).
+const SILENCE_MS = 10000;
 const TURN_END_COMPLETE_MS = 700;
 const TURN_END_MIDPHRASE_MS = 850;
 const TURN_END_SPELLING_MS = 1400;
@@ -219,6 +221,7 @@ export function useVoiceCall(opts: {
   const [startedAt, setStartedAt] = useState<number | null>(null);
   const [muted, setMuted] = useState(false);
   const mutedRef = useRef(false);
+  const lastFillerRef = useRef("");
 
   const recRef = useRef<Rec | null>(null);
   const voiceRef = useRef<SpeechSynthesisVoice | undefined>(undefined);
@@ -442,12 +445,24 @@ export function useVoiceCall(opts: {
     interruptedRef.current = false;
     waitingRef.current = true;
     clear(silenceTimer);
+    // Thinking out loud, like a person: a short "hmm" if the reply takes over ~1s, and "let me think
+    // that through" if it's still coming at ~3s (clark & fox tree 2002: uh/um mark short vs long
+    // delays; shiwa et al. 2008: fillers soften slow replies). Never on fast replies, never stacked twice.
+    clear(fillerTimer);
+    const stillWaiting = () => waitingRef.current && queueRef.current === 0 && !mutedRef.current && activeRef.current;
+    fillerTimer.current = setTimeout(() => {
+      if (!stillWaiting()) return;
+      if (Math.random() < 0.7) void speak(pickFiller(SHORT_FILLERS, lastFillerRef), true);
+      fillerTimer.current = setTimeout(() => {
+        if (stillWaiting()) void speak(pickFiller(LONG_FILLERS, lastFillerRef), true);
+      }, 2000);
+    }, 1100);
     optsRef.current.onUtterance(text, interrupted).finally(() => {
       waitingRef.current = false;
       clear(fillerTimer);
       if (queueRef.current === 0) armSilence();
     });
-  }, [armSilence]);
+  }, [armSilence, speak]);
 
   // Mute: the mic goes silent at the source (deepgram gets nothing), anything the fallback recognizer
   // still picks up is dropped, and silence doesn't count. The agent is never told.
@@ -628,4 +643,13 @@ export function useVoiceCall(opts: {
   }, []);
 
   return { status, setStatus, speaking, listening, heard, caption, startedAt, accept, hangUp, speak, endAfterSpeaking, greeted, patience, muted, toggleMute };
+}
+
+const SHORT_FILLERS = ["hmm.", "mm, okay.", "oh, okay.", "yeah, hmm."];
+const LONG_FILLERS = ["um, let me think that through for a second.", "hmm, give me a sec to think.", "okay, let me think about that."];
+function pickFiller(list: string[], last: { current: string }) {
+  const options = list.filter((f) => f !== last.current);
+  const f = options[Math.floor(Math.random() * options.length)] ?? list[0];
+  last.current = f;
+  return f;
 }

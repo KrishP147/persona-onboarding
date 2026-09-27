@@ -65,7 +65,8 @@ export function computeDirective(s: Session, channel: Channel): Directive {
 
   const nextSlot = ORDER[channel].find((k) => isOpen(s, k)) ?? null;
 
-  const mayAsk = nextSlot !== null && s.consecutiveAsks < MAX_CONSECUTIVE_ASKS;
+  // They called us: no gathering at all, it's their call.
+  const mayAsk = nextSlot !== null && s.consecutiveAsks < MAX_CONSECUTIVE_ASKS && !(channel === "voice" && s.call.byUser);
   if (!mayAsk && nextSlot) {
     notes.push(
       "You've asked for things several turns in a row. This turn, give the user something useful (answer, idea, mini-demo) and do NOT ask for info.",
@@ -95,11 +96,13 @@ export function computeDirective(s: Session, channel: Channel): Directive {
   if (channel === "voice" && isOpen(s, "agentName")) {
     notes.push("Don't ask for your own name on the call; that happens over text. If the user offers one, accept it.");
   }
-  if (channel === "voice" && isOpen(s, "gmail") && nextSlot === "gmail") {
+  if (channel === "voice" && isOpen(s, "gmail") && nextSlot === "gmail" && !s.call.byUser) {
     notes.push("Gmail can't be connected by voice: call send_gmail_link and tell them the link is in their texts.");
   }
   if (channel === "voice" && s.call.byUser) {
-    notes.push("They called you. Follow their lead: ask what's up, listen, and respond to what they bring. Don't steer to setup items unless it fits what they said.");
+    notes.push(
+      "They called you, so they're bringing something. Be there like a friend: listen, reflect what they said, follow their topic. Don't push setup items or any agenda, and don't bring up earlier topics (their old need, past emails, what you talked about before) unless they do. Short replies, comfortable with pauses.",
+    );
   }
   if (s.phase === "post_call") {
     notes.push("The call has ended. Continue over text without re-asking anything already collected.");
@@ -107,7 +110,7 @@ export function computeDirective(s: Session, channel: Channel): Directive {
   if (rushed && !canGraduate && s.phase !== "on_call") {
     notes.push("They seem in a hurry: offer to skip the rest of setup and just start with whatever they need. Graduate only if they say yes.");
   }
-  if (s.slots.helpNeed.status === "filled" && !canGraduate) {
+  if (s.slots.helpNeed.status === "filled" && !canGraduate && !(channel === "voice" && s.call.byUser)) {
     notes.push(
       "You know what they need: give a small concrete taste of help now, and tie whatever's left (especially Gmail) to that need. Don't graduate unless they ask to skip or stop setup.",
     );

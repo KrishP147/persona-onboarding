@@ -832,7 +832,7 @@ export async function handleUserMessage(
     // "hold on a sec": a person just says "sure" and waits; no questions, no check-ins for a while.
     if (HOLD.test(clean) && clean.split(/\s+/).length <= 8) {
       s.call.holding = true;
-      const ctx: Ctx = { s, channel, actions: [{ type: "patience", ms: 45000 }], newMessages: [], move: EVENT_MOVES.silence };
+      const ctx: Ctx = { s, channel, actions: [{ type: "patience", ms: 90000 }], newMessages: [], move: EVENT_MOVES.silence };
       emitAgentText(ctx, "sure, take your time.");
       return { session: s, newMessages: [userMsg, ...ctx.newMessages], chips: computeDirective(s, channel).chips, actions: ctx.actions };
     }
@@ -1060,9 +1060,9 @@ async function handleEventInner(s: Session, e: SessionEvent): Promise<TurnResult
         const ctx: Ctx = { s, channel: "voice", actions: [], newMessages: [], move: EVENT_MOVES.greet };
         const who = s.slots.agentName.value ?? "me";
         const name = s.slots.userName.value;
-        // They called us: answer like a person picking up ("what's up?"), no agenda.
+        // They called us: they're bringing something. Warm, open, no agenda, nothing from before.
         const next = e.byUser
-          ? "what's up?"
+          ? "really good to hear from you. what's going on?"
           : s.slots.userName.status === "missing"
             ? "what should i call you?"
             : s.slots.helpNeed.status === "missing"
@@ -1123,18 +1123,21 @@ async function handleEventInner(s: Session, e: SessionEvent): Promise<TurnResult
       }
       // Written by code: instant, and matched to what came before. "take your time" only makes
       // sense after a question; after a statement, silence more likely means the line dropped.
+      // Quiet check-ins that sound like someone who's just there, not a prompt waiting for input.
+      // Each one buys a longer silence before the next (10s, then 20s, then 30s), and after
+      // "hold on" the wait is much longer.
       const lastSaid = [...s.transcript].reverse().find((m) => m.role === "agent" && m.channel === "voice")?.text.trim() ?? "";
       const line =
         s.call.silenceStrikes === 1 && s.call.holding
-          ? "you still there?"
+          ? "i'm still here whenever you're ready."
           : s.call.silenceStrikes === 1
-          ? lastSaid.endsWith("?")
-            ? "take your time. want me to say that again?"
-            : heardThemThisCall(s)
-              ? "anything else you want me to do with that?"
-              : "hello? can you hear me okay?"
-          : "no pressure. if now's not great, i can just text you instead.";
-      const ctx: Ctx = { s, channel: "voice", actions: [], newMessages: [], move: EVENT_MOVES.silence };
+          ? !heardThemThisCall(s)
+            ? "hello? can you hear me okay?"
+            : lastSaid.endsWith("?")
+              ? "no rush."
+              : "mm, i'm here."
+          : "no pressure at all. if now's not a good time, i can just text you.";
+      const ctx: Ctx = { s, channel: "voice", actions: [{ type: "patience", ms: s.call.holding ? 60000 : s.call.silenceStrikes === 1 ? 20000 : 30000 }], newMessages: [], move: EVENT_MOVES.silence };
       emitAgentText(ctx, line);
       return { session: s, newMessages: ctx.newMessages, chips: computeDirective(s, "voice").chips, actions: ctx.actions };
     }

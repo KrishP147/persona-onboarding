@@ -9,3 +9,10 @@ export const CARTESIA_VOICES: Record<VoiceStyle, string> = {
 
 export const CARTESIA_VERSION = "2026-08-14";
 export const CARTESIA_MODEL = process.env.CARTESIA_MODEL ?? "sonic-3.6";
+
+// Backup voices (Deepgram Aura 2), one per style, used when Cartesia is out of credits.
+export const AURA_VOICES: Record<VoiceStyle, string> = {
+  feminine: "aura-2-thalia-en", // clear, energetic, friendly
+  masculine: "aura-2-apollo-en", // casual, comfortable
+  neutral: "aura-2-andromeda-en", // casual, expressive
+};
