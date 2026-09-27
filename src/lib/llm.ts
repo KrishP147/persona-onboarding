@@ -4,6 +4,10 @@
 import Anthropic from "@anthropic-ai/sdk";
 import { GoogleGenAI, HarmBlockThreshold, HarmCategory, ThinkingLevel, type Content, type Part as GPart, type SafetySetting, type ThinkingConfig } from "@google/genai";
 import { recordUsage } from "./usage";
+import { incrDaily } from "./store";
+
+// Paid fallback budget: at most this many Claude turns per day, counted across all instances.
+const FALLBACK_DAILY_TURNS = Number(process.env.LLM_FALLBACK_DAILY_TURNS ?? 60);
 
 export type Part = { type: "text"; text: string } | { type: "image"; mime: string; data: string };
 export interface Turn {
@@ -131,8 +135,10 @@ export async function runToolLoop(o: LoopOpts, exec: Exec): Promise<LoopResult> 
     try {
       return await geminiLoop(o, exec);
     } catch (err) {
-      // Quota or outage: a paid fallback keeps the conversation going, only if explicitly enabled.
+      // Quota or outage: a paid fallback keeps the conversation going, only if explicitly enabled,
+      // and only within a small daily budget so a busy day can't run up a bill.
       if (!fallback) throw err;
+      if ((await incrDaily("anthropic-fallback").catch(() => Infinity)) > FALLBACK_DAILY_TURNS) throw err;
       console.error("gemini failed, falling back to anthropic:", String((err as Error).message ?? err).slice(0, 120));
       return anthropicLoop(fallback, o, exec);
     }

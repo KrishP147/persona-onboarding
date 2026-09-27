@@ -8,6 +8,7 @@ import { SLOT_KEYS } from "./types";
 // - local dev: one JSON file per session under .data/
 // - deployed: Upstash Redis over its REST API (serverless has no writable disk and many instances)
 interface Backend {
+  incrDaily(name: string): Promise<number>;
   get(id: string): Promise<string | null>;
   set(id: string, value: string): Promise<void>;
   lock(id: string): Promise<() => Promise<void>>;
@@ -44,7 +45,15 @@ function safeId(id: string) {
 const DIR = path.join(process.cwd(), ".data", "sessions");
 const memLocks = new Map<string, Promise<unknown>>();
 
+const memCounters = new Map<string, number>();
+
 const fileBackend: Backend = {
+  async incrDaily(name) {
+    const key = `${name}:${new Date().toISOString().slice(0, 10)}`;
+    const n = (memCounters.get(key) ?? 0) + 1;
+    memCounters.set(key, n);
+    return n;
+  },
   async get(id) {
     try {
       return await fs.readFile(path.join(DIR, `${id}.json`), "utf8");
@@ -82,6 +91,12 @@ function upstash(url: string, token: string): Backend {
     return ((await res.json()) as { result: T }).result;
   }
   return {
+    async incrDaily(name) {
+      const key = `count:${name}:${new Date().toISOString().slice(0, 10)}`;
+      const n = await cmd<number>("INCR", key);
+      if (n === 1) await cmd("EXPIRE", key, 60 * 60 * 48);
+      return n;
+    },
     get: (id) => cmd<string | null>("GET", `session:${id}`),
     async set(id, value) {
       await cmd("SET", `session:${id}`, value, "EX", TTL_SECONDS);
@@ -107,6 +122,9 @@ const backend: Backend =
   process.env.UPSTASH_REDIS_REST_URL && process.env.UPSTASH_REDIS_REST_TOKEN
     ? upstash(process.env.UPSTASH_REDIS_REST_URL, process.env.UPSTASH_REDIS_REST_TOKEN)
     : fileBackend;
+
+// Shared daily counter (across serverless instances when Upstash is configured).
+export const incrDaily = (name: string) => backend.incrDaily(name);
 
 export async function loadSession(id: string): Promise<Session | null> {
   const raw = await backend.get(safeId(id));

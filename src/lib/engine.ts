@@ -437,7 +437,7 @@ export async function handleUserMessage(
     s,
     channel,
     interrupted ? "They talked over you mid-sentence. Drop what you were saying and respond to what they just said; don't repeat your cut-off line unless they ask." : undefined,
-    channel === "voice" ? "sorry, say that one more time?" : "ha, fair. what's going on?",
+    channel === "voice" ? "sorry, i missed that. say it one more time?" : "sorry, i lost my train of thought for a sec. can you say that again?",
   );
   r.newMessages.unshift(userMsg);
   const card = named?.card;
