@@ -66,7 +66,7 @@ export async function generate(ctx: Ctx, extraInstruction?: string): Promise<str
     state += `\nUNSENT DRAFT in the chat: to ${s.draft.to || "(no address yet)"}, "${s.draft.subject}". ${s.slots.gmail.status === "filled" ? "They can send it with a clear yes (send_email)." : "Gmail isn't connected, so it can't be sent until they connect."} Never say it was sent unless send_email succeeded.`;
   }
   if (s.lastSent && (!s.draft || s.draft.sent || !s.draft.to)) {
-    state += `\nLAST EMAIL SENT: to ${s.lastSent.to}, "${s.lastSent.subject}". If they mean the same person ("him", "her", "them", "again"), use that address in save_draft; don't ask for it.`;
+    state += `\nLAST EMAIL SENT: to ${s.lastSent.to}, "${s.lastSent.subject}". If they mean the same person ("him", "her", "them", "again"), use that address in save_draft; don't ask for it. A reply or follow up on it: save_draft with follow_up true (same thread). If they want to edit that one, it's already sent: say so, a new version would be a second email.`;
   }
   if (extraInstruction) state += `\n\nINSTRUCTION: ${extraInstruction}`;
   if (!extraInstruction || ctx.softInstruction) {

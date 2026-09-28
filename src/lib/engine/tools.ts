@@ -72,6 +72,7 @@ export const TOOLS: ToolDef[] = [
         to: { type: "string", description: "Recipient email address, or empty string if they haven't given one" },
         subject: { type: "string" },
         body: { type: "string", description: "The full email text, signed off with their name if you know it" },
+        follow_up: { type: "boolean", description: "true when it replies to or follows up on the last email you sent (same person, same thread)" },
       },
       required: ["to", "subject", "body"],
       additionalProperties: false,
@@ -371,11 +372,14 @@ export const scopeError = (reason: "expired" | "no_scope" | "failed", what: stri
       ? "error: their gmail connection doesn't allow drafts or sending. ask if they want the link again to allow it (one tap)"
       : `error: gmail didn't ${what}. tell them honestly; never say it worked`;
 
-export const SAME_PERSON = /\b(him|her|them|same (person|guy|address|email)|again|another (one|email))\b/i;
+export const SAME_PERSON = /\b(him|her|them|same (person|guy|address|email)|again|another (one|email)|follow(-| )?up|reply)\b/i;
+const FOLLOW_UP = /\b(follow(-| )?up|reply|respond)\b/i;
+const sameEmail = (a: { to: string; subject: string }, b: { to: string; subject: string }) =>
+  a.to.toLowerCase() === b.to.toLowerCase() && a.subject.trim().toLowerCase() === b.subject.trim().toLowerCase();
 
 export async function saveDraftTool(ctx: Ctx, input: Record<string, unknown>): Promise<string> {
   const { s } = ctx;
-  const d = { to: String(input.to ?? "").trim().slice(0, 200), subject: String(input.subject ?? "").trim().slice(0, 200), body: String(input.body ?? "").trim().slice(0, 5000) };
+  const d: { to: string; subject: string; body: string; threadId?: string } = { to: String(input.to ?? "").trim().slice(0, 200), subject: String(input.subject ?? "").trim().slice(0, 200), body: String(input.body ?? "").trim().slice(0, 5000) };
   if (!d.body) return "error: the draft is empty";
   // "[your name]" when we know their name is just a gap we can fill.
   if (s.slots.userName.value) d.body = d.body.replace(/\[(your|my|sender'?s?) (full )?name\]/gi, s.slots.userName.value);
@@ -383,6 +387,14 @@ export async function saveDraftTool(ctx: Ctx, input: Record<string, unknown>): P
   if (!d.to) d.to = lastUserText(s).match(/[^\s@<>(),;:]+@[^\s@<>(),;:]+\.[a-z]{2,}/i)?.[0] ?? "";
   // "email him again" / "same person": the one we last sent to.
   if (!d.to && s.lastSent && SAME_PERSON.test(lastUserText(s))) d.to = s.lastSent.to;
+  // A follow up on the last email: same person, "Re:" subject, same gmail thread.
+  const last = s.lastSent;
+  const followUp = !!last && (input.follow_up === true || FOLLOW_UP.test(lastUserText(s))) && (!d.to || d.to.toLowerCase() === last.to.toLowerCase());
+  if (followUp && last) {
+    d.to = last.to;
+    if (!/^re:/i.test(d.subject)) d.subject = `Re: ${last.subject}`;
+    d.threadId = last.threadId;
+  }
   if (d.to && !EMAIL_RE.test(d.to)) return `error: "${d.to}" isn't an email address. ask them for it, or save with an empty "to"`;
   // Connected or not, the draft always shows as one clean message in the chat.
   const access: GmailAccess = s.slots.gmail.status === "filled" ? await gmailAccess(s) : { error: "" };
@@ -402,6 +414,11 @@ export async function saveDraftTool(ctx: Ctx, input: Record<string, unknown>): P
   s.transcript.push(shown);
   ctx.shownDraft = shown.text;
   s.draft = { id, ...d, shownAt: s.transcript.length };
+  // Editing one that already went out makes a second email, not a fix to the first: say so.
+  if (last && !followUp && sameEmail(d, last)) {
+    s.draft.dupWarnedAt = s.transcript.length;
+    return `${where}. HEADS UP: this email already went to ${last.to}. tell them plainly it was already sent, so sending this would be a second copy (a correction), and ask if they still want it sent. never say it was sent`;
+  }
   return `${where}. don't repeat the draft. ask if they want to send it${d.to ? "" : " (and who to)"} or change anything. never say it was sent`;
 }
 
@@ -417,6 +434,11 @@ export async function sendEmailTool(ctx: Ctx): Promise<string> {
   const sayingSend = /\bsend\b/i.test(last) || (!!prevAgent && /\bsend\b/i.test(prevAgent.text));
   if (lastUserIdx < d.shownAt || !SEND_OK.test(last) || SEND_HOLD.test(last) || !sayingSend) {
     return `error: they haven't clearly said to send this version (they said "${last.slice(0, 60)}"). ask "want me to send it to ${d.to}?" and wait`;
+  }
+  // Same email already went out: warn once, and only send after a fresh yes to that warning.
+  if (s.lastSent && sameEmail(d, s.lastSent) && (d.dupWarnedAt === undefined || lastUserIdx < d.dupWarnedAt)) {
+    d.dupWarnedAt ??= s.transcript.length;
+    return `error: NOT sent. this email already went to ${d.to} ("${d.subject}"). warn them it was already sent, so this would be a second copy, and ask if they still want it sent`;
   }
   if (s.slots.gmail.status !== "filled") {
     return "error: NOT sent, gmail isn't connected yet. say plainly it hasn't been sent, and that as soon as they tap the \"connect your google account\" card you'll send it (offer the link if there's no card)";
@@ -434,9 +456,10 @@ export async function sendEmailTool(ctx: Ctx): Promise<string> {
     }
     const r = await sendDraft(access.token, d.id);
     if (!r.ok) return scopeError(r.reason, "send it");
+    d.threadId = r.value.threadId ?? d.threadId;
   }
   d.sent = true;
-  s.lastSent = { to: d.to, subject: d.subject };
+  s.lastSent = { to: d.to, subject: d.subject, threadId: d.threadId, at: s.transcript.length };
   ctx.sentEmail = true;
   return `sent to ${d.to}. tell them in a few words`;
 }

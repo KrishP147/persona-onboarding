@@ -109,7 +109,7 @@ async function fetchMessages(auth: { headers: Record<string, string> }, query: s
 }
 
 // Drafts and sending (gmail.compose). A draft is always shown to them before it can be sent.
-export type Draft = { to: string; subject: string; body: string };
+export type Draft = { to: string; subject: string; body: string; threadId?: string };
 
 function rawMessage(d: Draft) {
   const subject = /^[\x20-\x7e]*$/.test(d.subject) ? d.subject : `=?UTF-8?B?${Buffer.from(d.subject, "utf8").toString("base64")}?=`;
@@ -136,12 +136,12 @@ async function gmailPost<T>(accessToken: string, path: string, body: object, met
 
 // Creates a draft, or replaces the one we already made (so edits don't pile up in their drafts folder).
 export function saveDraft(accessToken: string, d: Draft, draftId?: string) {
-  const body = { ...(draftId ? { id: draftId } : {}), message: { raw: rawMessage(d) } };
+  const body = { ...(draftId ? { id: draftId } : {}), message: { raw: rawMessage(d), ...(d.threadId ? { threadId: d.threadId } : {}) } };
   return gmailPost<{ id: string }>(accessToken, draftId ? `drafts/${draftId}` : "drafts", body, draftId ? "PUT" : "POST");
 }
 
 export function sendDraft(accessToken: string, draftId: string) {
-  return gmailPost<{ id: string }>(accessToken, "drafts/send", { id: draftId });
+  return gmailPost<{ id: string; threadId?: string }>(accessToken, "drafts/send", { id: draftId });
 }
 
 export const DEMO_EMAIL = "demo.user@gmail.com";
