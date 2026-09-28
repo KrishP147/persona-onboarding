@@ -1088,6 +1088,8 @@ async function main() {
   const frag = await runStep("gmail-by-the-book", "Makes sense. Connecting your gmail is the main thing, so I can actually help with your email. Sound useful?");
   check("a cut that would leave a fragment keeps the reply whole", /help with your email/.test(frag.text) && frag.guards.some((g) => g.startsWith("kept whole")), `${frag.text} ${frag.guards}`);
   const earlyConn = await runStep("no-false-connected", "Good to go, I'm seeing your account now. What's your name?");
+  const condConn = await runStep("no-false-connected", "Tap the card and let me know if it worked. Once you sign in, you're good to go.");
+  check("conditional 'if it worked' / 'once you sign in' lines survive", /if it worked/.test(condConn.text) && /good to go/.test(condConn.text), condConn.text);
   check("'connected' isn't claimed before gmail is", !/good to go|seeing your account/i.test(earlyConn.text) && earlyConn.text.includes("name"), earlyConn.text);
   said1("Exactly do I need to set up?");
   const setup = await runStep("gmail-by-the-book", "Just a couple things: your name, and connecting your gmail so I can help with email. And then we figure out what you want me working on.");

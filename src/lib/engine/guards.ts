@@ -378,7 +378,8 @@ export const GUARD_PIPELINE: GuardStep[] = [
       // "tapped it" isn't a connection: until google says yes, it can't claim it's in their account.
       if (e.s.slots.gmail.status === "filled") return;
       const sentences = e.text.split(SENTENCE_BREAK);
-      const kept = sentences.filter((x) => !(CLAIMS_CONNECTED.test(x) && !x.trim().endsWith("?")));
+      // "let me know if it worked" / "once you sign in you're good to go" are conditions, not claims
+      const kept = sentences.filter((x) => !(CLAIMS_CONNECTED.test(x) && !x.trim().endsWith("?") && !/\b(if|once|when|after|as soon as)\b/i.test(x)));
       if (kept.length === sentences.length) return;
       e.fix("blocked a false 'connected' claim", kept.join(" ").trim() || "i don't see it connected yet. it can take a few seconds, or tap the card again.");
     },
