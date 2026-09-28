@@ -7,7 +7,7 @@ import { provider, quick, runToolLoop, type Part, type ToolDef, type Turn } from
 import { DEMO_INBOX, recordOutcome, triageInbox } from "./triage";
 import { connectDemo, readInbox, saveDraft, sendDraft } from "./google";
 import { getSecret } from "./store";
-import { EVENT_MOVES, chooseMove, markUsed } from "./moves";
+import { EVENT_MOVES, chooseMove, markUsed, pick, withAngle } from "./moves";
 import { GIF_MIN_GAP, GIF_MOODS, GIFS, gifUrl, type GifMood } from "./gifs";
 import { applyExtracted, extract } from "./extract";
 import { readPage, webEnabled, webSearch } from "./web";
@@ -569,7 +569,7 @@ async function generate(ctx: Ctx, extraInstruction?: string): Promise<string> {
   if (extraInstruction) state += `\n\nINSTRUCTION: ${extraInstruction}`;
   if (!extraInstruction || ctx.softInstruction) {
     // One research-backed move per turn, chosen in code, so the principles actually get applied.
-    const move = chooseMove(s, channel, { callFirst: d.callFirst, mayAsk: d.mayAsk });
+    const move = withAngle(s, chooseMove(s, channel, { callFirst: d.callFirst, mayAsk: d.mayAsk }));
     markUsed(s, move.id);
     ctx.move = { id: move.id, label: move.label, source: move.source };
     state += `\n\nMOVE THIS TURN (${move.label}): ${move.instruction}`;
@@ -1384,13 +1384,14 @@ async function handleEventInner(s: Session, e: SessionEvent): Promise<TurnResult
         const who = s.slots.agentName.value ?? "me";
         const name = s.slots.userName.value;
         // They called us: they're bringing something. Warm, open, no agenda, nothing from before.
+        // Seeded per session, so two people calling in don't hear word-for-word the same opener.
         const next = e.byUser
-          ? "really good to hear from you. what's going on?"
+          ? pick(s, "greet-inbound", ["really good to hear from you. what's going on?", "good timing. what's up?", "glad you called. what's on your mind?"])
           : s.slots.userName.status === "missing"
-            ? "what should i call you?"
+            ? pick(s, "greet-name", ["what should i call you?", "what do you like to be called?", "first things first, what's your name?"])
             : s.slots.helpNeed.status === "missing"
-              ? "what's been taking up most of your time lately?"
-              : "how's it going?";
+              ? pick(s, "greet-need", ["what's been taking up most of your time lately?", "what's been eating your week?", "what's the thing you keep putting off lately?"])
+              : pick(s, "greet", ["how's it going?", "how's your day going?", "how are things?"]);
         const line = e.byUser ? `hey${name ? ` ${name}` : ""}! ${next}` : `hey${name ? ` ${name}` : ""}, it's ${who}! ${next}`;
         // Right after hello, a quick "can you hear me?" (10s) catches a dead mic; after that, quiet is fine.
         ctx.actions.push({ type: "patience", ms: 10000 });

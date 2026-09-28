@@ -1,6 +1,7 @@
 // Keyless smoke test of the engine's safety nets (mock mode). Run: pnpm tsx scripts/smoke.ts
 import { loadSession, newSession, saveSession, withSession } from "../src/lib/store";
 import { cleanModelText, cutRepeatQuestions, fence, handleEvent, normQuestion, saysBye, softenGmailDemand, handleUserMessage, nowLine, parseTypedEmail } from "../src/lib/engine";
+import { crc32, pick } from "../src/lib/moves";
 import { readMood } from "../src/lib/mood";
 import { DEMO_INBOX, scoreItem } from "../src/lib/triage";
 import type { TurnResult } from "../src/lib/types";
@@ -192,6 +193,10 @@ async function main() {
   check("a double question keeps only the last", dbl.label === "cut a double question" && dbl.text === "love that. and what should i call you?", dbl.text);
   rq.askedQuestions = [normQuestion("what should i call you?")];
   check("a different pronoun is a different question", !cutRepeatQuestions(rq, "and what should you call me?").label);
+  // seeded variety: the same session repeats itself exactly, different sessions don't all get one opener
+  const openers = new Set(Array.from({ length: 20 }, () => pick(newSession(), "greet", ["a", "b", "c"])));
+  const one = newSession();
+  check("openers vary by session, stable within one", openers.size >= 2 && pick(one, "greet", ["a", "b", "c"]) === pick(one, "greet", ["a", "b", "c"]) && crc32("123456789") === 0xcbf43926, [...openers].join(","));
   const cancel = await handleEvent(newSession(), { type: "gmail_failed", error: "access_denied" });
   check("oauth cancel treated as a choice", /no worries/.test(said(cancel)), said(cancel));
 

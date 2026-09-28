@@ -11,6 +11,46 @@ export interface MoveDef extends Move {
   instruction: string;
 }
 
+// Seeded variety: the same session and turn always pick the same wording (reproducible), but two
+// reviewers (two sessions) don't both get the exact same opener. crc32 of session id + salt + turn.
+const CRC_TABLE = Array.from({ length: 256 }, (_, n) => {
+  let c = n;
+  for (let k = 0; k < 8; k++) c = c & 1 ? 0xedb88320 ^ (c >>> 1) : c >>> 1;
+  return c >>> 0;
+});
+export function crc32(str: string) {
+  let c = 0xffffffff;
+  for (const ch of new TextEncoder().encode(str)) c = CRC_TABLE[(c ^ ch) & 0xff] ^ (c >>> 8);
+  return (c ^ 0xffffffff) >>> 0;
+}
+export function pick<T>(s: Session, salt: string, options: readonly T[]): T {
+  const turn = s.transcript.filter((m) => m.role === "user").length;
+  return options[crc32(`${s.id}:${salt}:${turn}`) % options.length];
+}
+
+// Different ways into the same move, so the wording doesn't repeat across sessions.
+const ANGLES: Record<string, readonly string[]> = {
+  discover: [
+    "ask about the last week (what ate the most time).",
+    "ask about something they keep putting off.",
+    "ask what the most annoying part of their day was lately.",
+  ],
+  "ask-call": [
+    "lead with speed (a call is quicker than typing).",
+    "lead with ease (they can just talk, you'll handle the rest).",
+    "lead with time (about a minute, then back to their day).",
+  ],
+  offramp: [
+    "offer one concrete example that fits what they said.",
+    "make it tiny: one small thing you could take off their plate today.",
+    "a light, honest check: is now a bad time, want to pick it up later?",
+  ],
+};
+export function withAngle(s: Session, move: MoveDef): MoveDef {
+  const angles = ANGLES[move.id];
+  return angles ? { ...move, instruction: `${move.instruction} Angle this time: ${pick(s, move.id, angles)}` } : move;
+}
+
 const lastUser = (s: Session) => [...s.transcript].reverse().find((m) => m.role === "user")?.text ?? "";
 const used = (s: Session, id: string) => (s.movesUsed ?? []).includes(id);
 
