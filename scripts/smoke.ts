@@ -1,6 +1,6 @@
 // Keyless smoke test of the engine's safety nets (mock mode). Run: pnpm tsx scripts/smoke.ts
 import { loadSession, newSession, saveSession, withSession } from "../src/lib/store";
-import { cleanModelText, cutRepeatQuestions, fence, fromEmailOnly, runTool, handleEvent, normQuestion, saysBye, softenGmailDemand, handleUserMessage, nowLine, parseTypedEmail } from "../src/lib/engine";
+import { INTENTS, cleanModelText, cutRepeatQuestions, fence, fromEmailOnly, runTool, handleEvent, normQuestion, saysBye, softenGmailDemand, handleUserMessage, nowLine, parseTypedEmail } from "../src/lib/engine";
 import { crc32, pick } from "../src/lib/moves";
 import { readMood } from "../src/lib/mood";
 import { DEMO_INBOX, scoreItem } from "../src/lib/triage";
@@ -392,6 +392,13 @@ async function main() {
   check("agent name from an email is quarantined too", pe.slots.agentName.status === "missing" && qNeed.startsWith("error"), qNeed);
   pe.transcript.push({ id: "u-bob", role: "user", channel: "text", text: "lol actually my name is bob", ts: Date.now() });
   check("the same value is fine once they said it", !fromEmailOnly(pe, "Bob"));
+
+  // the intent table: every example it claims, it catches; every near miss, it doesn't
+  for (const [name, d] of Object.entries(INTENTS)) {
+    const missed = d.says.filter((x) => !d.re.test(x));
+    const wrong = d.notSays.filter((x) => d.re.test(x));
+    check(`intent ${name}: ${d.means}`, !missed.length && !wrong.length, [...missed.map((x) => `missed "${x}"`), ...wrong.map((x) => `wrongly caught "${x}"`)].join(", "));
+  }
 
   console.log(fails ? `\n${fails} failed` : "\nall passed");
   process.exit(fails ? 1 : 0);
