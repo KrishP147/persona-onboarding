@@ -1,5 +1,6 @@
 import type { Ctx } from "./engine";
 import { computeDirective } from "./policy";
+import { normQuestion } from "./engine/guards";
 
 // Keyless stand-in so the UI and harness plumbing work before API keys exist.
 // Deliberately dumb: real behavior comes from the LLM path.
@@ -34,9 +35,12 @@ export async function mockReply(ctx: Ctx, runTool: RunTool): Promise<string> {
     await runTool(ctx, "graduate", { reason: "mock: need known" });
     return `on it. (mock mode: add ANTHROPIC_API_KEY for real replies)`;
   }
-  if (d.offerCall) {
+  // Like a real model reading the thread: it doesn't re-ask anything already asked above (by it or by code).
+  const askedAbove = (q: string) => s.transcript.some((m) => m.role === "agent" && m.text.split(/(?<=[.!?])\s+/).some((x) => x.trim().endsWith("?") && normQuestion(x) === normQuestion(q)));
+  const offer = "want a quick call so i can get set up around you?";
+  if (d.offerCall && !askedAbove(offer)) {
     await runTool(ctx, "offer_call", {});
-    return "love it. want a quick call so i can get set up around you?";
+    return `love it. ${offer}`;
   }
   const q: Record<string, string> = {
     agentName: "what do you want to call me?",
@@ -44,5 +48,7 @@ export async function mockReply(ctx: Ctx, runTool: RunTool): Promise<string> {
     helpNeed: "what's one thing you'd love off your plate?",
     gmail: "want to connect gmail so i can help with email?",
   };
-  return d.nextSlot && d.mayAsk ? q[d.nextSlot] : "got it. (mock mode)";
+  // Like a sane model: a question it already asked isn't asked again word for word.
+  const ask = d.nextSlot && d.mayAsk ? q[d.nextSlot] : null;
+  return ask && !askedAbove(ask) ? ask : "got it. (mock mode)";
 }
