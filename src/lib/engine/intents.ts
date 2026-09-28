@@ -135,7 +135,7 @@ export function repliedElsewhere(s: Session, u?: Msg): Msg | undefined {
 export const replyFocus = (s: Session) => (s.turnBy === "event" ? undefined : repliedElsewhere(s, s.transcript.findLast((m) => m.role !== "event" && m.kind !== "contact_card")));
 // Commands and reactions are never names ("send" once became "Send it is").
 export const NOT_A_NAME =
-  /^(send|write|draft|call|email|connect|help|stop|cancel|done|next|go|continue|start|test|link|gmail|reply|check|find|search|wait|what\?|no|nah|nope|idk|i don'?t know|dunno|you pick|you choose|up to you|surprise me|anything|whatever|skip|why|what|whats|who|whos|hi|hey|hello|yes|yeah|yea|ye|ya|yep|yup|k|kk|ok|okay|sure|cool|nice|thanks|thank you|ty|lol|haha|lmao|hmm+|um+|uh+|idc|nothing|none|me|you|it|this|that|i|im)\b/i;
+  /^(send|write|draft|call|email|connect|help|stop|cancel|done|next|go|continue|start|test|link|gmail|reply|check|find|search|wait|what\?|no|nah|nope|idk|i don'?t know|dunno|you pick|you choose|up to you|surprise me|anything|whatever|skip|why|what|whats|who|whos|hi|hii+|hey+|hello|yo|yoo+|sup|wassup|hiya|heya|howdy|yes|yeah|yea|ye|ya|yep|yup|k|kk|ok|okay|sure|cool|nice|thanks|thank you|ty|lol|haha|lmao|hmm+|um+|uh+|idc|nothing|none|me|you|it|this|that|i|im)\b/i;
 // Answering "what do you want to call me?" with their own name is common: that's THEIR name.
 export const OWN_NAME = /^(?:(?:hi|hey|hello)[,! ]+)?(?:i'?m|i am|my name(?:'s| is)|it'?s|this is|call me)\s+([\p{L}][\p{L}'-]{0,19})[.!]?\s*(?:btw|lol)?[.!]?$/iu;
 

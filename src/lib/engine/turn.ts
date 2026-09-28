@@ -326,7 +326,9 @@ export async function nameAmbiguity(s: Session, channel: Channel, text: string, 
     const unnamed = s.slots.agentName.status === "missing" || (s.agentNameDefaulted && s.slots.agentName.value === "Persona");
     // only while the name question is fresh: once it has a name (even the default), a stray word later
     // ("ye" to "send it?") is never a rename. Renaming then takes a Reply to the name question or "call you x".
-    if (unnamed && recent(agentAsk) && !/\s/.test(bare) && !nameAskIsNewest(s, userMsg)) {
+    // "persona" when it already goes by persona: nothing to check ("go by persona instead of persona?")
+    const same = bare.toLowerCase() === (s.slots.agentName.value ?? "").toLowerCase();
+    if (unnamed && !same && recent(agentAsk) && !/\s/.test(bare) && !nameAskIsNewest(s, userMsg)) {
       const v = titled(bare);
       s.nameCheck = { value: v, as: "confirm" };
       emitAgentText(ctx, s.agentNameDefaulted ? `want me to go by ${v.toLowerCase()} instead of persona?` : `wait, is ${v.toLowerCase()} what you want to call me?`);
@@ -702,15 +704,18 @@ export async function handleUserMessageInner(
   if (skippedName && !r.actions.some((a) => a.type === "start_call")) {
     // Before the reply, so its call offer (unlocked by the name) reads as the next step, not an aside.
     const ctx: Ctx = { s, channel: "text", actions: [], newMessages: [], move: EVENT_MOVES.defaultName };
-    emitAgentText(ctx, SKIPPED_NAME_REPLY);
+    // "persona" is a name like any other: its contact card goes out with it (a rename updates that same card)
+    const hasCard = s.transcript.some((x) => x.kind === "contact_card");
+    emitAgentText(ctx, hasCard ? SKIPPED_NAME_REPLY : `${SKIPPED_NAME_REPLY}. save my contact card so you know it's me`);
     const [m] = ctx.newMessages;
+    const card = hasCard ? [] : [msg("agent", "text", s.slots.agentName.value ?? "Persona", { kind: "contact_card" })];
     // the reply comes after that line: it can't acknowledge it ("got it, going by persona")
     for (const x of r.newMessages) if (x.role === "agent" && (!x.kind || x.kind === "text")) x.text = dropSelfAck(x.text);
     const at = s.transcript.findIndex((x) => r.newMessages.includes(x) && x.role === "agent");
     s.transcript.splice(s.transcript.indexOf(m), 1);
-    s.transcript.splice(at >= 0 ? at : s.transcript.length, 0, m);
+    s.transcript.splice(at >= 0 ? at : s.transcript.length, 0, m, ...card);
     const first = r.newMessages.findIndex((x) => x.role === "agent");
-    r.newMessages.splice(first >= 0 ? first : r.newMessages.length, 0, m);
+    r.newMessages.splice(first >= 0 ? first : r.newMessages.length, 0, m, ...card);
   }
   if (channel === "voice" && s.call.holding && s.call.active) r.actions.push({ type: "patience", ms: HOLD_MS });
   // Image bytes were for this one reply; storing them would bloat every later read and write.

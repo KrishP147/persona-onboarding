@@ -449,6 +449,18 @@ async function main() {
   cx.transcript.push({ id: "u-cx3", role: "user", channel: "text", text: "yes send it", ts: Date.now() });
   const cxSent = await runTool(cxCtx, "send_email", {});
   check("demo send plays it straight: 'sent'", /^sent to jordan@persona\.com/.test(cxSent) && !!cx.draft?.sent, cxSent);
+  // going by persona is a name like any other: its card goes out with it; "persona" then isn't a rename; "yo" is a greeting
+  const pc = newSession();
+  await handleEvent(pc, { type: "open" });
+  const pcR = await handleUserMessage(pc, "text", "skip for now");
+  const pcAll = pcR.newMessages.filter((m) => m.role === "agent").map((m) => (m.kind === "contact_card" ? `[card:${m.text}]` : m.text));
+  check("default name sends the persona contact card, right after its line", pcAll.includes("[card:Persona]") && /save my contact card/.test(pcAll[pcAll.indexOf("[card:Persona]") - 1] ?? ""), pcAll.join(" | "));
+  const pcSame = await handleUserMessage(pc, "text", "persona");
+  check("'persona' when it's already persona: no 'instead of persona?' check", !/instead of persona/.test(said(pcSame)) && !pc.nameCheck, said(pcSame));
+  const yo = newSession();
+  await handleEvent(yo, { type: "open" });
+  await handleUserMessage(yo, "text", "yo");
+  check("'yo' to the name question is a greeting, not a name", yo.slots.agentName.status === "missing" && !yo.transcript.some((m) => m.kind === "contact_card"), String(yo.slots.agentName.value));
   // name set (the default counts): a stray "ye" much later is a yes, never "want me to go by ye?"
   const yeS = newSession();
   await handleEvent(yeS, { type: "open" });
