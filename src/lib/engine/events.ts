@@ -230,6 +230,8 @@ export const EVENT_HANDLERS: { [K in SessionEvent["type"]]: EventHandler<K> } = 
       recordAsk(s, q ? "helpNeed" : null, !!q);
       return { session: s, newMessages: ctx.newMessages, chips: computeDirective(s, "text").chips, actions: [] };
     }
+    // Nothing asked, nothing pending: they're not keeping us waiting, so there's nothing to say.
+    if (!/\?\s*$/.test(lastAgent.text.trim())) return idle();
     // Written by code, never the model: a model asked for "a nudge" once narrated instead ("i'll wait for them...").
     emitAgentText(ctx, `no rush${name ? ` ${name}` : ""}, i'm around whenever`);
     recordAsk(s, null);
