@@ -100,3 +100,10 @@ export function useMedia(query: string) {
     () => false,
   );
 }
+
+const onResize = (cb: () => void) => {
+  window.addEventListener("resize", cb);
+  return () => window.removeEventListener("resize", cb);
+};
+// the window's width (1280 on the server)
+export const useViewportWidth = () => useSyncExternalStore(onResize, () => window.innerWidth, () => 1280);

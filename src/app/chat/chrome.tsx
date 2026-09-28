@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { useEffect, useRef, type ReactNode } from "react";
 import { SKIN_IDS, type SkinId } from "./skins/types";
-import { PIPELINE } from "./why/frameworks";
+import { MapGlyph } from "./why/ReasoningMap";
 
 const LABEL: Record<SkinId, string> = { iphone: "iPhone", pixel: "Pixel", galaxy: "Galaxy" };
 
@@ -74,7 +74,7 @@ export function Pill({ children, onClick, pressed }: { children: ReactNode; onCl
   );
 }
 
-export function TopBar({ skin, setSkin, showWhy, toggleWhy, onRestart, mock }: { skin: SkinId | null; setSkin: (id: SkinId) => void; showWhy: boolean; toggleWhy: () => void; onRestart: () => void; mock: boolean }) {
+export function TopBar({ skin, setSkin, pill, onRestart, mock }: { skin: SkinId | null; setSkin: (id: SkinId) => void; pill: ReactNode; onRestart: () => void; mock: boolean }) {
   return (
     <nav aria-label="Page" className="hidden sm:grid grid-cols-[1fr_auto_1fr] items-center h-16 px-6">
       <div className="flex items-center gap-3">
@@ -83,10 +83,9 @@ export function TopBar({ skin, setSkin, showWhy, toggleWhy, onRestart, mock }: {
       </div>
       <PhonePicker value={skin} onChange={setSkin} />
       <div className="flex justify-end gap-2">
-        <span className="hidden lg:block">
-          <Pill onClick={toggleWhy} pressed={showWhy}>
-            {showWhy ? "Hide reasoning" : "Show reasoning"}
-          </Pill>
+        {/* sm..lg: no margin beside the phone, so the reasoning pill lives here */}
+        <span data-rz-pill className="lg:hidden">
+          {pill}
         </span>
         <Pill onClick={onRestart}>Restart</Pill>
       </div>
@@ -94,8 +93,8 @@ export function TopBar({ skin, setSkin, showWhy, toggleWhy, onRestart, mock }: {
   );
 }
 
-// phones: the menu is a bottom sheet with the phone picker, annotate toggle, how it works and restart
-export function MenuSheet({ skin, setSkin, annotate, setAnnotate, onRestart, onClose, mock }: { skin: SkinId | null; setSkin: (id: SkinId) => void; annotate: boolean; setAnnotate: (v: boolean) => void; onRestart: () => void; onClose: () => void; mock: boolean }) {
+// phones: the menu is a bottom sheet with the phone picker, the reasoning switch and restart
+export function MenuSheet({ skin, setSkin, reasoning, setReasoning, onRestart, onClose, mock }: { skin: SkinId | null; setSkin: (id: SkinId) => void; reasoning: boolean; setReasoning: (v: boolean) => void; onRestart: () => void; onClose: () => void; mock: boolean }) {
   const headRef = useRef<HTMLHeadingElement>(null);
   useEffect(() => {
     headRef.current?.focus();
@@ -123,32 +122,22 @@ export function MenuSheet({ skin, setSkin, annotate, setAnnotate, onRestart, onC
         </h2>
         <PhonePicker value={skin} onChange={setSkin} size="lg" />
         <label className="mt-5 flex items-center justify-between gap-4 min-h-11">
-          <span>
-            <span className="block text-[15px] font-medium">Annotate replies</span>
-            <span className="block text-[13px] text-ink-mute">show the move under each reply</span>
+          <span className="flex items-center gap-3">
+            <MapGlyph />
+            <span>
+              <span className="block text-[15px] font-medium">Examine reasoning</span>
+              <span className="block text-[13px] text-ink-mute">a map of the move behind each reply{mock ? " · mock mode" : ""}</span>
+            </span>
           </span>
           <button
             role="switch"
-            aria-checked={annotate}
-            onClick={() => setAnnotate(!annotate)}
-            className={`relative w-[51px] h-[31px] rounded-full shrink-0 transition-colors duration-200 ${annotate ? "bg-pgreen" : "bg-step-200"}`}
+            aria-checked={reasoning}
+            onClick={() => setReasoning(!reasoning)}
+            className={`relative w-[51px] h-[31px] rounded-full shrink-0 transition-colors duration-200 ${reasoning ? "bg-pgreen" : "bg-step-200"}`}
           >
-            <span className={`absolute top-[2px] left-[2px] w-[27px] h-[27px] rounded-full bg-white shadow transition-transform duration-200 ease-[var(--ease-house)] ${annotate ? "translate-x-5" : ""}`} />
+            <span className={`absolute top-[2px] left-[2px] w-[27px] h-[27px] rounded-full bg-white shadow transition-transform duration-200 ease-[var(--ease-house)] ${reasoning ? "translate-x-5" : ""}`} />
           </button>
         </label>
-        <h3 className="mt-6 text-[12.5px] font-semibold tracking-[0.09em] uppercase text-ink-mute mb-3">How it works</h3>
-        <ol className="space-y-3">
-          {PIPELINE.map(([title, detail], i) => (
-            <li key={title} className="flex gap-3">
-              <span className="shrink-0 w-6 h-6 rounded-full bg-alt text-[12px] font-semibold flex items-center justify-center">{i + 1}</span>
-              <div>
-                <div className="text-[15px] leading-5">{title}</div>
-                <div className="text-[13px] leading-[18px] text-ink-mute">{detail}</div>
-              </div>
-            </li>
-          ))}
-        </ol>
-        <p className="mt-4 text-[13px] leading-[18px] text-ink-mute">tap &ldquo;why&rdquo; under any reply to see the move behind it.{mock ? " running in mock mode." : ""}</p>
         <button onClick={onRestart} className="mt-6 w-full h-12 rounded-full bg-ink text-white text-[16px] font-medium active:scale-[.99]">
           Restart conversation
         </button>

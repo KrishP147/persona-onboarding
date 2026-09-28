@@ -98,3 +98,15 @@ body {
   .sk-pulse, .sk-bounce, .sk-wave, .sk-spin, .sk-pop { animation: none; }
   .sk-sheet-ios, .sk-sheet-m3 { animation: sk-fade 80ms linear; }
 }
+
+/* reasoning pill: a soft glow when a new turn lands; with reduced motion, a count badge instead */
+@keyframes rz-glow {
+  0% { box-shadow: 0 0 0 0 color-mix(in srgb, var(--p-blue) 45%, transparent); }
+  100% { box-shadow: 0 0 0 10px color-mix(in srgb, var(--p-blue) 0%, transparent); }
+}
+.rz-glow { animation: rz-glow 1.2s var(--ease-house) 1; }
+.rz-count { display: none; }
+@media (prefers-reduced-motion: reduce) {
+  .rz-glow { animation: none; }
+  .rz-count { display: inline-flex; }
+}
