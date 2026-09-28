@@ -153,11 +153,11 @@ function sentences(text: string) {
 // span: when the heard audio happened (wall clock ms), from deepgram's timestamps.
 type Heard = (finals: string, interim: string, speechFinal?: boolean, span?: [number, number]) => void;
 
-type Deepgram = { stop: () => void; swap: (stream: MediaStream) => Promise<void> };
+type Deepgram = { stop: () => void };
 
-// Deepgram live transcription straight from the browser. Resolves to stop + swap (a new mic
-// stream, same socket), or null if it can't start (no token, blocked socket): the caller falls
-// back to Web Speech.
+// Deepgram live transcription straight from the browser. Resolves to stop, or null if it can't
+// start (no token, blocked socket): the caller falls back to Web Speech. A new mic mid-call gets
+// a fresh session: one socket carries one recording (one container header, one clock).
 async function startDeepgram(sessionId: string, stream: MediaStream, onHeard: Heard, onDrop: () => void, onSpeechStart: () => void): Promise<Deepgram | null> {
   try {
     const r = await fetch(`/api/voice/token?s=${encodeURIComponent(sessionId)}`, { cache: "no-store" });
@@ -176,15 +176,11 @@ async function startDeepgram(sessionId: string, stream: MediaStream, onHeard: He
       return null;
     }
     const mime = ["audio/webm;codecs=opus", "audio/webm", "audio/mp4"].find((m) => MediaRecorder.isTypeSupported(m));
-    const record = (s: MediaStream) => {
-      const r = new MediaRecorder(s, mime ? { mimeType: mime } : undefined);
-      r.ondataavailable = (e) => {
-        if (e.data.size && ws.readyState === WebSocket.OPEN) ws.send(e.data);
-      };
-      r.start(250);
-      return r;
+    const rec = new MediaRecorder(stream, mime ? { mimeType: mime } : undefined);
+    rec.ondataavailable = (e) => {
+      if (e.data.size && ws.readyState === WebSocket.OPEN) ws.send(e.data);
     };
-    let rec = record(stream);
+    rec.start(250);
     const streamStart = Date.now(); // deepgram's timestamps count from here
     const keepAlive = setInterval(() => ws.readyState === WebSocket.OPEN && ws.send(JSON.stringify({ type: "KeepAlive" })), 8000);
     let stopped = false;
@@ -220,24 +216,7 @@ async function startDeepgram(sessionId: string, stream: MediaStream, onHeard: He
         ws.close();
       } catch {}
     };
-    // New mic, same socket: let the old recorder flush its last chunk, then record the new stream.
-    const swap = async (next: MediaStream) => {
-      if (stopped) return;
-      const old = rec;
-      await new Promise<void>((resolve) => {
-        if (old.state === "inactive") return resolve();
-        old.onstop = () => resolve();
-        setTimeout(resolve, 500);
-        try {
-          old.stop();
-        } catch {
-          resolve();
-        }
-      });
-      if (stopped || ws.readyState !== WebSocket.OPEN) return;
-      rec = record(next);
-    };
-    return { stop, swap };
+    return { stop };
   } catch {
     return null;
   }
@@ -284,7 +263,8 @@ export function useVoiceCall(opts: {
   const patienceRef = useRef<number | null>(null); // one-shot longer silence window
   const streamRef = useRef<MediaStream | null>(null);
   const stopDeepgramRef = useRef<(() => void) | null>(null);
-  const swapDeepgramRef = useRef<((s: MediaStream) => Promise<void>) | null>(null);
+  const openDeepgramRef = useRef<((s: MediaStream) => Promise<(Deepgram & { dropped: boolean }) | null>) | null>(null); // a fresh session on a new mic
+  const webSpeechRef = useRef<(() => boolean) | null>(null); // fallback when that fails
   const styleRef = useRef<VoiceStyle>("neutral"); // locked when the call connects
   const cloudTtsRef = useRef(true); // flips off for the rest of the call after a failure
   const genRef = useRef(0); // bumps on barge-in/hangup so queued audio is dropped
@@ -469,7 +449,20 @@ export function useVoiceCall(opts: {
       const old = streamRef.current;
       streamRef.current = next;
       wireStream(next);
-      await swapDeepgramRef.current?.(next);
+      // Deepgram: open a fresh session on the new stream, then retire the old one.
+      const open = openDeepgramRef.current;
+      if (open && stopDeepgramRef.current) {
+        const dg = await open(next);
+        const oldStop = stopDeepgramRef.current;
+        // Stale (a newer mic took over, or hung up) or the live socket dropped to Web Speech meanwhile.
+        if (!activeRef.current || streamRef.current !== next || !oldStop) dg?.stop();
+        else {
+          oldStop(); // stopped on purpose: no drop fallback
+          const live = dg && !dg.dropped ? dg : null;
+          stopDeepgramRef.current = live?.stop ?? null;
+          if (!live) webSpeechRef.current?.();
+        }
+      }
       if (old !== next) old?.getTracks().forEach((t) => t.stop());
       if (seq !== swapSeqRef.current) return;
       if (toastTimer.current) clearTimeout(toastTimer.current);
@@ -571,7 +564,8 @@ export function useVoiceCall(opts: {
     recRef.current = null;
     stopDeepgramRef.current?.();
     stopDeepgramRef.current = null;
-    swapDeepgramRef.current = null;
+    openDeepgramRef.current = null;
+    webSpeechRef.current = null;
     stopMicWatch();
     streamRef.current?.getTracks().forEach((t) => t.stop());
     streamRef.current = null;
@@ -849,7 +843,22 @@ export function useVoiceCall(opts: {
         if (audioRef.current?.el === a.el) a.el.volume = 1; // just a noise: back to normal
       }, 1500);
     };
-    const dg = stream && sid ? await startDeepgram(sid, stream, onHeard, () => void (activeRef.current && startWebSpeech()), onSpeechStart) : null;
+    // One Deepgram session per mic stream. Only the live one's drop falls back to Web Speech;
+    // a session that drops before it goes live is marked so the caller skips it.
+    const openDeepgram = async (s: MediaStream) => {
+      if (!sid) return null;
+      const box = { stop: () => {}, dropped: false };
+      const dg = await startDeepgram(sid, s, onHeard, () => {
+        box.dropped = true;
+        if (stopDeepgramRef.current !== box.stop) return;
+        stopDeepgramRef.current = null; // socket gone; a later mic swap leaves Web Speech on its own mic
+        if (activeRef.current) startWebSpeech();
+      }, onSpeechStart);
+      if (!dg) return null;
+      box.stop = dg.stop;
+      return box.dropped ? null : box;
+    };
+    const dg = stream ? await openDeepgram(stream) : null;
     if (cancelled()) {
       // Hung up while we were connecting: close everything we opened.
       dg?.stop();
@@ -860,7 +869,8 @@ export function useVoiceCall(opts: {
     usingDeepgramRef.current = !!dg;
     if (dg) {
       stopDeepgramRef.current = dg.stop;
-      swapDeepgramRef.current = dg.swap;
+      openDeepgramRef.current = openDeepgram;
+      webSpeechRef.current = startWebSpeech;
     }
     else if (!startWebSpeech()) {
       teardown();
