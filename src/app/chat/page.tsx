@@ -5,6 +5,7 @@ import { MenuSheet, TopBar } from "./chrome";
 import { Intro } from "./Intro";
 import { CallPhone, DeviceFrame, FRAMES, PhoneScreen, useFrameZoom } from "./Phone";
 import { SKINS, useSkin } from "./skins";
+import { Stage, StageItem, useMedia } from "./Stage";
 import type { WhyHooks } from "./Thread";
 import { useChat } from "./useChat";
 import { usePref } from "./usePref";
@@ -20,6 +21,7 @@ export default function Home() {
   const [picked, setSkin] = useSkin();
   const skin = picked ?? SKINS.pixel;
   const zoom = useFrameZoom(skin.id);
+  const lg = useMedia("(min-width: 1024px)");
   // desktop reasoning lane: collapsed until asked for, remembered
   const [showWhy, setShowWhy] = usePref("persona-show-reasoning", false);
   const [menuOpen, setMenuOpen] = useState(false); // phone: picker, annotate, how it works, restart
@@ -80,24 +82,37 @@ export default function Home() {
   const metrics = metricsLine(chat.session);
   const restart = chat.restart;
   const frame = FRAMES[skin.id];
+  const call = chat.call.status !== "idle";
 
   return (
     <main className="min-h-dvh bg-canvas text-ink flex flex-col overflow-x-clip">
       <TopBar skin={picked?.id ?? null} setSkin={setSkin} showWhy={showWhy} toggleWhy={() => setShowWhy(!showWhy)} onRestart={restart} mock={chat.mock} />
-      <div className={`flex-1 flex flex-wrap justify-center items-start gap-x-10 gap-y-6 sm:px-6 sm:pb-6 transition-opacity duration-300 ${picked ? "opacity-100" : "opacity-0"}`}>
-        <DeviceFrame skin={skin} bp="sm" zoom={zoom}>
-          <PhoneScreen
-            skin={skin}
-            chat={chat}
-            why={why}
-            scrollRef={scrollRef}
-            onMenu={() => setMenuOpen(true)}
-            overlay={sheetId && <WhySheet key={skin.id} skin={skin} turns={turns} id={sheetId} onNav={openSheet} onClose={closeSheet} metrics={metrics} />}
-          />
-        </DeviceFrame>
-        {chat.call.status !== "idle" && <CallPhone skin={skin} chat={chat} zoom={zoom} />}
-        {showWhy && (
-          <div className="hidden lg:block">
+      {/* phones sit centered; a call adds a second phone and both glide to share the middle (lg+ only) */}
+      <Stage
+        sig={[call ? "call" : "", showWhy && lg ? "why" : ""].join("|")}
+        animate={lg}
+        className={`flex-1 flex flex-wrap justify-center items-start gap-x-10 gap-y-6 sm:px-6 sm:pb-6 transition-opacity duration-300 ${picked ? "opacity-100" : "opacity-0"}`}
+      >
+        <StageItem id="chat" className="w-full sm:w-auto">
+          <DeviceFrame skin={skin} bp="sm" zoom={zoom}>
+            <PhoneScreen
+              skin={skin}
+              chat={chat}
+              why={why}
+              scrollRef={scrollRef}
+              onMenu={() => setMenuOpen(true)}
+              overlay={sheetId && <WhySheet key={skin.id} skin={skin} turns={turns} id={sheetId} onNav={openSheet} onClose={closeSheet} metrics={metrics} />}
+            />
+          </DeviceFrame>
+        </StageItem>
+        {call && (
+          // below lg the call is full screen (fixed), so its wrapper takes no room in the row
+          <StageItem id="call" className="max-lg:contents">
+            <CallPhone skin={skin} chat={chat} zoom={zoom} />
+          </StageItem>
+        )}
+        {showWhy && lg && (
+          <StageItem id="why">
             <WhySidebar
               turns={turns}
               scrollRef={scrollRef}
@@ -110,9 +125,9 @@ export default function Home() {
               height={Math.round(frame.h * zoom)}
               metrics={metrics}
             />
-          </div>
+          </StageItem>
         )}
-      </div>
+      </Stage>
       {menuOpen && (
         <MenuSheet
           skin={picked?.id ?? null}
