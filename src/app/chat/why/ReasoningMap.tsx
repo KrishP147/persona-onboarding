@@ -103,6 +103,7 @@ export function ReasoningMap({
   const [cursor, setCursor] = useState<string | null>(null);
   const [how, setHow] = useState(false);
   const [popH, setPopH] = useState(0);
+  const [scrolled, setScrolled] = useState(false);
   const [w, setW] = useState(width ?? 340);
   const boxRef = useRef<HTMLDivElement>(null);
   const graphRef = useRef<HTMLDivElement>(null);
@@ -140,7 +141,14 @@ export function ReasoningMap({
     const reduced = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
     const behavior = reduced ? "auto" : "smooth";
     if (top < box.scrollTop) box.scrollTo({ top, behavior });
-    else if (bottom > box.scrollTop + box.clientHeight) box.scrollTo({ top: Math.min(top, bottom - box.clientHeight), behavior });
+    else if (bottom > box.scrollTop + box.clientHeight) {
+      // land on a step's top edge, so the first row in view is whole, not sliced under the track
+      const need = bottom - box.clientHeight;
+      const edge = steps.map((x) => g.offsetTop + x.y - 12).find((y) => y >= need && y - need < NODE_H);
+      // no room below to snap (the end of the graph): stop at need; the top fade softens the cut
+      const room = box.scrollHeight - box.clientHeight;
+      box.scrollTo({ top: Math.min(top, edge !== undefined && edge <= room ? edge : need), behavior });
+    }
   };
 
   useEffect(() => {
@@ -244,7 +252,11 @@ export function ReasoningMap({
         </button>
       </header>
       <MilestoneTrack miles={miles} />
-      <div ref={boxRef} className="min-h-0 overflow-y-auto overscroll-contain px-5 pb-5 pt-1">
+      <div
+        ref={boxRef}
+        onScroll={(e) => setScrolled(e.currentTarget.scrollTop > 2)}
+        className={`min-h-0 overflow-y-auto overscroll-contain px-5 pb-5 pt-1 border-t transition-[border-color] duration-150 ${scrolled ? "border-step-200 [mask-image:linear-gradient(to_bottom,transparent,#000_28px)]" : "border-transparent"}`}
+      >
         <div
           ref={graphRef}
           data-rz-graph
@@ -389,12 +401,12 @@ const Shield = () => (
 // the milestones as a compact track: filled once reached (with the turn), dashed if declined, hollow ahead
 function MilestoneTrack({ miles }: { miles: Milestone[] }) {
   return (
-    <ol className="grid grid-cols-6 px-3 pt-3 pb-3" aria-label="Onboarding progress">
+    <ol className="grid grid-cols-6 gap-x-1 px-3 pt-3 pb-3" aria-label="Onboarding progress">
       {miles.map((m, i) => {
         const label = `${m.label}: ${m.state === "done" ? `reached${m.at ? ` at turn ${m.at}` : ""}` : m.state === "declined" ? "declined" : "not yet"}`;
         return (
           <li key={m.id} className="relative flex flex-col items-center text-center" aria-label={label}>
-            {i > 0 && <span className={`absolute top-[7px] right-1/2 w-full h-[1.5px] ${m.state === "done" ? "bg-ink-faint" : "bg-step-300"}`} aria-hidden />}
+            {i > 0 && <span className={`absolute top-[7px] right-1/2 w-[calc(100%+4px)] h-[1.5px] ${m.state === "done" ? "bg-ink-faint" : "bg-step-300"}`} aria-hidden />}
             <span
               className={`relative z-[1] w-[16px] h-[16px] rounded-full flex items-center justify-center ${m.state === "done" ? "bg-ink text-canvas" : m.state === "declined" ? "bg-alt border-[1.5px] border-dashed border-ink-faint" : "bg-alt border-[1.5px] border-step-300"}`}
               aria-hidden
@@ -405,7 +417,8 @@ function MilestoneTrack({ miles }: { miles: Milestone[] }) {
                 </svg>
               )}
             </span>
-            <span className={`mt-1 text-[10.5px] leading-[13px] ${m.state === "open" ? "text-ink-faint" : "text-ink"}`} aria-hidden>
+            {/* two short lines at most, so neighbours never touch */}
+            <span className={`mt-1 max-w-[52px] text-[10.5px] leading-[13px] text-balance ${m.state === "open" ? "text-ink-faint" : "text-ink"}`} aria-hidden>
               {m.label}
             </span>
             <span className="text-[10px] leading-3 font-mono text-ink-faint" aria-hidden>
