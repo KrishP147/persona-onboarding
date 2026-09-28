@@ -6,10 +6,10 @@ open https://persona-onboarding-omega.vercel.app in chrome on a wide screen (the
 
 say: "onboarding is the first conversation with your assistant, so i spent most of my time on the moments where people don't play along. let me try to break it."
 
-- skip the name question and just say what you need ("i'm drowning in recruiter emails"). it answers you, then: "ha, you skipped my name. i'll go by persona for now, rename me anytime."
+- skip the name question and just say what you need ("i'm drowning in recruiter emails"). it says "i'll go by persona for now, rename me anytime" and answers you. no "you skipped my name".
 - say "lol ok" to the call offer. it rings (a laugh isn't a no).
 - on the call: talk over it mid-sentence. it stops right away, and never says "as i said" about the part you cut off.
-- go quiet. one check-in, then "i'm going to hang up now, i'll text you", then it does.
+- go quiet. it waits. after 25s it picks up where you were ("still thinking about the recruiter emails? no rush."), checks in once more, and only warns before hanging up at about two minutes.
 - call again and hang up on it mid-sentence. the recap text still lands. (if it missed something you said on the call, the recap adds "caught after you hung up: ...". it only shows when something was missed, so don't promise it on camera.)
 - say: "persona's own flow sent nothing after i hung up. this one can't skip it: the recap lives in code, not in a prompt."
 

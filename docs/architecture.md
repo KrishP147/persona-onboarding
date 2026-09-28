@@ -45,13 +45,14 @@ flowchart TD
 
 ## the guards
 
-the guards run as one ordered pipeline (`src/lib/engine/guards.ts`). every guard that changes a reply tags it, and the "why it said that" panel shows the tags as "checks that ran" chips. there are 24:
+the guards run as one ordered pipeline (`src/lib/engine/guards.ts`). every guard that changes a reply tags it, and the "why it said that" panel shows the tags as "checks that ran" chips. there are 31:
 
 - **honesty:** dropped unsupported claim, blocked a false 'sent' claim, dropped a false 'link sent' claim, sent the link it said it sent
-- **leaks:** leak filtered (notes about the system, the user in the third person), tool names stripped, blocked a line not allowed here
+- **leaks:** leak filtered (notes about the system), narration dropped (the user in the third person, the agent narrating its own plan), tool names stripped, blocked a line not allowed here
+- **tone:** dropped an accusing line, dropped a guess stated as fact, name held back (used it just now)
 - **not a form:** blocked repeat question, rewrote a repeat question, cut a double question, blocked a third question in a row, blocked repeat name question
 - **gmail, asked well:** gmail ask written by code, gmail pitch held for its own turn, gmail demand softened, repeat gmail ask dropped
-- **calls:** goodbye added before hangup, hung up after goodbye, said out loud that the link is in texts, long text moved to the chat
+- **calls:** goodbye added before hangup, hung up after goodbye, yielded: they said stop, said out loud that the link is in texts, long text moved to the chat, contact card before the call, contact card resent in code
 - **safety:** quarantined: came from an email, ignored: not user-said
 - **fallbacks:** model failed: scripted line, empty reply: scripted line
 
@@ -62,8 +63,8 @@ the guards run as one ordered pipeline (`src/lib/engine/guards.ts`). every guard
 | the model errors or times out | a scripted line goes out instead. a second failure on a call says so and hangs up, and the conversation carries on over text |
 | the claude budget cap is hit | same as a model failure: scripted lines, never a silent chat |
 | they hang up mid-sentence | a recap text always follows, written by code if the model's is empty. a name or need they said but we missed gets caught after the hangup |
-| silence on a call | one check-in after a real while, then "i'm going to hang up now, i'll text you", then it does |
-| left on read over text | one relaxed double text after about 45 seconds, a lighter one a few minutes later, then quiet |
+| silence on a call | quiet is fine for a long time: a check-in that picks up where you were after 25s (45s after "hold on"), a softer one 30s later, a heads-up at about two minutes, then a goodbye and a hangup 12s after that |
+| left on read over text | at most one short double text, written by code, and never a third text in a row; before your first message, one gentle line after a minute; nothing right after a call's recap |
 | a dead or muted mic | true digital silence is told apart from a quiet room, and a card offers another mic or switching to text (journal 16); no mic permission at all carries on over text |
 | speech to text fails | the browser's own speech recognition takes over |
 | text to speech fails or runs out of credits | the next provider takes over for 6 hours, so the voice doesn't flip mid-call |
