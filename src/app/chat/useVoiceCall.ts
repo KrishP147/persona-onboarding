@@ -50,9 +50,14 @@ function turnEndDelay(text: string, speechFinal = false) {
 const VOICE_KEY = "persona-voice-";
 
 const MIC: MediaTrackConstraints = { echoCancellation: true, noiseSuppression: true, autoGainControl: true };
-// Dead mic: true digital silence (a quiet room still has a noise floor well above this) for 4s.
-const DEAD_RMS = 1e-4;
+// Dead mic: 4s with no signal at all. the call's own stream goes through noise suppression, which
+// can output exact zeros in a quiet room, so zeros there only mean "check": a short raw capture
+// (no processing) of the same mic decides. a live mic always has some noise on the raw side.
+const DIGITAL_ZERO = 1e-6; // peak below this is digital silence (one 16-bit step is ~3e-5)
 const DEAD_MS = 4000;
+const PROBE_MS = 1200; // how long the raw check listens
+const PROBE_OK_MS = 30000; // raw said live: don't check again for a while
+const RAW: MediaTrackConstraints = { echoCancellation: false, noiseSuppression: false, autoGainControl: false };
 const TOAST_MS = 2500;
 
 // Which input the OS calls default right now (chrome lists a "default" entry; others put it first).
@@ -135,6 +140,48 @@ function similar(a: string, b: string) {
   return 1 - d[a.length][b.length] / Math.max(a.length, b.length);
 }
 
+// mic watchdog state: one per call
+type Watch = {
+  ctx: AudioContext;
+  analyser: AnalyserNode;
+  source: MediaStreamAudioSourceNode | null;
+  timer: ReturnType<typeof setInterval>;
+  offDevices: () => void;
+  lastEnergy: number;
+  mutedSince: number | null; // track.muted since when
+  probe: { stream: MediaStream | null; source: MediaStreamAudioSourceNode | null; analyser: AnalyserNode; started: number; heard: boolean; gone: boolean } | null;
+  probeOkUntil: number;
+  defaultKey: string;
+};
+
+// raw check: same mic, no echo cancelling / noise suppression / gain, read by its own analyser
+function startProbe(w: Watch, deviceId?: string) {
+  const p: NonNullable<Watch["probe"]> = { stream: null, source: null, analyser: w.ctx.createAnalyser(), started: Date.now(), heard: false, gone: false };
+  p.analyser.fftSize = 2048;
+  w.probe = p;
+  navigator.mediaDevices
+    .getUserMedia({ audio: deviceId ? { ...RAW, deviceId: { exact: deviceId } } : RAW })
+    .then((s) => {
+      if (w.probe !== p) return s.getTracks().forEach((t) => t.stop());
+      p.stream = s;
+      p.source = w.ctx.createMediaStreamSource(s);
+      p.source.connect(p.analyser);
+      p.started = Date.now();
+    })
+    .catch(() => {
+      p.gone = true;
+    });
+}
+
+function endProbe(w: Watch) {
+  const p = w.probe;
+  w.probe = null;
+  if (!p) return;
+  try {
+    p.source?.disconnect();
+  } catch {}
+  p.stream?.getTracks().forEach((t) => t.stop());
+}
 
 export type CallStatus = "idle" | "ringing" | "connecting" | "active" | "ended";
 
@@ -285,18 +332,9 @@ export function useVoiceCall(opts: {
   const [micTroubleRaw, setMicTrouble] = useState(false);
   const [micToast, setMicToast] = useState<string | null>(null);
   const [inputId, setInputId] = useState<string | null>(null);
-  const watchRef = useRef<{
-    ctx: AudioContext;
-    analyser: AnalyserNode;
-    source: MediaStreamAudioSourceNode | null;
-    timer: ReturnType<typeof setInterval>;
-    offTrack: () => void;
-    offDevices: () => void;
-    lastEnergy: number;
-    defaultKey: string;
-  } | null>(null);
-  const silentRef = useRef(false); // no energy for DEAD_MS
-  const trackTroubleRef = useRef(false); // the track itself says muted/ended
+  const watchRef = useRef<Watch | null>(null);
+  const silentRef = useRef(false); // no signal for DEAD_MS, raw check agreed
+  const trackTroubleRef = useRef(false); // the track ended, or stayed muted for DEAD_MS
   const pickedRef = useRef<string | undefined>(undefined); // an input they chose; undefined follows the OS default
   const swapSeqRef = useRef(0);
   const toastTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -367,6 +405,7 @@ export function useVoiceCall(opts: {
 
   const syncTrouble = () => setMicTrouble(silentRef.current || trackTroubleRef.current);
 
+
   const stopMicWatch = useCallback(() => {
     swapSeqRef.current += 1; // a swap still in flight gives up
     const w = watchRef.current;
@@ -381,8 +420,8 @@ export function useVoiceCall(opts: {
     setInputId(null);
     if (!w) return;
     clearInterval(w.timer);
-    w.offTrack();
     w.offDevices();
+    endProbe(w);
     try {
       w.source?.disconnect();
       w.analyser.disconnect();
@@ -390,13 +429,14 @@ export function useVoiceCall(opts: {
     void w.ctx.close().catch(() => {});
   }, []);
 
-  // Point the analyser and the track listeners at this stream, and start the silence window over.
+  // Point the analyser at this stream, and start the silence window over.
   const wireStream = useCallback((stream: MediaStream) => {
     const w = watchRef.current;
     if (!w) return;
     const track = stream.getAudioTracks()[0];
-    w.offTrack();
-    w.offTrack = () => {};
+    endProbe(w);
+    w.probeOkUntil = 0;
+    w.mutedSince = null;
     try {
       w.source?.disconnect();
     } catch {}
@@ -407,26 +447,7 @@ export function useVoiceCall(opts: {
     } catch {}
     w.lastEnergy = Date.now();
     silentRef.current = false;
-    trackTroubleRef.current = !!track && (track.muted || track.readyState === "ended");
-    if (track) {
-      const bad = () => {
-        trackTroubleRef.current = true;
-        syncTrouble();
-      };
-      const ok = () => {
-        trackTroubleRef.current = track.readyState === "ended";
-        if (watchRef.current) watchRef.current.lastEnergy = Date.now();
-        syncTrouble();
-      };
-      track.addEventListener("mute", bad);
-      track.addEventListener("ended", bad);
-      track.addEventListener("unmute", ok);
-      w.offTrack = () => {
-        track.removeEventListener("mute", bad);
-        track.removeEventListener("ended", bad);
-        track.removeEventListener("unmute", ok);
-      };
-    }
+    trackTroubleRef.current = !!track && track.readyState === "ended";
     setInputId(track?.getSettings().deviceId ?? null);
     syncTrouble();
   }, []);
@@ -489,6 +510,12 @@ export function useVoiceCall(opts: {
       const analyser = ctx.createAnalyser();
       analyser.fftSize = 2048;
       const buf = new Float32Array(analyser.fftSize);
+      const peak = (a: AnalyserNode) => {
+        a.getFloatTimeDomainData(buf);
+        let m = 0;
+        for (let i = 0; i < buf.length; i++) m = Math.max(m, Math.abs(buf[i]));
+        return m;
+      };
       const timer = setInterval(() => {
         const w = watchRef.current;
         if (!w) return;
@@ -497,18 +524,51 @@ export function useVoiceCall(opts: {
         if (w.ctx.state !== "running" || mutedRef.current || !w.source) {
           if (w.ctx.state === "suspended") void w.ctx.resume().catch(() => {});
           w.lastEnergy = now;
+          w.mutedSince = null;
+          endProbe(w);
           return;
         }
-        w.analyser.getFloatTimeDomainData(buf);
-        let sum = 0;
-        for (let i = 0; i < buf.length; i++) sum += buf[i] * buf[i];
-        if (Math.sqrt(sum / buf.length) >= DEAD_RMS) {
+        // the track: ended counts at once, muted only if it stays muted
+        const track = streamRef.current?.getAudioTracks()[0];
+        if (track?.muted) w.mutedSince ??= now;
+        else w.mutedSince = null;
+        const trackBad = !!track && (track.readyState === "ended" || (w.mutedSince !== null && now - w.mutedSince >= DEAD_MS));
+        if (trackBad !== trackTroubleRef.current) {
+          trackTroubleRef.current = trackBad;
+          syncTrouble();
+        }
+        // the signal: any sample off zero is a live mic, however quiet
+        if (peak(w.analyser) >= DIGITAL_ZERO) {
           w.lastEnergy = now;
+          endProbe(w);
           if (silentRef.current) {
             silentRef.current = false;
             syncTrouble();
           }
-        } else if (now - w.lastEnergy >= DEAD_MS && !silentRef.current) {
+          return;
+        }
+        if (silentRef.current || now - w.lastEnergy < DEAD_MS) return;
+        if (now < w.probeOkUntil) {
+          w.lastEnergy = now; // raw said live recently: zeros here are just noise suppression
+          return;
+        }
+        // zeros for 4s: ask the raw mic before blaming it
+        if (!w.probe) return startProbe(w, track?.getSettings().deviceId);
+        const p = w.probe;
+        if (p.gone) {
+          endProbe(w);
+          w.probeOkUntil = now + PROBE_OK_MS; // couldn't check: don't nag
+          w.lastEnergy = now;
+          return;
+        }
+        if (!p.source) return; // still opening
+        if (peak(p.analyser) >= DIGITAL_ZERO) p.heard = true;
+        if (now - p.started < PROBE_MS && !p.heard) return;
+        endProbe(w);
+        if (p.heard) {
+          w.probeOkUntil = now + PROBE_OK_MS;
+          w.lastEnergy = now;
+        } else {
           silentRef.current = true;
           syncTrouble();
         }
@@ -539,9 +599,11 @@ export function useVoiceCall(opts: {
         analyser,
         source: null,
         timer,
-        offTrack: () => {},
         offDevices: () => md.removeEventListener("devicechange", onDevices),
         lastEnergy: Date.now(),
+        mutedSince: null,
+        probe: null,
+        probeOkUntil: 0,
         defaultKey: "",
       };
       void audioInputs()
