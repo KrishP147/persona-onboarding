@@ -610,7 +610,7 @@ export function cleanModelText(t: string, userName?: string | null) {
   const cleaned = t.replace(/\*\*([^*\n]+)\*\*/g, "$1").replace(/^#{1,4}\s+/gm, "").replace(TOOL_NAMES, " ").replace(STAGE_BRACKETS, keepFillIns).replace(/^\s*\[|\]\s*$/gm, "").replace(/[ \t]{2,}/g, " ").trim();
   return cleaned
     .split(/\n\s*\n/)
-    .map((b) => b.split(/(?<=[.!?])\s+/).filter((x) => !META.test(x) && !LEAK.test(x) && !/\bSTATE\b/.test(x) && !EMPTY_PROMISE.test(x) && !narratesAbout(x, userName)).join(" "))
+    .map((b) => b.split(SENTENCE_BREAK).filter((x) => !META.test(x) && !LEAK.test(x) && !/\bSTATE\b/.test(x) && !EMPTY_PROMISE.test(x) && !narratesAbout(x, userName)).join(" "))
     .filter((b) => b.trim())
     .join("\n\n")
     .trim();
@@ -651,9 +651,14 @@ export function stopAtRepeat(text: string) {
   return out.trim();
 }
 
+// A sentence ends at . ! or ?, but not after "dr." or "mr." ("got it, dr. patel" was once cut to "got it, dr.").
+const SENTENCE_BREAK = /(?<!\b(?:dr|mr|mrs|ms|st|jr|sr|prof|mt|vs|ave|approx)\.)(?<=[.!?])\s+/i;
+// For cutting length only, a closing quote or paren after the stop still ends the sentence.
+const SENTENCE_END = /(?<!\b(?:dr|mr|mrs|ms|st|jr|sr|prof|mt|vs|ave|approx)\.["')]*)(?<=[.!?]["')]*)\s+/i;
+
 function capSentences(text: string, max: number) {
-  const parts = text.match(/[^.!?]+[.!?]+["')]*\s*|[^.!?]+$/g) ?? [text];
-  return parts.length <= max ? text : parts.slice(0, max).join("").trim();
+  const parts = text.split(SENTENCE_END);
+  return parts.length <= max ? text : parts.slice(0, max).join(" ").trim();
 }
 
 function emitAgentText(ctx: Ctx, raw: string) {
@@ -731,7 +736,7 @@ async function turn(
   // Gmail, by the book: the gmail turn ends with the code-written question; other turns don't pitch it.
   if ((!extraInstruction || ctx.softInstruction) && s.slots.gmail.status === "missing" && !ctx.newMessages.some((m) => m.kind === "gmail_link")) {
     const raisedIt = /\b(gmail|email|inbox|link)\b/i.test(lastUserText(s));
-    const help = text.split(/(?<=[.!?])\s+/).filter((x) => !GMAIL_PITCH.test(x) && !(ctx.move?.id === "ask-gmail" && /\b(without your (ok|okay)|won.?t send)/i.test(x))).join(" ").trim();
+    const help = text.split(SENTENCE_BREAK).filter((x) => !GMAIL_PITCH.test(x) && !(ctx.move?.id === "ask-gmail" && /\b(without your (ok|okay)|won.?t send)/i.test(x))).join(" ").trim();
     if (ctx.move?.id === "ask-gmail") {
       // On a call: one sentence of help, then the ask, so the question is never cut off.
       const lead = channel === "voice" ? capSentences(help.replace(/\?[^?]*$/, "."), 1) : help;
@@ -743,7 +748,7 @@ async function turn(
   // (the most common grader note: "repeated the gmail request after it was connected / agreed").
   const linkWaiting = linkPending(s) && !ctx.newMessages.some((m) => m.kind === "gmail_link");
   if ((s.slots.gmail.status !== "missing" || linkWaiting) && !/\b(gmail|google|link|connect)\b/i.test(lastUserText(s))) {
-    const kept = text.split(/(?<=[.!?])\s+/).filter((x) => !GMAIL_ASKISH.test(x)).join(" ").trim();
+    const kept = text.split(SENTENCE_BREAK).filter((x) => !GMAIL_ASKISH.test(x)).join(" ").trim();
     if (kept) text = kept;
   }
   // On a call, never three questions in a row: after two, it just responds and lets them talk
@@ -751,13 +756,13 @@ async function turn(
   if (channel === "voice" && text.trim().endsWith("?") && ctx.move?.id !== "ask-gmail") {
     const lastTwo = s.transcript.filter((m) => m.role === "agent" && m.channel === "voice" && m.move?.id !== "silence").slice(-2);
     if (lastTwo.length === 2 && lastTwo.every((m) => m.text.trim().endsWith("?"))) {
-      const kept = text.split(/(?<=[.!?])\s+/).filter((x) => !x.trim().endsWith("?")).join(" ").trim();
+      const kept = text.split(SENTENCE_BREAK).filter((x) => !x.trim().endsWith("?")).join(" ").trim();
       if (kept) text = kept;
     }
   }
   // Already named: never ask "what should i go by?" again (it did, on a call, right after being named).
   if (s.slots.agentName.status === "filled" && NAME_ASK.test(text)) {
-    const kept = text.split(/(?<=[.!?])\s+/).filter((x) => !NAME_ASK.test(x)).join(" ").trim();
+    const kept = text.split(SENTENCE_BREAK).filter((x) => !NAME_ASK.test(x)).join(" ").trim();
     if (kept) text = kept;
   }
   // "sent!" only if send_email actually went out this turn.

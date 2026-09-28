@@ -141,6 +141,11 @@ async function runPersona(p: Persona) {
       s = (await api<TurnResult>("/api/session", { sessionId: id, event: { type: "call_ended", reason: "agent_ended" } })).session;
     }
   }
+  // Out of turns mid-call: the user hangs up, so the judge sees the post-call text instead of a call cut at the turn limit.
+  if (s.call.active) {
+    marks.set(p.id, new Map([...(marks.get(p.id) ?? []), [s.transcript.length, "  -- (test turn limit: user hung up) --"]]));
+    s = (await api<TurnResult>("/api/session", { sessionId: id, event: { type: "call_ended", reason: "user_hangup" } })).session;
+  }
   return s;
 }
 
