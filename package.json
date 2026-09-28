@@ -10,6 +10,7 @@
     "harness": "tsx harness/run.ts",
     "typecheck": "tsc --noEmit",
     "smoke": "tsx scripts/smoke.ts",
+    "fuzz": "tsx scripts/fuzz.ts",
     "stress-matrix": "tsx scripts/stress-matrix.ts",
     "funnel": "tsx --env-file-if-exists=.env.local scripts/funnel.ts",
     "e2e": "tsx scripts/e2e.ts",

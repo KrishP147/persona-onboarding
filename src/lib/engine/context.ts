@@ -3,6 +3,10 @@ import { type Channel, type ClientAction, type Msg, type Session } from "../type
 
 import { type Move } from "../types";
 import { STAGE_BRACKETS, TOOL_NAMES, capBubbles, capSentences, keepFillIns, stopAtRepeat } from "./text";
+import { dropAskedQuestions, rememberQuestions } from "./guards";
+
+// A reply is at most two texts: a double text is fine, a triple reads like a wall.
+export const MAX_BUBBLES = 2;
 
 export function msg(role: Msg["role"], channel: Channel, text: string, extra: Partial<Msg> = {}): Msg {
   return { id: nanoid(10), role, channel, text, ts: Date.now(), ...extra };
@@ -68,7 +72,12 @@ export function recapFallback(s: Session, reason: string) {
 
 export function emitAgentText(ctx: Ctx, raw: string) {
   // House style: no em dashes, no stage directions like "(waiting for reply)".
-  const text = stopAtRepeat(raw.replace(TOOL_NAMES, " ").replace(STAGE_BRACKETS, keepFillIns)).replace(/\s*[—]\s*/g, ", ").replace(/\((?:[a-z]+ ){0,3}(?:on|in) (?:the |our )?(?:call|chat)\)\s*/gi, "").replace(/^\s*\*?\([^)]*\)\*?\s*$/gm, "").trim();
+  let text = stopAtRepeat(raw.replace(TOOL_NAMES, " ").replace(STAGE_BRACKETS, keepFillIns)).replace(/\s*[—]\s*/g, ", ").replace(/\((?:[a-z]+ ){0,3}(?:on|in) (?:the |our )?(?:call|chat)\)\s*/gi, "").replace(/^\s*\*?\([^)]*\)\*?\s*$/gm, "").trim();
+  // Never the same question twice, scripted lines too ("what's on your mind?" after every decline).
+  const deduped = dropAskedQuestions(ctx.s, text, ctx.channel);
+  if (deduped !== text) guard(ctx, "blocked repeat question");
+  text = deduped;
+  rememberQuestions(ctx.s, text);
   // On a call, three sentences is already a lot to listen to; trim anything longer.
   const spoken = ctx.channel === "voice" ? capSentences(text.replace(/\n+/g, " ").trim(), 3) : text;
   // An email typed out in the reply stays one bubble (split per paragraph it read like several texts).
@@ -78,7 +87,7 @@ export function emitAgentText(ctx: Ctx, raw: string) {
       ? [spoken]
       : isEmail
         ? [text.replace(/^\s*-{3,}\s*$/gm, "").replace(/\n{3,}/g, "\n\n").trim()]
-        : capBubbles(text.split(/\n\s*\n/).map((b) => b.trim()).filter(Boolean), 3);
+        : capBubbles(text.split(/\n\s*\n/).map((b) => b.trim()).filter(Boolean), MAX_BUBBLES);
   for (const b of bubbles.filter(Boolean)) {
     const m = msg("agent", ctx.channel, b, { ...(ctx.move ? { move: ctx.move } : {}), ...(ctx.guards?.length ? { guards: [...ctx.guards] } : {}) });
     ctx.newMessages.push(m);
@@ -91,4 +100,18 @@ export function eventMsg(s: Session, text: string): Msg {
   const m = msg("event", "text", text, { kind: "event" });
   s.transcript.push(m);
   return m;
+}
+
+// The contact card always comes before the first call (so the incoming call shows who it is), even when
+// the name is still the "Persona" default. Returns true if it sent one now.
+export function ensureCard(ctx: Ctx): boolean {
+  const { s } = ctx;
+  const name = s.slots.agentName.value;
+  if (!name || s.transcript.some((m) => m.kind === "contact_card")) return false;
+  const line = msg("agent", "text", "here's my contact card so you know it's me.");
+  const card = msg("agent", "text", name, { kind: "contact_card" });
+  s.transcript.push(line, card);
+  ctx.newMessages.push(line, card);
+  guard(ctx, "contact card before the call");
+  return true;
 }

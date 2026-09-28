@@ -1,6 +1,6 @@
 // Keyless smoke test of the engine's safety nets (mock mode). Run: pnpm tsx scripts/smoke.ts
 import { getSecret, loadSession, newSession, saveSession, setSecret, withSession } from "../src/lib/store";
-import { GUARD_PIPELINE, INTENTS, cleanModelText, cutRepeatQuestions, fence, fromEmailOnly, runTool, handleEvent, normQuestion, saysBye, softenGmailDemand, handleUserMessage, nowLine, parseTypedEmail } from "../src/lib/engine";
+import { CLAIMS_LINK, GUARD_PIPELINE, dropAskedQuestions, fixCallTypos, makeGuardEnv, INTENTS, cleanModelText, cutRepeatQuestions, fence, fromEmailOnly, runTool, handleEvent, normQuestion, saysBye, softenGmailDemand, handleUserMessage, nowLine, parseTypedEmail, MAX_BUBBLES, emitAgentText } from "../src/lib/engine";
 import { crc32, pick } from "../src/lib/moves";
 import { readMood } from "../src/lib/mood";
 import { DEMO_INBOX, scoreItem } from "../src/lib/triage";
@@ -9,7 +9,7 @@ import { POST as DemoPOST } from "../src/app/api/auth/google/demo/route";
 import { GET as StartGET } from "../src/app/api/auth/google/start/route";
 import { popupPage } from "../src/app/api/auth/google/popup";
 import { keyterms } from "../src/lib/voice";
-import { reconcileHooks } from "../src/lib/extract";
+import { applyExtracted, reconcileHooks } from "../src/lib/extract";
 import { costOf, metered, percentile, recordUsage } from "../src/lib/usage";
 import { GET as SessionGET } from "../src/app/api/session/route";
 
@@ -29,13 +29,21 @@ async function main() {
   await handleEvent(s, { type: "call_started" });
   check("call active", s.call.active && s.phase === "on_call");
 
-  // silence: one check-in (no hangup), then a spoken heads-up + end_call
+  // silence: a check-in, a softer one 30s later, a heads-up at ~2 min, then a goodbye and hangup 12s after
+  const patienceOf = (r: TurnResult) => (r.actions.find((a) => a.type === "patience") as { ms: number } | undefined)?.ms;
+  const noEnd = (r: TurnResult) => !r.actions.some((a) => a.type === "end_call");
+  s.transcript.push({ id: "v-s", role: "user", channel: "voice", text: "so the recruiter emails are the big thing", ts: Date.now() });
   const r1 = await handleEvent(s, { type: "silence" });
-  check("1st silence only checks in", !r1.actions.some((a) => a.type === "end_call") && r1.actions.some((a) => a.type === "patience"), said(r1));
+  check("1st silence only checks in", noEnd(r1) && patienceOf(r1) === 30000, said(r1));
+  check("check-in picks up where they were, never re-pitches setup", !/setup/i.test(said(r1)) && /no rush|what's on your mind|still thinking/.test(said(r1)), said(r1));
+  const r2 = await handleEvent(s, { type: "silence" });
+  check("2nd silence: a softer check-in, still no hangup", noEnd(r2) && patienceOf(r2) === 65000 && !/hang up/i.test(said(r2)), said(r2));
   const r3 = await handleEvent(s, { type: "silence" });
-  check("2nd silence warns and hangs up", r3.actions.some((a) => a.type === "end_call") && /hang up/i.test(said(r3)), said(r3));
-  const spoken = r3.actions.find((a) => a.type === "speak");
-  check("says goodbye before hanging up", !!spoken && /bye|talk soon|text you/i.test((spoken as { text: string }).text), said(r3));
+  check("at ~2 min: a heads-up, then a gap before the hangup", noEnd(r3) && /hang up in a few seconds/.test(said(r3)) && patienceOf(r3) === 12000, said(r3));
+  const r4 = await handleEvent(s, { type: "silence" });
+  check("then it says goodbye and hangs up", r4.actions.some((a) => a.type === "end_call"), said(r4));
+  const spoken = r4.actions.find((a) => a.type === "speak");
+  check("says goodbye before hanging up", !!spoken && /bye|talk soon|text you/i.test((spoken as { text: string }).text), said(r4));
 
   const end = await handleEvent(s, { type: "call_ended", reason: "agent_ended" });
   check("text follow-up after call", end.newMessages.some((m) => m.role === "agent" && m.channel === "text"), said(end));
@@ -226,32 +234,39 @@ async function main() {
   check("weak signal stays low confidence", conf("nah").confidence === "low");
   check("stretching raises intensity", conf("noooo").intensity === "high");
 
-  // left on read over text: default name + call offer, then one light no-question line, then quiet
+  // left on read over text: silence never names it; one gentle line before their first message (after 60s),
+  // one double text after that at most, and never three texts in a row
   const ago = (x: typeof s, ms: number) => x.transcript.forEach((m) => (m.ts -= ms));
   const idle = newSession();
   await handleEvent(idle, { type: "open" });
   const tooSoon = await handleEvent(idle, { type: "text_idle" });
   check("no double text seconds after its own text", tooSoon.newMessages.length === 0, said(tooSoon));
-  ago(idle, 60000);
+  ago(idle, 45000);
+  const earlyIdle = await handleEvent(idle, { type: "text_idle" });
+  check("still reading the intro: nothing before 60s", earlyIdle.newMessages.length === 0, said(earlyIdle));
+  ago(idle, 20000);
   const n1 = await handleEvent(idle, { type: "text_idle" });
-  check("skipped name: goes by persona, says so", idle.slots.agentName.value === "Persona" && /skipped my name/.test(said(n1)) && /rename/.test(said(n1)), said(n1));
-  check("skipped name double text offers the call with a reason", /call/.test(said(n1)) && /easier|faster/.test(said(n1)) && idle.callOffers === 1, said(n1));
+  check("before their first message: one gentle line, no question", n1.newMessages.length === 1 && !said(n1).includes("?") && /no rush/.test(said(n1)), said(n1));
+  check("silence never names the agent", idle.slots.agentName.status === "missing" && !/persona/i.test(said(n1)), said(n1));
   ago(idle, 200000);
   const n2 = await handleEvent(idle, { type: "text_idle" });
-  check("second nudge asks nothing", n2.newMessages.length === 1 && !said(n2).includes("?"), said(n2));
-  ago(idle, 200000);
-  const n3 = await handleEvent(idle, { type: "text_idle" });
-  check("then quiet until they're back", n3.newMessages.length === 0, said(n3));
-  const back = await handleUserMessage(idle, "text", "sure call me");
-  check("yes to the nudge's call offer rings", back.actions.some((a) => a.type === "start_call"), said(back));
+  check("then quiet until they're back", n2.newMessages.length === 0, said(n2));
 
-  // unanswered call offer: take the pressure off
+  // unanswered call offer: take the pressure off, but never a third text in a row
   const offer = newSession();
   await handleEvent(offer, { type: "open" });
   await handleUserMessage(offer, "text", "nova");
   ago(offer, 60000);
   const o1 = await handleEvent(offer, { type: "text_idle" });
-  check("unanswered call offer: no pressure, keep texting", /no pressure/.test(said(o1)) && offer.slots.agentName.value === "Nova", said(o1));
+  check("never three texts in a row without a reply", o1.newMessages.length === 0 && offer.slots.agentName.value === "Nova", said(o1));
+  const offer1 = newSession();
+  offer1.slots.agentName = { ...offer1.slots.agentName, value: "Nova", status: "filled" };
+  offer1.transcript.push(
+    { id: "u-o", role: "user", channel: "text", text: "hi", ts: Date.now() - 61000 },
+    { id: "a-o", role: "agent", channel: "text", text: "want me to give you a quick call? way faster than typing", ts: Date.now() - 60000 },
+  );
+  const o2 = await handleEvent(offer1, { type: "text_idle" });
+  check("unanswered call offer: no pressure, keep texting", /no pressure/.test(said(o2)), said(o2));
   const onCallIdle = newSession();
   onCallIdle.call.active = true;
   check("no text nudges during a call", (await handleEvent(onCallIdle, { type: "text_idle" })).newMessages.length === 0);
@@ -295,6 +310,7 @@ async function main() {
   const trouble = await handleUserMessage(gt, "text", "it says access blocked??");
   check("google's access-blocked wall: demo inbox offered", /demo inbox/.test(said(trouble)) && gt.demoOffered === true, said(trouble));
   const gi = newSession();
+  gi.transcript.push({ id: "u2", role: "user", channel: "text", text: "sure send the link", ts: Date.now() - 61000 });
   gi.transcript.push({ id: "l2", role: "agent", channel: "text", text: "Connect your Google account", ts: Date.now() - 60000, kind: "gmail_link" }, { id: "t2", role: "agent", channel: "text", text: "tap it whenever", ts: Date.now() - 60000 });
   const waitIdle = await handleEvent(gi, { type: "text_idle" });
   check("idle while the link is out mentions the demo inbox", /demo inbox/.test(said(waitIdle)), said(waitIdle));
@@ -412,9 +428,218 @@ async function main() {
   pe.transcript.push({ id: "u-bob", role: "user", channel: "text", text: "lol actually my name is bob", ts: Date.now() });
   check("the same value is fine once they said it", !fromEmailOnly(pe, "Bob"));
 
+  // graduating stamps graduatedAt once (a later graduation never moves it)
+  const ga = newSession();
+  await handleEvent(ga, { type: "open" });
+  await handleUserMessage(ga, "text", "skip all this, just find me sushi");
+  const firstAt = ga.graduatedAt;
+  ga.prePhase = "graduated";
+  ga.call.active = true;
+  await handleEvent(ga, { type: "call_ended", reason: "user_hangup" });
+  check("graduatedAt set once, as an iso time", ga.phase === "graduated" && !!firstAt && !Number.isNaN(Date.parse(firstAt)) && ga.graduatedAt === firstAt, String(firstAt));
+
+  // contact card before every first call (regression: a defaulted "persona" name swallowed the rename and the card)
+  const flow = async (idleFirst: boolean, ...lines: string[]) => {
+    const f = newSession();
+    await handleEvent(f, { type: "open" });
+    if (idleFirst) {
+      f.transcript[f.transcript.length - 1].ts -= 60000;
+      await handleEvent(f, { type: "text_idle" });
+    }
+    const all: string[] = [];
+    let last: TurnResult | undefined;
+    for (const l of lines) {
+      last = await handleUserMessage(f, "text", l);
+      all.push(...last.newMessages.filter((m) => m.role === "agent").map((m) => (m.kind === "contact_card" ? `[card:${m.text}]` : m.text)));
+    }
+    const cardAt = all.findIndex((x) => x.startsWith("[card:"));
+    const callAt = all.findIndex((x) => /calling you now/.test(x));
+    return { f, all, cardAt, callAt, rang: !!last?.actions.some((a) => a.type === "start_call") };
+  };
+  const p1 = await flow(true, "hey you can be julia. im krish. call me");
+  check("prod replay: default name, then 'you can be julia ... call me' -> ack + card, then call", p1.f.slots.agentName.value === "Julia" && p1.all.includes("[card:Julia]") && p1.cardAt < p1.callAt && p1.rang, p1.all.join(" | "));
+  const p2 = await flow(false, "luna", "i'm krish", "call me");
+  check("name, own name, 'call me': card came before the call", p2.cardAt >= 0 && p2.cardAt < p2.callAt && p2.rang, p2.all.join(" | "));
+  const p3 = await flow(false, "call you luna, i'm krish, call me");
+  check("name + call in one message: ack + card, then call", p3.all.includes("[card:Luna]") && p3.cardAt < p3.callAt && p3.rang, p3.all.join(" | "));
+  const p4 = await flow(false, "call me", "luna");
+  check("call before naming: a late name still names it, with the card", p4.f.slots.agentName.value === "Luna" && p4.all.includes("[card:Luna]"), p4.all.join(" | "));
+  const p5 = await flow(true, "call me");
+  check("default name then a call: the card still comes first", p5.all.includes("[card:Persona]") && p5.cardAt < p5.callAt && p5.rang, p5.all.join(" | "));
+  const p6 = await flow(false, "luna", "send me the contact card");
+  const cards = p6.f.transcript.filter((m) => m.kind === "contact_card");
+  check("'send me the contact card' re-posts it (no email draft talk, one card)", cards.length === 1 && p6.all.at(-1) === "[card:Luna]" && !/draft/.test(p6.all.join(" ")), p6.all.join(" | "));
+  const swap = newSession();
+  swap.slots.agentName = { ...swap.slots.agentName, value: "Julia", status: "filled" };
+  await applyExtracted(swap, { agentName: null, userName: "Julia", helpNeed: null, declined: [] }, async () => {});
+  check("'hi julia' never makes the user julia", swap.slots.userName.value !== "Julia", String(swap.slots.userName.value));
+  // language: two bubbles max, no accusations, no guesses stated as fact, the name used well
+  const step = async (name: string, ss: typeof s, text: string) => {
+    const ctx = { s: ss, channel: "text" as const, actions: [], newMessages: [] } as Parameters<typeof emitAgentText>[0];
+    const env = { ctx, s: ss, channel: "text" as const, text, failed: false, usedFallback: false, opts: {}, fix(label: string, next: string) { if (next !== env.text) { env.text = next; (ctx.guards ??= []).push(label); } }, trim(label: string, next: string) { env.fix(label, next); } };
+    await GUARD_PIPELINE.find((g) => g.name === name)!.run(env);
+    return { text: env.text, guards: ctx.guards ?? [] };
+  };
+  const bub = newSession();
+  const bctx = { s: bub, channel: "text" as const, actions: [], newMessages: [] } as Parameters<typeof emitAgentText>[0];
+  emitAgentText(bctx, "oof, 200 unread\n\nthat's a lot\n\nwant me to sort the recruiter ones?");
+  check("a reply is at most two bubbles", MAX_BUBBLES === 2 && bctx.newMessages.length === 2 && /sort the recruiter/.test(bctx.newMessages[1].text), bctx.newMessages.map((m) => m.text).join(" | "));
+  const acc = await step("no-accusing-or-assuming", bub, "ha, you skipped my name. i'll go by persona for now");
+  check("accusing line dropped, the rest kept", acc.text === "i'll go by persona for now" && acc.guards.includes("dropped an accusing line"), acc.text);
+  const why = await step("no-accusing-or-assuming", bub, "why didn't you connect gmail? want the link again?");
+  check("\"why didn't you\" dropped", why.text === "want the link again?", why.text);
+  const guess = await step("no-accusing-or-assuming", bub, "sounds like you're swamped this week.\n\nwant me to draft the replies?");
+  check("a guess stated as fact is dropped, bubbles kept", guess.text === "want me to draft the replies?" && guess.guards.includes("dropped a guess stated as fact"), guess.text);
+  const fine = await step("no-accusing-or-assuming", bub, "sounds rough. that recruiter email sounds urgent, want a draft?");
+  check("reacting to their situation is fine", fine.guards.length === 0, fine.text);
+  check("code-written default-name line never accuses", !/skipped|never|forgot/.test(said(sk)), said(sk));
+
+  // narration: the model thinking out loud never reaches them (the exact prod leak, plus variants)
+  const leaks = [
+    "The call's already ended. I'll wait for them to text back.",
+    "i'll wait for them to reply.",
+    "no response needed here.",
+    "they haven't replied yet, so i'll hold off.",
+    "waiting for the user to respond.",
+    "(waits quietly)",
+  ];
+  for (const l of leaks) {
+    const r = await step("narration", bub, l);
+    check(`narration dropped: "${l}"`, r.text === "" && r.guards.includes("narration dropped"), r.text);
+  }
+  const mixed = await step("narration", bub, "got it.\n\nthe call's over, i'll wait for them.");
+  check("narration dropped, the real line kept", mixed.text === "got it.", mixed.text);
+  for (const ok of ["the recruiter said they'll get back to you friday.", "their office called back? want me to draft a reply?", "i'll text you a recap."]) {
+    const r = await step("narration", bub, ok);
+    check(`talking to them survives: "${ok}"`, r.text === ok && r.guards.length === 0, r.text);
+  }
+  const afterCall = newSession();
+  afterCall.transcript.push(
+    { id: "u-c", role: "user", channel: "voice", text: "ok bye", ts: Date.now() - 90000 },
+    { id: "e-c", role: "event", channel: "text", text: "Call ended (40s)", ts: Date.now() - 80000, kind: "event" },
+    { id: "a-c", role: "agent", channel: "text", text: "thanks for the chat! text me anytime.", ts: Date.now() - 80000, move: { id: "recap", label: "", source: "" } },
+  );
+  const ac = await handleEvent(afterCall, { type: "text_idle" });
+  check("no left-on-read nudge right after a call's recap", ac.newMessages.length === 0, said(ac));
+  const plain = newSession();
+  plain.slots.agentName = { ...plain.slots.agentName, value: "Nova", status: "filled" };
+  plain.transcript.push({ id: "u-p", role: "user", channel: "text", text: "mostly school stuff", ts: Date.now() - 61000 }, { id: "a-p", role: "agent", channel: "text", text: "that's a lot to juggle", ts: Date.now() - 60000 });
+  const pl = await handleEvent(plain, { type: "text_idle" });
+  check("left-on-read line is code-written", said(pl) === "no rush, i'm around whenever", said(pl));
+
+  // their name: always in re-engagement lines, otherwise about once every 3 turns and never twice in a row
+  const nm = newSession();
+  nm.slots.userName = { ...nm.slots.userName, value: "Krish", status: "filled" };
+  nm.slots.agentName = { ...nm.slots.agentName, value: "Nova", status: "filled" };
+  await handleEvent(nm, { type: "call_started" });
+  nm.transcript.push({ id: "v-n", role: "user", channel: "voice", text: "hold on a sec", ts: Date.now() });
+  nm.call.holding = true;
+  const hold = await handleEvent(nm, { type: "silence" });
+  check("check-in after a pause uses their name", /still there, Krish\?/.test(said(hold)), said(hold));
+  const nobody = newSession();
+  nobody.transcript.push({ id: "u-x", role: "user", channel: "text", text: "hi", ts: Date.now() - 61000 }, { id: "a-x", role: "agent", channel: "text", text: "want me to give you a quick call? way faster than typing", ts: Date.now() - 60000 });
+  nobody.slots.agentName = { ...nobody.slots.agentName, value: "Nova", status: "filled" };
+  const noName = await handleEvent(nobody, { type: "text_idle" });
+  check("no name before they've given one", /no pressure on the call btw/.test(said(noName)), said(noName));
+  nm.transcript.push({ id: "a-k", role: "agent", channel: "text", text: "got it krish, that's a lot", ts: Date.now() });
+  const twiceName = await step("name-rate", nm, "ok krish, want me to draft it?");
+  check("name never twice in a row", twiceName.text === "ok, want me to draft it?" && twiceName.guards.includes("name held back (used it just now)"), twiceName.text);
+  const possessive = await step("name-rate", nm, "i'll keep krish's resume handy.");
+  check("name-rate leaves non-address uses alone", possessive.text === "i'll keep krish's resume handy.", possessive.text);
+  nm.transcript.push({ id: "a-1", role: "agent", channel: "text", text: "on it", ts: Date.now() }, { id: "a-2", role: "agent", channel: "text", text: "here you go", ts: Date.now() });
+  const laterName = await step("name-rate", nm, "ok krish, want me to draft it?");
+  check("name fine again after a couple of turns", laterName.text === "ok krish, want me to draft it?", laterName.text);
+
+  // gmail link on a clear yes, even when the yes isn't first; "stop talking" yields (regressions from a live call)
+  const onCall = async () => {
+    const c = newSession();
+    await handleEvent(c, { type: "open" });
+    await handleUserMessage(c, "text", "luna");
+    await handleUserMessage(c, "text", "i'm krish");
+    const rang = await handleUserMessage(c, "text", "call me");
+    await handleEvent(c, { type: "call_started" });
+    return { c, rang };
+  };
+  const askLink = (c: ReturnType<typeof newSession>) =>
+    c.transcript.push({ id: "ask", role: "agent", channel: "voice", ts: Date.now(), text: "want me to text you a link to connect your gmail? that way i can keep an eye on the emails that come with it." });
+  const e2e = await onCall();
+  askLink(e2e.c);
+  const yesLink = await handleUserMessage(e2e.c, "voice", "That'd be great. Sure.");
+  check("e2e: text naming -> card -> call -> gmail yes -> link in the transcript", e2e.c.transcript.some((m) => m.kind === "contact_card") && e2e.rang.actions.some((a) => a.type === "start_call") && yesLink.newMessages.some((m) => m.kind === "gmail_link") && e2e.c.transcript.some((m) => m.kind === "gmail_link"), said(yesLink));
+  for (const yes of ["sure", "yes please", "please do", "oh yeah, go ahead"]) {
+    const y = await onCall();
+    askLink(y.c);
+    const r = await handleUserMessage(y.c, "voice", yes);
+    check(`yes to the gmail ask sends the link: "${yes}"`, r.newMessages.some((m) => m.kind === "gmail_link"), said(r));
+  }
+  const noLink = await onCall();
+  askLink(noLink.c);
+  const nl = await handleUserMessage(noLink.c, "voice", "not right now, that's a lot");
+  check("a no to the gmail ask sends no link", !nl.newMessages.some((m) => m.kind === "gmail_link"), said(nl));
+  const hush = await onCall();
+  const st = await handleUserMessage(hush.c, "voice", "Stop talking.");
+  check("'stop talking' on a call: no words back, just waits", !st.newMessages.some((m) => m.role === "agent") && st.actions.some((a) => a.type === "patience"), said(st));
+  const claim = cleanModelText("my bad, give me just a second here. you should see it pop up in your texts in a moment.");
+  check("'you should see it pop up in your texts' counts as a link claim", /pop up in your texts/.test(claim) && CLAIMS_LINK.test(claim), claim);
+  const metaWait = cleanModelText("The call's already ended. I'll wait for them to text back.");
+  check("'i'll wait for them to text back' never goes out", !/wait for them/i.test(metaWait), metaWait);
+
+  // first message with everything in it: "julia. my name is krish. clal me" (a live retest)
+  const first = async (t: string) => {
+    const f = newSession();
+    await handleEvent(f, { type: "open" });
+    const r = await handleUserMessage(f, "text", t);
+    const lines = r.newMessages.filter((m) => m.role === "agent").map((m) => (m.kind === "contact_card" ? `[card:${m.text}]` : m.text));
+    return { f, r, lines, rang: r.actions.some((a) => a.type === "start_call") };
+  };
+  const fm = await first("julia. my name is krish. clal me");
+  const ackAt = fm.lines.findIndex((x) => /julia it is\. nice to meet you, krish/i.test(x));
+  const ringAt = fm.lines.findIndex((x) => /calling you now/.test(x));
+  check("'julia. my name is krish. clal me': both names in one beat, card, then it rings (no offer)", fm.f.slots.agentName.value === "Julia" && fm.f.slots.userName.value === "Krish" && ackAt >= 0 && fm.lines.includes("[card:Julia]") && ringAt > fm.lines.indexOf("[card:Julia]") && fm.rang && !fm.lines.some((x) => /want me to give you a (quick )?call/.test(x)), fm.lines.join(" | "));
+  for (const t of ["julia. i'm krish. cal me", "julia. my name is krish. caal me", "julia. my name is krish. call me pls", "julia. my name is krish. u can call me now"]) {
+    const v = await first(t);
+    check(`first-message call variant rings: "${t}"`, v.rang && v.f.slots.userName.value === "Krish" && v.lines.includes("[card:Julia]"), v.lines.join(" | "));
+  }
+  const nameOnly = await first("julia. you can call me krish");
+  check("'you can call me krish' is their name, not a ring", !nameOnly.rang && nameOnly.f.slots.userName.value === "Krish", nameOnly.lines.join(" | "));
+  check("typo'd call words", ["clal me", "cal me", "caal me", "cll me"].every((x) => fixCallTypos(x) === "call me") && fixCallTypos("tell me") === "tell me" && fixCallTypos("all me") === "all me", "");
+
+  // replay of a call where it "didn't listen" (session kGvKVGwpTIQc): cuts left fragments, "that's it" hung up, the recap invented a need
+  const lis = await onCall();
+  const said1 = (t: string) => lis.c.transcript.push({ id: `u${lis.c.transcript.length}`, role: "user", channel: "voice", ts: Date.now(), text: t });
+  const runStep = async (name: string, text: string) => {
+    const ctx = { s: lis.c, channel: "voice" as const, actions: [], newMessages: [] } as Parameters<typeof emitAgentText>[0];
+    const env = makeGuardEnv({ ctx, s: lis.c, channel: "voice", text, failed: false, usedFallback: false, opts: {} });
+    await GUARD_PIPELINE.find((g) => g.name === name)!.run(env);
+    return { text: env.text, guards: ctx.guards ?? [] };
+  };
+  said1("curious.");
+  const frag = await runStep("gmail-by-the-book", "Makes sense. Connecting your gmail is the main thing, so I can actually help with your email. Sound useful?");
+  check("a cut that would leave a fragment keeps the reply whole", /help with your email/.test(frag.text) && frag.guards.some((g) => g.startsWith("kept whole")), `${frag.text} ${frag.guards}`);
+  said1("Exactly do I need to set up?");
+  const setup = await runStep("gmail-by-the-book", "Just a couple things: your name, and connecting your gmail so I can help with email. And then we figure out what you want me working on.");
+  check("'what do i need to set up?': gmail is the answer, never held", /connecting your gmail/.test(setup.text) && !setup.guards.includes("gmail pitch held for its own turn"), setup.text);
+  const notBye = await handleUserMessage(lis.c, "voice", "What do mean you're bad? That's it.");
+  check("\"what do you mean...? that's it.\" is not a bye", !notBye.actions.some((a) => a.type === "end_call") && lis.c.call.active, said(notBye));
+  lis.c.slots.helpNeed = { ...lis.c.slots.helpNeed, value: null, status: "missing" };
+  const endR = await handleEvent(lis.c, { type: "call_ended", reason: "user_hangup" });
+  const recapT = endR.newMessages.filter((m) => m.role === "agent" && m.channel === "text" && !m.kind);
+  check("no need heard: one code-written recap, nothing invented", recapT.length === 1 && !/job|application|recruit/i.test(recapT[0].text) && !!recapT[0].guards?.some((g) => g.startsWith("recap written by code")), recapT.map((m) => m.text).join(" | "));
+
+  // code-written lines never repeat a question either (fuzz found the decline line and the fallback doing it)
+  const dec = newSession();
+  await handleEvent(dec, { type: "open" });
+  await handleUserMessage(dec, "text", "luna");
+  const d1 = await handleEvent(dec, { type: "call_declined" });
+  const d2 = await handleEvent(dec, { type: "call_declined" });
+  check("second decline doesn't re-ask 'what's on your mind?'", /what's on your mind\?/.test(said(d1)) && !/what's on your mind\?/.test(said(d2)) && said(d2).trim().length > 0, `${said(d1)} || ${said(d2)}`);
+  dec.askedQuestions = [normQuestion("what's up?")];
+  const onlyQ = dropAskedQuestions(dec, "what's up?", "voice");
+  check("a line that was only a repeated question becomes a short non-question, never empty", onlyQ.length > 0 && !onlyQ.includes("?"), onlyQ);
+
   // the guard pipeline runs in a fixed, named order (goodbye before hangup comes before the gmail rules, etc.)
   const order = GUARD_PIPELINE.map((g) => g.name);
-  check("guard pipeline order", order.join(",") === "avoid,force-end,placing-call,goodbye-before-hangup,hang-up-after-goodbye,gmail-by-the-book,no-repeat-gmail-ask,no-third-question,no-repeat-name-ask,no-false-sent,call-offer-and-link-claims,long-text-to-chat,link-said-aloud,no-repeat-questions", order.join(","));
+  check("guard pipeline order", order.join(",") === "avoid,narration,force-end,placing-call,goodbye-before-hangup,hang-up-after-goodbye,gmail-by-the-book,no-repeat-gmail-ask,no-third-question,no-repeat-name-ask,no-accusing-or-assuming,name-rate,no-false-sent,call-offer-and-link-claims,long-text-to-chat,link-said-aloud,no-repeat-questions", order.join(","));
 
   // the intent table: every example it claims, it catches; every near miss, it doesn't
   for (const [name, d] of Object.entries(INTENTS)) {

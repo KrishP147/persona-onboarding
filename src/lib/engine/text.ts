@@ -1,4 +1,3 @@
-import { LAUGH_TOKEN } from "./intents";
 
 export function parseTypedEmail(text: string): { to: string; subject: string; body: string } | null {
   const lines = text.replace(/\*\*/g, "").split("\n");
@@ -36,7 +35,7 @@ export function dropDraftEcho(text: string, draft: string) {
 
 export const GOODBYE = /\b(bye|goodbye|talk (to you )?(soon|later)|take care|catch you|ciao|see ya|i'?ll let you go|call me (back )?(whenever|anytime)|good talking|have a (good|great|nice|lovely) (one|day|night|evening|weekend)|see (you|ya)|later!|i'?ll text you( instead)?)\b/i;
 // "i just sent you a link" said without actually sending one.
-export const CLAIMS_LINK = /\b(sent|dropped|texted|shared|popped)\b[^.?!]{0,40}\b(link|it)\b|\blink\b[^.?!]{0,30}\b(your texts|our texts|the chat|the thread)\b|\b(it'?s|it is) (in|on) (your|our) texts\b/i;
+export const CLAIMS_LINK = /\b(sent|dropped|texted|shared|popped)\b[^.?!]{0,40}\b(link|it)\b|\blink\b[^.?!]{0,30}\b(your texts|our texts|the chat|the thread)\b|\b(it'?s|it is) (in|on) (your|our) texts\b|\b(see it|it'?ll|it will|should) (pop up|show up|appear|land)\b[^.?!]{0,30}\b(texts|chat)\b/i;
 // Bracketed stage directions ("[starting call...]") are never said out loud or texted.
 export const STAGE_BRACKETS = /\s*\[([^\]\n]{1,160})\]\s*/g;
 // Fill-ins in a draft ("hi [client's name],") stay; stripping them left "hi ,".
@@ -44,7 +43,7 @@ export const PLACEHOLDER = /\b(name|company|business|date|time|day|email|phone|n
 export const STAGE_VERB = /^\s*\*?\s*(sends?|sending|sent|calling|calls?|dials?|dialing|pauses?|laughs?|smiles?|waits?|typing|hangs? up|ringing|drops?)\b/i;
 
 export const CLAIMS_SENT = /^\s*(sent|done|all set)\b|\b(i('?ve| have)? (just )?sent|it'?s (been )?sent|email (is )?sent|sending (it|that|now)|on its way|(ready|good) to go|went out|it'?s out)\b/i;
-export const EMPTY_PROMISE = /\b(give me (a|one) (sec|second|moment|minute)|one sec(ond)?|i'?m (looking at|reading|going through) (it|this|that|them)( now)?|let me (pull|look|check|grab|find)|pulling (those|that|it|them) up|checking (now|on that))\b/i;
+export const EMPTY_PROMISE = /\b(give me (just )?(a|one) (sec|second|moment|minute)|one sec(ond)?|i'?m (looking at|reading|going through) (it|this|that|them)( now)?|let me (pull|look|check|grab|find)|pulling (those|that|it|them) up|checking (now|on that))\b/i;
 // The model talking about its own setup instead of to the person ("the system is being strict about
 // the most recent message context..."). Only user-facing words ever go out; any sentence like this is dropped.
 export const LEAK =
@@ -54,7 +53,7 @@ export const LEAK =
 // "i'll call you" is fine (that's us), so only third parties count.
 export const CANT_DO =
   /\b(i'?m|i am|i'?ll|i will|let me|going to|gonna)\s+(just\s+)?(call(ing)?|ring(ing)?|phon(e|ing)|dial(ing)?)\s+(them|their|the (dentist|doctor|office|restaurant|place|clinic|salon|hotel|shop|store)|dr\.?\s|[a-z]+'s\b)|\b(i'?m|i'?ll|i will|let me)\s+(book|reserv|flag|star|archiv|delet|unsubscrib|set(ting)? up (a )?(filter|reminder))\w*|\b(flagging|archiving|deleting) (that|it|this|the|those|them)\b|\bi'?ll (get|put|pull|have) (that|those|it|them|the|your)\b[^.!?]{0,40}\b(together|ready|over to you)\b/i;
-export const META = /\b(let me back up|i'?m waiting for|i should (stay|wait|remain|let|keep)|since (they|he|she|the user)|the user|i'?ll (stay quiet|wait (silently|quietly))|let them (check|speak|respond)|stay quiet|respond when ready|they haven'?t said)\b/i;
+export const META = /\b(let me back up|wait for (them|him|her)|for (them|him|her) to (text|reply|respond|get back)|i'?m waiting for|i should (stay|wait|remain|let|keep)|since (they|he|she|the user)|the user|i'?ll (stay quiet|wait (silently|quietly))|let them (check|speak|respond)|stay quiet|respond when ready|they haven'?t said)\b/i;
 
 // Talking ABOUT them instead of TO them ("I'll text Paul a quick message... letting him know...").
 export const THIRD_PERSON = /\b(letting (him|her|them) know|acknowledging the|a quick message (to|for)|(text|message|ping|remind) (him|her)\b)/i;
@@ -138,8 +137,6 @@ export function nowLine(tz?: string, now = new Date()) {
   return `NOW: ${fmt("UTC")} UTC${tz ? `; their local time: ${fmt(tz)} (${tz})` : ""}. Use this for any question about today's date, the day, or the time anywhere (convert time zones from it); never guess the date.`;
 }
 
-// "lol ok" / "haha sure": the laugh is a reaction, the rest is the answer.
-export const LAUGH_LEAD = new RegExp(`^\\s*${LAUGH_TOKEN}[!., ]+`, "iu");
 
 // Fences: what the user typed, what tools returned, and what emails say reach the model inside tags, and the
 // prompt treats anything fenced as data, never instructions. Tag look-alikes inside the content are dropped,
@@ -147,3 +144,15 @@ export const LAUGH_LEAD = new RegExp(`^\\s*${LAUGH_TOKEN}[!., ]+`, "iu");
 export const FENCE_TAGS = /<\/?\s*(user_said|email_content|tool_result)\b[^>]*>/gi;
 export const unfence = (t: string) => t.replace(FENCE_TAGS, "");
 export const fence = (tag: "user_said" | "email_content", t: string) => `<${tag}>${unfence(t)}</${tag}>`;
+
+// Pointing out what they didn't do reads as blame, even said lightly ("ha, you skipped my name").
+export const ACCUSING =
+  /\b(you (skipped|forgot|missed|ignored)\b|you never (gave|told|answered|named|replied|said|picked)|you (didn'?t|did not|haven'?t|have not) (answer|reply|respond|say|give|tell|name|pick|get back)|why (didn'?t|haven'?t|won'?t|wouldn'?t) you|did you forget|left me on read)/i;
+// A guess about them stated as fact. Say what they said, or ask.
+export const ASSUMING = /\b(sounds like you('re| are| have| must)|you must (be|have|feel)|you seem( to be)?|seems like you|you('re| are) (clearly|obviously|probably))\b/i;
+
+// Reasoning written as if nobody's reading: the user in the third person, the agent narrating its own plan or
+// state, or a stage direction. Every word goes to them as a text, so these sentences never go out.
+export const NARRATION =
+  /\b(the (user|person|caller|human)|i'?ll (just )?(wait|hold off|stay quiet|keep quiet|stand by|sit tight|leave it)|(wait(ing)?|until) for (them|him|her|a reply|a response|their)|for (them|him|her) to (text|reply|respond|get back|answer|say)|(the call'?s|the call (has|is|was)) (already )?(ended|over|done|finished)|no (response|reply|message|action) (is )?(needed|necessary|required)|nothing (to say|needed|to add)|(they|he|she) (hasn'?t|haven'?t|didn'?t|isn'?t|aren'?t|is|are|seems?|might|may|will|'ll|'re|'s) (still )?(busy|away|gone|typing|reading|responding|replying|quiet|silent|there|ready|thinking|not)\b)/i;
+export const STAGE_DIRECTION = /^\s*[(*[][^)*\]]*[)*\]]\s*[.!]?\s*$/;

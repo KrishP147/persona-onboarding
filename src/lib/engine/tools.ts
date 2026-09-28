@@ -6,7 +6,7 @@ import { getSecret } from "../store";
 import { GIF_MIN_GAP, GIF_MOODS, GIFS, gifUrl, type GifMood } from "../gifs";
 import { readPage, webSearch } from "../web";
 import { type Ctx, guard, msg, shortNeed } from "./context";
-import { CALL_OK, DELEGATE, EMAIL_RE, FEMININE, MASCULINE, NEGATED_CALL, SEND_HOLD, SEND_OK, YES, gmailConsent, lastUserText, saidNow, userWantsOut, userWrappingUp } from "./intents";
+import { CALL_OK, DELEGATE, EMAIL_RE, FEMININE, MASCULINE, NEGATED_CALL, SEND_HOLD, SEND_OK, YES, gmailConsent, lastUserText, fixCallTypos, saidNow, userWantsOut, userWrappingUp } from "./intents";
 import { cleanModelText, fence } from "./text";
 import { fromEmailOnly, rememberEmails } from "./guards";
 
@@ -213,6 +213,7 @@ export async function runTool(ctx: Ctx, name: string, input: Record<string, unkn
       s.slots[slot] = { ...s.slots[slot], value, status: "filled", source: ctx.channel, updatedAt: Date.now() };
       if (s.lastAskedSlot === slot) s.lastAskedSlot = undefined;
       if (slot === "agentName") {
+        s.agentNameDefaulted = false;
         // Picking the voice runs alongside the reply instead of in front of it.
         const onCall = s.call.active;
         (ctx.pending ??= []).push(
@@ -252,7 +253,7 @@ export async function runTool(ctx: Ctx, name: string, input: Record<string, unkn
       const askedSince = s.transcript.slice(lastEnd + 1).some((m) => m.role === "user" && /\b(call|ring|phone)\b/i.test(m.text) && !NEGATED_CALL.test(m.text));
       const said_no = s.callDeclinedAt !== undefined || (lastEnd >= 0 && s.call.endedReason !== "agent_ended");
       if (said_no && !askedSince) return "error: they said no to a call or just hung up. don't call again unless they ask; carry on over text";
-      const last = saidNow(s);
+      const last = fixCallTypos(saidNow(s));
       if (!YES.test(last) && !CALL_OK.test(last)) {
         return `error: they haven't said yes to a call (they said "${last.slice(0, 60)}"). don't ring. react to what they said and ask again lightly, or carry on over text`;
       }
@@ -337,6 +338,7 @@ export async function runTool(ctx: Ctx, name: string, input: Record<string, unkn
       }
       if (open.length && !userWantsOut(s)) return `error: still open (${open.join(", ")}) and they haven't asked to skip. keep helping and gather what's left gently`;
       s.phase = "graduated";
+      s.graduatedAt ??= new Date().toISOString();
       s.graduatedReason = String(input.reason ?? "");
       for (const k of Object.keys(s.slots) as SlotKey[]) if (s.slots[k].status === "missing") s.slots[k].status = "deferred";
       ctx.actions.push({ type: "graduate" });

@@ -8,7 +8,14 @@ export const MAX_ASKS_PER_SLOT = 2; // after this, defer and bring it up later o
 export const MAX_CONSECUTIVE_ASKS = 1; // after an ask, the next turn just responds like a person
 export const MAX_CALL_OFFERS = 2;
 // One check-in after a real while, then a spoken heads-up and a hangup (never waits forever).
-export const MAX_SILENCE_STRIKES = 2;
+// The silence ladder on a call. The client waits 25s before the first strike (45s after "hold on");
+// each strike tells it how long to wait for the next. Warning at about two minutes of total silence.
+export const SILENCE_SECOND_MS = 30000; // check-in -> softer check-in
+export const SILENCE_BEFORE_WARN_MS = 65000; // softer check-in -> heads-up (25 + 30 + 65 = 2 min)
+export const SILENCE_WARN_STRIKE = 3;
+export const SILENCE_WARN_GAP_MS = 12000; // heads-up -> goodbye and hangup
+export const MAX_SILENCE_STRIKES = 4;
+export const HOLD_MS = 45000; // "hold on" / "one sec": first check-in waits this long
 
 const SLOT_NAME: Record<SlotKey, string> = {
   agentName: "agentName (YOUR name, the assistant's)",

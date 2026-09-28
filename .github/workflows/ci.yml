@@ -34,6 +34,8 @@ jobs:
       - run: pnpm -s typecheck
       - run: pnpm -s lint
       - run: pnpm -s smoke
+      # seeded random event sequences, invariants checked after every step (keyless, ~5s)
+      - run: pnpm -s fuzz 2000 42
 
       - run: pnpm -s stress-matrix
       - run: git diff --exit-code STRESS_TESTS.md

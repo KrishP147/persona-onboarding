@@ -1,6 +1,7 @@
 "use client";
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { VoiceStyle } from "@/lib/types";
+import { turnEndDelay } from "./turnEnd";
 
 // Voice layer. Speech in: Deepgram streaming (short-lived token from /api/voice/token), else
 // browser Web Speech. Speech out: Cartesia via /api/voice/tts, else browser speechSynthesis.
@@ -8,8 +9,7 @@ import type { VoiceStyle } from "@/lib/types";
 //
 // Turn-taking rules (see docs/journal/04-voice-and-edge-cases.md):
 // - the user's turn ends after a pause whose length depends on whether they sound finished:
-//   ~0.7s when complete, longer mid-phrase or while spelling things out (humans gap ~0-200ms,
-//   and gaps past ~600-700ms start to read as hesitation: Stivers et al. 2009, Kendrick & Torreira 2015)
+//   ~0.7s when complete, much longer when it sounds unfinished (see turnEnd.ts)
 // - silence only counts when nobody is talking and nothing is pending; first reprompt at ~6s,
 //   and much longer while the user is off doing a task like the gmail sign-in
 // - the user can talk over the agent (barge-in); echoes of the agent's own words are ignored
@@ -30,29 +30,20 @@ type Rec = {
 
 // People tolerate a lot more quiet on a call with someone who is there for them than a form does;
 // quiet is fine: the only check-in comes after 20s (10s at the start of a call, in case they can't hear us).
-const SILENCE_MS = 20000;
-const TURN_END_COMPLETE_MS = 700;
-const TURN_END_MIDPHRASE_MS = 850;
-const TURN_END_SPELLING_MS = 1400;
-const TRAILING = /\b(and|but|or|so|because|the|a|an|my|is|are|to|of|with|for|um+|uh+|like|then|if|at|dot)$/i;
-const SPELLING = /(\d\s*){3,}$|@|\bdot\b|\bat\b\s*$|\bemail is\b|\bnumber is\b|\baddress is\b/i;
-
-// How long to wait before deciding the user is done talking.
-function turnEndDelay(text: string, speechFinal = false) {
-  const t = text.trim();
-  if (SPELLING.test(t)) return TURN_END_SPELLING_MS;
-  if (TRAILING.test(t) || /,$/.test(t)) return TURN_END_MIDPHRASE_MS;
-  // Deepgram heard a pause AND the sentence sounds finished: answer quickly. A pause mid-thought
-  // ("yes. can you type this...") gets the normal wait, so one sentence isn't chopped into three turns.
-  if (speechFinal && /[.?!]$/.test(t)) return 250;
-  return TURN_END_COMPLETE_MS;
-}
+const SILENCE_MS = 25000; // first silence window; later windows come from the server (policy.ts silence ladder)
+// They kept talking right after a turn went out ("...so i'm just" / "curious."): one turn, not two.
+const CONTINUE_MS = 1500;
 const VOICE_KEY = "persona-voice-";
 
 const MIC: MediaTrackConstraints = { echoCancellation: true, noiseSuppression: true, autoGainControl: true };
-// Dead mic: true digital silence (a quiet room still has a noise floor well above this) for 4s.
-const DEAD_RMS = 1e-4;
+// Dead mic: 4s with no signal at all. the call's own stream goes through noise suppression, which
+// can output exact zeros in a quiet room, so zeros there only mean "check": a short raw capture
+// (no processing) of the same mic decides. a live mic always has some noise on the raw side.
+const DIGITAL_ZERO = 1e-6; // peak below this is digital silence (one 16-bit step is ~3e-5)
 const DEAD_MS = 4000;
+const PROBE_MS = 1200; // how long the raw check listens
+const PROBE_OK_MS = 30000; // raw said live: don't check again for a while
+const RAW: MediaTrackConstraints = { echoCancellation: false, noiseSuppression: false, autoGainControl: false };
 const TOAST_MS = 2500;
 
 // Which input the OS calls default right now (chrome lists a "default" entry; others put it first).
@@ -119,7 +110,14 @@ function speakBrowser(text: string, voice: SpeechSynthesisVoice | undefined, onS
   });
 }
 
-const STOP_WORDS = /^(wait|stop|hold|hang|sorry|no|nope|hey|actually|um|excuse)$/i;
+// first word of a short "stop" said over the agent ("stop talking", "hold on", "shh", "enough")
+const STOP_WORDS = /^(wait|stop|hold|hang|sorry|no|nope|hey|actually|um|excuse|sh+|shush|enough|quiet|pause)$/i;
+// a reply that's only a backchannel ("mm", "ok"): after they cut the agent off, saying it adds nothing
+const TINY_REPLY = /^(m+|mhm+|hm+|uh[- ]?huh|ok(ay)?|sure|yeah|yep|got it)$/i;
+const tinyReply = (t: string) => {
+  const w = t.toLowerCase().replace(/[^a-z' -]/g, "").trim();
+  return w.length <= 3 || TINY_REPLY.test(w);
+};
 
 const words = (t: string) => t.toLowerCase().replace(/[^a-z0-9' ]/g, " ").split(/\s+/).filter(Boolean);
 
@@ -135,6 +133,54 @@ function similar(a: string, b: string) {
   return 1 - d[a.length][b.length] / Math.max(a.length, b.length);
 }
 
+// mic watchdog state: one per call
+type Watch = {
+  ctx: AudioContext;
+  analyser: AnalyserNode;
+  source: MediaStreamAudioSourceNode | null;
+  timer: ReturnType<typeof setInterval>;
+  offDevices: () => void;
+  lastEnergy: number;
+  mutedSince: number | null; // track.muted since when
+  probe: { stream: MediaStream | null; source: MediaStreamAudioSourceNode | null; analyser: AnalyserNode; started: number; heard: boolean; gone: boolean } | null;
+  probeOkUntil: number;
+  defaultKey: string;
+};
+
+// raw check: same mic, no echo cancelling / noise suppression / gain, read by its own analyser
+function startProbe(w: Watch, deviceId?: string) {
+  const p: NonNullable<Watch["probe"]> = { stream: null, source: null, analyser: w.ctx.createAnalyser(), started: Date.now(), heard: false, gone: false };
+  p.analyser.fftSize = 2048;
+  w.probe = p;
+  navigator.mediaDevices
+    .getUserMedia({ audio: deviceId ? { ...RAW, deviceId: { exact: deviceId } } : RAW })
+    .then((s) => {
+      if (w.probe !== p) return s.getTracks().forEach((t) => t.stop());
+      p.stream = s;
+      p.source = w.ctx.createMediaStreamSource(s);
+      p.source.connect(p.analyser);
+      p.started = Date.now();
+    })
+    .catch(() => {
+      p.gone = true;
+    });
+}
+
+// ios (every browser there is webkit, ipads report as macs with touch)
+function noSecondCapture() {
+  const ua = navigator.userAgent;
+  return /iPhone|iPad|iPod/.test(ua) || (/Macintosh/.test(ua) && navigator.maxTouchPoints > 1);
+}
+
+function endProbe(w: Watch) {
+  const p = w.probe;
+  w.probe = null;
+  if (!p) return;
+  try {
+    p.source?.disconnect();
+  } catch {}
+  p.stream?.getTracks().forEach((t) => t.stop());
+}
 
 export type CallStatus = "idle" | "ringing" | "connecting" | "active" | "ended";
 
@@ -153,7 +199,8 @@ function sentences(text: string) {
 // span: when the heard audio happened (wall clock ms), from deepgram's timestamps.
 type Heard = (finals: string, interim: string, speechFinal?: boolean, span?: [number, number]) => void;
 
-type Deepgram = { stop: () => void };
+// pause: mic off (mute, hold). the recorder stops and nothing is sent; the socket stays open.
+type Deepgram = { stop: () => void; pause: (on: boolean) => void };
 
 // Deepgram live transcription straight from the browser. Resolves to stop, or null if it can't
 // start (no token, blocked socket): the caller falls back to Web Speech. A new mic mid-call gets
@@ -181,8 +228,11 @@ async function startDeepgram(sessionId: string, stream: MediaStream, onHeard: He
     }
     const mime = ["audio/webm;codecs=opus", "audio/webm", "audio/mp4"].find((m) => MediaRecorder.isTypeSupported(m));
     const rec = new MediaRecorder(stream, mime ? { mimeType: mime } : undefined);
+    let paused = false;
+    let pausedAt = 0;
+    let pausedMs = 0; // deepgram's clock doesn't run while nothing is sent
     rec.ondataavailable = (e) => {
-      if (e.data.size && ws.readyState === WebSocket.OPEN) ws.send(e.data);
+      if (!paused && e.data.size && ws.readyState === WebSocket.OPEN) ws.send(e.data);
     };
     rec.start(250);
     const streamStart = Date.now(); // deepgram's timestamps count from here
@@ -196,7 +246,8 @@ async function startDeepgram(sessionId: string, stream: MediaStream, onHeard: He
         const t = String(m.channel?.alternatives?.[0]?.transcript ?? "");
         if (!t.trim()) return;
         const st = Number(m.start ?? 0);
-        const span: [number, number] = [streamStart + st * 1000, streamStart + (st + Number(m.duration ?? 0)) * 1000];
+        const t0 = streamStart + pausedMs;
+        const span: [number, number] = [t0 + st * 1000, t0 + (st + Number(m.duration ?? 0)) * 1000];
         if (m.is_final) onHeard(t, "", !!m.speech_final, span);
         else onHeard("", t, false, span);
       } catch {}
@@ -220,7 +271,20 @@ async function startDeepgram(sessionId: string, stream: MediaStream, onHeard: He
         ws.close();
       } catch {}
     };
-    return { stop };
+    const pause = (on: boolean) => {
+      if (on === paused || stopped) return;
+      paused = on;
+      try {
+        if (on) {
+          pausedAt = Date.now();
+          if (rec.state === "recording") rec.pause();
+        } else {
+          pausedMs += Date.now() - pausedAt;
+          if (rec.state === "paused") rec.resume();
+        }
+      } catch {}
+    };
+    return { stop, pause };
   } catch {
     return null;
   }
@@ -242,6 +306,13 @@ export function useVoiceCall(opts: {
   const [startedAt, setStartedAt] = useState<number | null>(null);
   const [muted, setMuted] = useState(false);
   const mutedRef = useRef(false);
+  // hold: mic off and the agent quiet, nothing sent anywhere, nothing times out
+  const [held, setHeld] = useState(false);
+  const [heldAt, setHeldAt] = useState<number | null>(null);
+  const heldRef = useRef(false);
+  const heldEndRef = useRef<{ final: boolean } | null>(null); // a hangup that came in on hold, decided on unhold
+  const endTimer = useRef<ReturnType<typeof setTimeout> | null>(null); // the beat after "bye"
+  const micOff = () => mutedRef.current || heldRef.current;
   const lastFillerRef = useRef("");
 
   const recRef = useRef<Rec | null>(null);
@@ -257,6 +328,10 @@ export function useVoiceCall(opts: {
   const queueRef = useRef(0); // utterances queued or playing
   const bufferRef = useRef(""); // finalized user speech not yet sent
   const interruptedRef = useRef(false);
+  const quietReplyRef = useRef(0); // turn whose reply answers a cut-off (0: none): don't speak a bare "mm"
+  const turnSeqRef = useRef(0);
+  const lastSentRef = useRef<{ text: string; at: number } | null>(null); // the last turn sent, and when
+  const continueRef = useRef(""); // a sent turn they're still finishing: resent with the rest
   const cutHeardRef = useRef(""); // what they actually heard of the line they cut off
   const pendingEndRef = useRef(false);
   const usingDeepgramRef = useRef(false);
@@ -267,6 +342,7 @@ export function useVoiceCall(opts: {
   const patienceRef = useRef<number | null>(null); // one-shot longer silence window
   const streamRef = useRef<MediaStream | null>(null);
   const stopDeepgramRef = useRef<(() => void) | null>(null);
+  const pauseDeepgramRef = useRef<((on: boolean) => void) | null>(null); // the live session's pause
   const openDeepgramRef = useRef<((s: MediaStream) => Promise<(Deepgram & { dropped: boolean }) | null>) | null>(null); // a fresh session on a new mic
   const webSpeechRef = useRef<(() => boolean) | null>(null); // fallback when that fails
   const styleRef = useRef<VoiceStyle>("neutral"); // locked when the call connects
@@ -285,18 +361,9 @@ export function useVoiceCall(opts: {
   const [micTroubleRaw, setMicTrouble] = useState(false);
   const [micToast, setMicToast] = useState<string | null>(null);
   const [inputId, setInputId] = useState<string | null>(null);
-  const watchRef = useRef<{
-    ctx: AudioContext;
-    analyser: AnalyserNode;
-    source: MediaStreamAudioSourceNode | null;
-    timer: ReturnType<typeof setInterval>;
-    offTrack: () => void;
-    offDevices: () => void;
-    lastEnergy: number;
-    defaultKey: string;
-  } | null>(null);
-  const silentRef = useRef(false); // no energy for DEAD_MS
-  const trackTroubleRef = useRef(false); // the track itself says muted/ended
+  const watchRef = useRef<Watch | null>(null);
+  const silentRef = useRef(false); // no signal for DEAD_MS, raw check agreed
+  const trackTroubleRef = useRef(false); // the track ended, or stayed muted for DEAD_MS
   const pickedRef = useRef<string | undefined>(undefined); // an input they chose; undefined follows the OS default
   const swapSeqRef = useRef(0);
   const toastTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -338,10 +405,11 @@ export function useVoiceCall(opts: {
 
   const armSilence = useCallback(() => {
     clear(silenceTimer);
+    if (micOff()) return; // unmute / unhold arms it again
     const wait = patienceRef.current ?? SILENCE_MS;
     silenceTimer.current = setTimeout(() => {
       patienceRef.current = null;
-      const idle = activeRef.current && !mutedRef.current && !waitingRef.current && queueRef.current === 0 && !bufferRef.current;
+      const idle = activeRef.current && !micOff() && !waitingRef.current && queueRef.current === 0 && !bufferRef.current;
       if (idle) optsRef.current.onSilence();
     }, wait);
   }, []);
@@ -356,7 +424,7 @@ export function useVoiceCall(opts: {
   );
 
   const startRec = useCallback(() => {
-    if (!activeRef.current) return;
+    if (!activeRef.current || micOff()) return; // mic off: the fallback recognizer stays stopped
     try {
       recRef.current?.start();
     } catch {
@@ -366,6 +434,7 @@ export function useVoiceCall(opts: {
   }, []);
 
   const syncTrouble = () => setMicTrouble(silentRef.current || trackTroubleRef.current);
+
 
   const stopMicWatch = useCallback(() => {
     swapSeqRef.current += 1; // a swap still in flight gives up
@@ -381,8 +450,8 @@ export function useVoiceCall(opts: {
     setInputId(null);
     if (!w) return;
     clearInterval(w.timer);
-    w.offTrack();
     w.offDevices();
+    endProbe(w);
     try {
       w.source?.disconnect();
       w.analyser.disconnect();
@@ -390,13 +459,14 @@ export function useVoiceCall(opts: {
     void w.ctx.close().catch(() => {});
   }, []);
 
-  // Point the analyser and the track listeners at this stream, and start the silence window over.
+  // Point the analyser at this stream, and start the silence window over.
   const wireStream = useCallback((stream: MediaStream) => {
     const w = watchRef.current;
     if (!w) return;
     const track = stream.getAudioTracks()[0];
-    w.offTrack();
-    w.offTrack = () => {};
+    endProbe(w);
+    w.probeOkUntil = 0;
+    w.mutedSince = null;
     try {
       w.source?.disconnect();
     } catch {}
@@ -407,26 +477,7 @@ export function useVoiceCall(opts: {
     } catch {}
     w.lastEnergy = Date.now();
     silentRef.current = false;
-    trackTroubleRef.current = !!track && (track.muted || track.readyState === "ended");
-    if (track) {
-      const bad = () => {
-        trackTroubleRef.current = true;
-        syncTrouble();
-      };
-      const ok = () => {
-        trackTroubleRef.current = track.readyState === "ended";
-        if (watchRef.current) watchRef.current.lastEnergy = Date.now();
-        syncTrouble();
-      };
-      track.addEventListener("mute", bad);
-      track.addEventListener("ended", bad);
-      track.addEventListener("unmute", ok);
-      w.offTrack = () => {
-        track.removeEventListener("mute", bad);
-        track.removeEventListener("ended", bad);
-        track.removeEventListener("unmute", ok);
-      };
-    }
+    trackTroubleRef.current = !!track && track.readyState === "ended";
     setInputId(track?.getSettings().deviceId ?? null);
     syncTrouble();
   }, []);
@@ -449,7 +500,7 @@ export function useVoiceCall(opts: {
       }
       pickedRef.current = deviceId && deviceId !== "default" ? deviceId : undefined;
       const track = next.getAudioTracks()[0];
-      next.getAudioTracks().forEach((t) => (t.enabled = !mutedRef.current));
+      next.getAudioTracks().forEach((t) => (t.enabled = !micOff()));
       const old = streamRef.current;
       streamRef.current = next;
       wireStream(next);
@@ -464,6 +515,8 @@ export function useVoiceCall(opts: {
           oldStop(); // stopped on purpose: no drop fallback
           const live = dg && !dg.dropped ? dg : null;
           stopDeepgramRef.current = live?.stop ?? null;
+          pauseDeepgramRef.current = live?.pause ?? null;
+          live?.pause(micOff());
           if (!live) webSpeechRef.current?.();
         }
       }
@@ -489,26 +542,71 @@ export function useVoiceCall(opts: {
       const analyser = ctx.createAnalyser();
       analyser.fftSize = 2048;
       const buf = new Float32Array(analyser.fftSize);
+      const peak = (a: AnalyserNode) => {
+        a.getFloatTimeDomainData(buf);
+        let m = 0;
+        for (let i = 0; i < buf.length; i++) m = Math.max(m, Math.abs(buf[i]));
+        return m;
+      };
       const timer = setInterval(() => {
         const w = watchRef.current;
         if (!w) return;
         const now = Date.now();
-        // Can't measure (context suspended) or not meant to hear anything (muted): don't blame the mic.
-        if (w.ctx.state !== "running" || mutedRef.current || !w.source) {
+        // Can't measure (context suspended) or not meant to hear anything (muted, on hold): don't blame the mic.
+        if (w.ctx.state !== "running" || micOff() || !w.source) {
           if (w.ctx.state === "suspended") void w.ctx.resume().catch(() => {});
           w.lastEnergy = now;
+          w.mutedSince = null;
+          endProbe(w);
           return;
         }
-        w.analyser.getFloatTimeDomainData(buf);
-        let sum = 0;
-        for (let i = 0; i < buf.length; i++) sum += buf[i] * buf[i];
-        if (Math.sqrt(sum / buf.length) >= DEAD_RMS) {
+        // the track: ended counts at once, muted only if it stays muted
+        const track = streamRef.current?.getAudioTracks()[0];
+        if (track?.muted) w.mutedSince ??= now;
+        else w.mutedSince = null;
+        const trackBad = !!track && (track.readyState === "ended" || (w.mutedSince !== null && now - w.mutedSince >= DEAD_MS));
+        if (trackBad !== trackTroubleRef.current) {
+          trackTroubleRef.current = trackBad;
+          syncTrouble();
+        }
+        // the signal: any sample off zero is a live mic, however quiet
+        if (peak(w.analyser) >= DIGITAL_ZERO) {
           w.lastEnergy = now;
+          endProbe(w);
           if (silentRef.current) {
             silentRef.current = false;
             syncTrouble();
           }
-        } else if (now - w.lastEnergy >= DEAD_MS && !silentRef.current) {
+          return;
+        }
+        if (silentRef.current || now - w.lastEnergy < DEAD_MS) return;
+        if (now < w.probeOkUntil) {
+          w.lastEnergy = now; // raw said live recently: zeros here are just noise suppression
+          return;
+        }
+        // zeros for 4s: ask the raw mic before blaming it. not on ios: a second capture there can
+        // mute or end the call's own track, so only the ended/muted checks count on iphones.
+        if (!w.probe && noSecondCapture()) {
+          w.probeOkUntil = now + PROBE_OK_MS;
+          w.lastEnergy = now;
+          return;
+        }
+        if (!w.probe) return startProbe(w, track?.getSettings().deviceId);
+        const p = w.probe;
+        if (p.gone) {
+          endProbe(w);
+          w.probeOkUntil = now + PROBE_OK_MS; // couldn't check: don't nag
+          w.lastEnergy = now;
+          return;
+        }
+        if (!p.source) return; // still opening
+        if (peak(p.analyser) >= DIGITAL_ZERO) p.heard = true;
+        if (now - p.started < PROBE_MS && !p.heard) return;
+        endProbe(w);
+        if (p.heard) {
+          w.probeOkUntil = now + PROBE_OK_MS;
+          w.lastEnergy = now;
+        } else {
           silentRef.current = true;
           syncTrouble();
         }
@@ -539,9 +637,11 @@ export function useVoiceCall(opts: {
         analyser,
         source: null,
         timer,
-        offTrack: () => {},
         offDevices: () => md.removeEventListener("devicechange", onDevices),
         lastEnergy: Date.now(),
+        mutedSince: null,
+        probe: null,
+        probeOkUntil: 0,
         defaultKey: "",
       };
       void audioInputs()
@@ -560,14 +660,19 @@ export function useVoiceCall(opts: {
   const teardown = useCallback(() => {
     mutedRef.current = false;
     setMuted(false);
+    heldRef.current = false;
+    heldEndRef.current = null;
+    setHeld(false);
+    setHeldAt(null);
     activeRef.current = false;
-    [silenceTimer, turnTimer, fillerTimer].forEach(clear);
+    [silenceTimer, turnTimer, fillerTimer, endTimer].forEach(clear);
     try {
       recRef.current?.abort();
     } catch {}
     recRef.current = null;
     stopDeepgramRef.current?.();
     stopDeepgramRef.current = null;
+    pauseDeepgramRef.current = null;
     openDeepgramRef.current = null;
     webSpeechRef.current = null;
     stopMicWatch();
@@ -580,6 +685,9 @@ export function useVoiceCall(opts: {
     waitingRef.current = false;
     patienceRef.current = null;
     interruptedRef.current = false;
+    quietReplyRef.current = 0;
+    lastSentRef.current = null;
+    continueRef.current = "";
     setListening(false);
     setSpeaking(false);
     setHeard("");
@@ -609,6 +717,8 @@ export function useVoiceCall(opts: {
     // Resolves once this line has finished playing (or was cut off), so the chat can wait for it.
     (text: string, isFiller = false): Promise<void> => {
       if (!activeRef.current || !text.trim()) return Promise.resolve();
+      if (heldRef.current) return Promise.resolve(); // on hold: a late reply stays in the thread, unspoken
+      if (!isFiller && quietReplyRef.current !== 0 && tinyReply(text)) return Promise.resolve();
       if (!isFiller) clear(fillerTimer);
       clear(silenceTimer);
       queueRef.current += 1;
@@ -627,7 +737,7 @@ export function useVoiceCall(opts: {
         setSpeaking(false);
         if (pendingEndRef.current) {
           pendingEndRef.current = false;
-          setTimeout(() => hangUp("agent_ended"), 400); // a beat after "bye", like a person
+          endTimer.current = setTimeout(() => hangUp("agent_ended"), 400); // a beat after "bye", like a person
         } else if (!waitingRef.current) armSilence();
       };
       let finished = () => {};
@@ -667,6 +777,11 @@ export function useVoiceCall(opts: {
   const endAfterSpeaking = useCallback(
     (final = false) => {
       finalEndRef.current = final;
+      // never hang up on someone who put us on hold: decide when they're back
+      if (heldRef.current) {
+        heldEndRef.current = { final: final || !!heldEndRef.current?.final };
+        return;
+      }
       if (queueRef.current > 0 || window.speechSynthesis?.speaking) pendingEndRef.current = true;
       else hangUp("agent_ended");
     },
@@ -675,21 +790,30 @@ export function useVoiceCall(opts: {
 
   // User finished a turn: send it, with a spoken filler if the reply is slow.
   const flushTurn = useCallback(() => {
-    const text = bufferRef.current.trim();
+    const own = bufferRef.current.trim();
     bufferRef.current = "";
+    // the rest of a sentence already sent goes out whole, as a turn that talks over the first half's reply
+    const prev = own ? continueRef.current : "";
+    continueRef.current = "";
+    const text = prev ? `${prev} ${own}` : own;
     if (text) setHeard(text); // keep their full sentence on screen until they speak again
     if (!text || !activeRef.current) return;
-    const interrupted = interruptedRef.current;
+    lastSentRef.current = { text, at: Date.now() };
+    const interrupted = interruptedRef.current || !!prev;
     const heardBefore = interrupted ? cutHeardRef.current : undefined;
     cutHeardRef.current = "";
     interruptedRef.current = false;
+    const turn = ++turnSeqRef.current;
+    quietReplyRef.current = interrupted ? turn : 0;
+    // "stop" / "shh" over the agent: no thinking-out-loud filler either
+    const hushed = interrupted && words(text).length <= 2 && STOP_WORDS.test(words(text)[0] ?? "");
     waitingRef.current = true;
     clear(silenceTimer);
     // Thinking out loud, like a person: a short "hmm" if the reply takes over ~1s, and "let me think
     // that through" if it's still coming at ~3s (clark & fox tree 2002: uh/um mark short vs long
     // delays; shiwa et al. 2008: fillers soften slow replies). Never on fast replies, never stacked twice.
     clear(fillerTimer);
-    const stillWaiting = () => waitingRef.current && queueRef.current === 0 && !mutedRef.current && activeRef.current;
+    const stillWaiting = () => waitingRef.current && queueRef.current === 0 && !micOff() && activeRef.current && !hushed;
     fillerTimer.current = setTimeout(() => {
       if (!stillWaiting()) return;
       if (Math.random() < 0.5) void speak(pickFiller(SHORT_FILLERS, lastFillerRef), true);
@@ -699,24 +823,71 @@ export function useVoiceCall(opts: {
     }, 1100);
     optsRef.current.onUtterance(text, interrupted, heardBefore).finally(() => {
       waitingRef.current = false;
+      if (quietReplyRef.current === turn) quietReplyRef.current = 0;
       clear(fillerTimer);
       if (queueRef.current === 0) armSilence();
     });
   }, [armSilence, speak]);
 
-  // Mute: the mic goes silent at the source (deepgram gets nothing), anything the fallback recognizer
-  // still picks up is dropped, and silence doesn't count. The agent is never told.
+  // Mic off or on: the track goes silent, the deepgram recorder pauses (nothing is sent), and the
+  // fallback recognizer stops; back on, all of it resumes.
+  const applyMic = useCallback(() => {
+    const off = micOff();
+    streamRef.current?.getAudioTracks().forEach((t) => (t.enabled = !off));
+    pauseDeepgramRef.current?.(off);
+    if (!off) return startRec();
+    try {
+      recRef.current?.abort();
+    } catch {}
+    setListening(false);
+  }, [startRec]);
+
+  // Mute: mic off, call live. The agent keeps talking if it was, nothing reaches stt, silence doesn't
+  // count (no check-ins), the mic watchdog rests. Unmute starts the silence window over. The agent is never told.
   const toggleMute = useCallback(() => {
     const m = !mutedRef.current;
     mutedRef.current = m;
     setMuted(m);
-    streamRef.current?.getAudioTracks().forEach((t) => (t.enabled = !m));
+    applyMic();
     if (m) {
       clear(turnTimer);
       clear(silenceTimer);
       if (bufferRef.current.trim()) flushTurn(); // what they said before muting still counts
     } else if (activeRef.current && queueRef.current === 0 && !waitingRef.current) armSilence();
-  }, [armSilence, flushTurn]);
+  }, [applyMic, armSilence, flushTurn]);
+
+  // Hold: the agent stops mid-word, the mic goes off, nothing reaches stt or the server, and nothing
+  // times out (silence, fillers, the watchdog, a pending hangup). Client only: the server never hears of it.
+  // Unhold: one short line, spoken here, then it listens with a fresh silence window.
+  const toggleHold = useCallback(() => {
+    if (!activeRef.current) return;
+    const h = !heldRef.current;
+    heldRef.current = h;
+    setHeld(h);
+    setHeldAt(h ? Date.now() : null);
+    applyMic();
+    if (h) {
+      [silenceTimer, turnTimer, fillerTimer].forEach(clear);
+      if (endTimer.current || pendingEndRef.current) heldEndRef.current = { final: finalEndRef.current };
+      clear(endTimer);
+      pendingEndRef.current = false;
+      stopAudio();
+      queueRef.current = 0;
+      speakingTextRef.current = "";
+      bufferRef.current = ""; // half a sentence before hold isn't a turn
+      continueRef.current = "";
+      lastSentRef.current = null;
+      setSpeaking(false);
+      setCaption("");
+      setHeard("");
+      return;
+    }
+    const end = heldEndRef.current;
+    heldEndRef.current = null;
+    // a hangup we can't talk out of still happens; an ordinary goodbye is dropped: they came back to talk
+    if (end?.final) return hangUp("agent_ended");
+    void speak(BACK_LINE, true);
+  }, [applyMic, hangUp, speak]);
 
   const accept = useCallback(async () => {
     const W = window as unknown as { SpeechRecognition?: new () => Rec; webkitSpeechRecognition?: new () => Rec };
@@ -744,7 +915,7 @@ export function useVoiceCall(opts: {
     if (window.speechSynthesis) voiceRef.current = await lockVoice(styleRef.current);
 
     const onHeard: Heard = (finals, interim, speechFinal, span) => {
-      if (mutedRef.current) return; // muted: nothing they say reaches the agent
+      if (micOff()) return; // muted or on hold: nothing they say reaches the agent
       const latest = (finals || interim).trim();
       if (!latest) return;
       // A final goodbye is already on its way: let it finish; nothing said now changes the ending.
@@ -754,6 +925,9 @@ export function useVoiceCall(opts: {
       // unless it's clearly them cutting in: 3+ words we didn't just say, or a lone "wait"/"stop".
       // Ignored audio never shows up as "you".
       const now = Date.now();
+      // still finishing the sentence that just went out (reply in flight or barely started)
+      const sent = lastSentRef.current;
+      const continues = !!sent && (span ? span[0] : now) - sent.at < CONTINUE_MS && (waitingRef.current || queueRef.current > 0);
       const recent = lastSpokenRef.current;
       const overlapping = span ? playbackRef.current.filter((p) => span[0] < (p.end ?? now) + 300 && span[1] > p.start) : [];
       const duringUs = queueRef.current > 0 || overlapping.length > 0 || (!span && now - recent.endedAt < 1200);
@@ -763,7 +937,8 @@ export function useVoiceCall(opts: {
         const novel = heardWords.filter((w) => !said.some((x) => similar(w, x) >= 0.6));
         const cutsIn = novel.length >= 3 && novel.length / heardWords.length >= 0.5;
         const saysStop = heardWords.length <= 2 && STOP_WORDS.test(heardWords[0] ?? "") && !said.some((x) => similar(heardWords[0], x) >= 0.8);
-        if (!cutsIn && !saysStop) return;
+        const goesOn = continues && novel.length === heardWords.length; // none of it is our echo
+        if (!cutsIn && !saysStop && !goesOn) return;
       }
       // Real speech over the agent: stop talking and listen (barge-in).
       if (queueRef.current > 0) {
@@ -776,6 +951,11 @@ export function useVoiceCall(opts: {
         speakingTextRef.current = "";
         setSpeaking(false);
         interruptedRef.current = true;
+      }
+      if (continues && sent && !continueRef.current) {
+        continueRef.current = sent.text;
+        lastSentRef.current = null;
+        clear(fillerTimer); // no "hmm" over them while they finish
       }
       clear(silenceTimer);
       if (finals.trim()) bufferRef.current += ` ${finals.trim()}`;
@@ -794,7 +974,7 @@ export function useVoiceCall(opts: {
         if (interim.trim() && !finals.trim()) bufferRef.current += ` ${interim.trim()}`;
         flushTurn();
       };
-      turnTimer.current = setTimeout(() => fire(0), turnEndDelay(`${bufferRef.current} ${interim}`, speechFinal));
+      turnTimer.current = setTimeout(() => fire(0), turnEndDelay(`${bufferRef.current} ${interim}`, speechFinal, usingDeepgramRef.current));
     };
 
     // Prefer Deepgram; fall back to the browser recognizer if it can't start or drops mid-call.
@@ -851,15 +1031,17 @@ export function useVoiceCall(opts: {
     // a session that drops before it goes live is marked so the caller skips it.
     const openDeepgram = async (s: MediaStream) => {
       if (!sid) return null;
-      const box = { stop: () => {}, dropped: false };
+      const box: Deepgram & { dropped: boolean } = { stop: () => {}, pause: () => {}, dropped: false };
       const dg = await startDeepgram(sid, s, onHeard, () => {
         box.dropped = true;
         if (stopDeepgramRef.current !== box.stop) return;
         stopDeepgramRef.current = null; // socket gone; a later mic swap leaves Web Speech on its own mic
+        pauseDeepgramRef.current = null;
         if (activeRef.current) startWebSpeech();
       }, onSpeechStart);
       if (!dg) return null;
       box.stop = dg.stop;
+      box.pause = dg.pause;
       return box.dropped ? null : box;
     };
     const dg = stream ? await openDeepgram(stream) : null;
@@ -873,6 +1055,8 @@ export function useVoiceCall(opts: {
     usingDeepgramRef.current = !!dg;
     if (dg) {
       stopDeepgramRef.current = dg.stop;
+      pauseDeepgramRef.current = dg.pause;
+      dg.pause(micOff());
       openDeepgramRef.current = openDeepgram;
       webSpeechRef.current = startWebSpeech;
     }
@@ -905,11 +1089,12 @@ export function useVoiceCall(opts: {
     return () => window.removeEventListener("pagehide", onHide);
   }, []);
 
-  // muted is on purpose: never nag about a mic they switched off themselves
-  const micTrouble = micTroubleRaw && !muted && status === "active";
-  return { status, setStatus, speaking, listening, heard, caption, startedAt, accept, hangUp, speak, endAfterSpeaking, greeted, patience, muted, toggleMute, micTrouble, micToast, inputId, swapInput };
+  // muted or on hold is on purpose: never nag about a mic they switched off themselves
+  const micTrouble = micTroubleRaw && !muted && !held && status === "active";
+  return { status, setStatus, speaking, listening, heard, caption, startedAt, accept, hangUp, speak, endAfterSpeaking, greeted, patience, muted, toggleMute, held, heldAt, toggleHold, micTrouble, micToast, inputId, swapInput };
 }
 
+const BACK_LINE = "i'm back, go ahead.";
 const SHORT_FILLERS = ["hmm.", "mm, okay.", "oh, okay.", "yeah, hmm."];
 const LONG_FILLERS = ["um, let me think that through for a second.", "hmm, give me a sec to think.", "okay, let me think about that."];
 function pickFiller(list: string[], last: { current: string }) {

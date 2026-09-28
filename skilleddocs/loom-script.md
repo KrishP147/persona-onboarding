@@ -1,6 +1,6 @@
 # loom script: the approach (about 5 minutes)
 
-open https://persona-onboarding-omega.vercel.app in chrome on a wide screen (the "why it said that" panel shows at 1280px and up). use the mute button on the call whenever you talk to the camera.
+open https://persona-onboarding-gold.vercel.app in chrome on a wide screen (the "why it said that" panel shows at 1280px and up). use the mute button on the call whenever you talk to the camera.
 
 ## 0. the thesis (20s)
 

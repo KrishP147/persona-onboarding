@@ -1,19 +1,19 @@
 import { type Attachment, type Channel, type Msg, type Session, type SlotKey, type TurnResult } from "../types";
-import { computeDirective, directiveText, recordAsk, MAX_CALL_OFFERS } from "../policy";
+import { computeDirective, directiveText, recordAsk, HOLD_MS, MAX_CALL_OFFERS } from "../policy";
 import { SYSTEM_PROMPT } from "../prompt";
 import { mockReply } from "../mock";
 import { provider, runToolLoop, type Part, type Turn } from "../llm";
 import { recordOutcome } from "../triage";
 import { connectDemo } from "../google";
-import { EVENT_MOVES, chooseMove, markUsed, withAngle } from "../moves";
+import { EVENT_MOVES, chooseMove, markUsed, pick, withAngle } from "../moves";
 import { applyExtracted, extract } from "../extract";
 import { webEnabled } from "../web";
 
 import { currentMeter, metered, percentile, recordTurn, type Meter } from "../usage";
-import { type Ctx, emitAgentText, goodbyeLine, guard, msg, outageLine } from "./context";
-import { CALL_NO, CLEAR_BYE, DELEGATE, DEMO_YES, GMAIL_TROUBLE, HOLD, INSULT_NAME, LAUGH, NAME_ASK, NAME_HINT, NEGATED_CALL, NOT_A_NAME, NO_CALLS, OFFERED_CALL, OWN_NAME, SEND_CMD, SEND_REQUEST, SENT_Q, SKIP_SETUP, THANKS, USER_BYE, WAITING_ON_THEM, WANTS_OUT, YES, asTurnBy, asksForLink, gmailConsent, lastUserText, saidNow, saysBye } from "./intents";
-import { LAUGH_LEAD, cleanModelText, dropDraftEcho, fence, nowLine, parseTypedEmail } from "./text";
-import { GMAIL_ASK_MARK, GUARD_PIPELINE, type GuardEnv, type TurnOpts, rememberQuestions, sealGoodbye } from "./guards";
+import { type Ctx, emitAgentText, ensureCard, goodbyeLine, guard, msg, outageLine } from "./context";
+import { CALL_NO, CARD_ASK, LAUGH_LEAD, CARD_WANT, CLEAR_BYE, DELEGATE, firstSentenceName, fixCallTypos, hintedAgentName, ownNameIn, DEMO_YES, GMAIL_TROUBLE, HOLD, INSULT_NAME, LAUGH, NAME_ASK, NAME_HINT, NEGATED_CALL, NOT_A_NAME, NO_CALLS, OFFERED_CALL, OWN_NAME, SEND_CMD, SEND_REQUEST, SENT_Q, SKIP_SETUP, STOP_TALKING, THANKS, USER_BYE, WAITING_ON_THEM, WANTS_OUT, YES, asTurnBy, asksForLink, gmailConsent, lastUserText, saidNow, saysBye } from "./intents";
+import { cleanModelText, dropDraftEcho, fence, nowLine, parseTypedEmail } from "./text";
+import { GMAIL_ASK_MARK, GUARD_PIPELINE, type TurnOpts, makeGuardEnv, sealGoodbye } from "./guards";
 import { LOOKUP_TOOLS, MAX_TOOL_ROUNDS, TERMS_LINK, TOOLS, WEB_TOOLS, gifAllowed, makeGif, runTool, saveDraftTool, sendEmailTool } from "./tools";
 import { handleEvent } from "./events";
 
@@ -50,9 +50,9 @@ export function toTurns(s: Session): Turn[] {
     if (prev && prev.role === role) prev.parts.push(...parts);
     else out.push({ role, parts });
   });
-  if (out.length === 0 || out[0].role !== "user") out.unshift({ role: "user", parts: [{ type: "text", text: "(user opened the chat)" }] });
+  if (out.length === 0 || out[0].role !== "user") out.unshift({ role: "user", parts: [{ type: "text", text: "[chat opened]" }] });
   // APIs need a final user turn; if the agent spoke last (e.g. event-triggered turn), add a nudge.
-  if (out[out.length - 1].role !== "user") out.push({ role: "user", parts: [{ type: "text", text: "(no new message from the user)" }] });
+  if (out[out.length - 1].role !== "user") out.push({ role: "user", parts: [{ type: "text", text: "[no new message]" }] });
   return out;
 }
 
@@ -151,18 +151,9 @@ export async function turn(
     }
   }
   // Every post-model safety net, in order (guards.ts). Each names itself in Msg.guards when it changes the reply.
-  const env: GuardEnv = {
-    ctx, s, channel, text, failed, usedFallback, extraInstruction, fallback, opts,
-    fix(label, next) {
-      if (next !== env.text) {
-        env.text = next;
-        guard(ctx, label);
-      }
-    },
-  };
+  const env = makeGuardEnv({ ctx, s, channel, text, failed, usedFallback, extraInstruction, fallback, opts });
   for (const step of GUARD_PIPELINE) await step.run(env);
   text = env.text;
-  rememberQuestions(s, text);
   // Ask bookkeeping: credit a question to the slot this turn's move was about (never the fallback line).
   const isQuestion = !usedFallback && text.includes("?");
   const MOVE_SLOT: Record<string, SlotKey> = { "name-me": "agentName", discover: "helpNeed", dig: "helpNeed", offramp: "helpNeed", "ask-name": "userName", "ask-gmail": "gmail" };
@@ -180,10 +171,13 @@ export async function turn(
 
 // Right after the agent asks for its name, a short reply like "Julia" or "call you Max" is the name.
 export async function captureAgentName(s: Session, channel: Channel, text: string): Promise<{ card?: Msg; pending: Promise<void>[] } | undefined> {
-  if (channel !== "text" || s.slots.agentName.status !== "missing" || s.lastAskedSlot !== "agentName") return;
+  // A late name also replaces the "persona" default they got for moving on ("call me", then "luna").
+  const renamingDefault = !!s.agentNameDefaulted && s.slots.agentName.value === "Persona";
+  if (channel !== "text" || (!renamingDefault && (s.slots.agentName.status !== "missing" || s.lastAskedSlot !== "agentName"))) return;
   // Only as the direct answer to the name question: a later "send" or "help" is never a name.
-  const prevAgent = [...s.transcript].slice(0, -1).reverse().find((m) => m.role === "agent" && (!m.kind || m.kind === "text"));
-  if (!prevAgent || !NAME_ASK.test(prevAgent.text)) return;
+  // The name question was asked in the last couple of exchanges ("call me" first, then "luna" still answers it).
+  const askIdx = s.transcript.findLastIndex((m) => m.role === "agent" && NAME_ASK.test(m.text));
+  if (askIdx < 0 || s.transcript.slice(askIdx + 1).filter((m) => m.role === "user").length > 2) return;
   const own = text.trim().match(OWN_NAME);
   if (own) {
     if (s.slots.userName.status !== "filled") {
@@ -197,7 +191,8 @@ export async function captureAgentName(s: Session, channel: Channel, text: strin
   const value = m[1].replace(/\b\p{L}/gu, (c) => c.toUpperCase());
   const ctx: Ctx = { s, channel, actions: [], newMessages: [] };
   await runTool(ctx, "set_slot", { slot: "agentName", value });
-  return { card: ctx.newCard, pending: ctx.pending ?? [] };
+  // A rename updates the one card in place; it still goes out again so they see the new name.
+  return { card: ctx.newCard ?? ctx.newMessages.find((x) => x.kind === "contact_card"), pending: ctx.pending ?? [] };
 }
 
 export async function handleUserMessage(...args: Parameters<typeof handleUserMessageInner>): Promise<TurnResult> {
@@ -267,9 +262,16 @@ export async function handleUserMessageInner(
     // "hold on a sec": a person just says "sure" and waits; no questions, no check-ins for a while.
     if (HOLD.test(clean) && clean.split(/\s+/).length <= 8) {
       s.call.holding = true;
-      const ctx: Ctx = { s, channel, actions: [{ type: "patience", ms: 90000 }], newMessages: [], move: EVENT_MOVES.silence };
+      const ctx: Ctx = { s, channel, actions: [{ type: "patience", ms: HOLD_MS }], newMessages: [], move: EVENT_MOVES.silence };
       emitAgentText(ctx, "sure, take your time.");
       return { session: s, newMessages: [userMsg, ...ctx.newMessages], chips: computeDirective(s, channel).chips, actions: ctx.actions };
+    }
+    // "stop talking" / "shh": yield. No words back (not even "ok i'll stop"), and a long quiet before any check-in.
+    if (STOP_TALKING.test(clean)) {
+      s.call.holding = true;
+      const ctx: Ctx = { s, channel, actions: [{ type: "patience", ms: 90000 }], newMessages: [], move: EVENT_MOVES.silence };
+      guard(ctx, "yielded: they said stop");
+      return { session: s, newMessages: [userMsg], chips: computeDirective(s, channel).chips, actions: ctx.actions };
     }
     // "i'll let you know once it's connected": they're off doing something, so wait like after "hold on".
     s.call.holding = WAITING_ON_THEM.test(clean);
@@ -308,16 +310,40 @@ export async function handleUserMessageInner(
     await Promise.all(named.pending);
     return { session: s, newMessages: [userMsg, ...(early?.msgs ?? []), ...ctx.newMessages], chips: computeDirective(s, channel).chips, actions: [] };
   }
+  // "send me the contact card" / "it's not there": post it again, in code (the model once claimed it had,
+  // then offered to draft an email). The old card moves down instead of duplicating (one card per session).
+  if (CARD_ASK.test(clean) && CARD_WANT.test(clean) && s.slots.agentName.value) {
+    const ctx: Ctx = { s, channel: "text", actions: [], newMessages: [], move: EVENT_MOVES.honest };
+    s.transcript = s.transcript.filter((m) => m.kind !== "contact_card");
+    const card = msg("agent", "text", s.slots.agentName.value, { kind: "contact_card" });
+    emitAgentText(ctx, "here it is. tap it to save me so you know it's me when i call.");
+    s.transcript.push(card);
+    ctx.newMessages.push(card);
+    guard(ctx, "contact card resent in code");
+    const spoken: Msg[] = [];
+    if (s.call.active && channel === "voice") {
+      const v: Ctx = { s, channel: "voice", actions: [], newMessages: [] };
+      emitAgentText(v, "just sent my contact card to our texts.");
+      spoken.push(...v.newMessages);
+    }
+    recordAsk(s, null);
+    return { session: s, newMessages: [userMsg, ...(early?.msgs ?? []), ...ctx.newMessages, ...spoken], chips: computeDirective(s, channel).chips, actions: [] };
+  }
   // They said yes to our call offer: ring now, the way persona does ("calling you now."), no model needed.
   const prevText = [...s.transcript].slice(0, -1).reverse().find((m) => m.role === "agent" && (!m.kind || m.kind === "text"));
   // Asking for a call is the answer; no need to confirm it back ("could we call?" -> ring).
+  const callText = fixCallTypos(clean);
   const asksForCall =
-    /\b(call me(?=\s*($|[.!?,]|(now|back|please|pls|plz|asap|right now|real quick|quick|when|whenever|anytime|later|today|tomorrow|so|and|if|then)\b))|(can|could|should|shall) (we|you) (call|hop on a call|do a call)|let'?s (call|hop on a call|do a call)|give me a (call|ring)|ring me|phone me|hop on a (quick )?call)\b/i.test(clean) &&
-    !NEGATED_CALL.test(clean);
+    /\b(call me(?=\s*($|[.!?,]|(now|back|please|pls|plz|asap|right now|real quick|quick|when|whenever|anytime|later|today|tomorrow|so|and|if|then)\b))|(can|could|should|shall) (we|you) (call|hop on a call|do a call)|let'?s (call|hop on a call|do a call)|give me a (call|ring)|ring me|phone me|hop on a (quick )?call)\b/i.test(callText) &&
+    !NEGATED_CALL.test(callText);
   // A short yes ("sure", "yeah call me") is a yes; "yes but u aren't listening..." is not (it rang once).
   const saidYesToOffer = !!prevText && OFFERED_CALL.test(prevText.text) && YES.test(clean.replace(LAUGH_LEAD, "")) && !/\bbut\b/i.test(clean) && (clean.trim().split(/\s+/).length <= 4 || /\b(call|ring)\b/i.test(clean));
+  // "call me" instead of a name: they moved on without naming it, so it goes by the default (with its card).
+  const defaultForCall = channel === "text" && !s.call.active && asksForCall && !CALL_NO.test(clean) && s.slots.agentName.status === "missing" && s.lastAskedSlot === "agentName";
+  if (defaultForCall) defaultAgentName(s);
   if (channel === "text" && !s.call.active && s.slots.agentName.status !== "missing" && (asksForCall || saidYesToOffer) && !CALL_NO.test(clean)) {
     const ctx: Ctx = { s, channel, actions: [], newMessages: [], move: EVENT_MOVES.callNow };
+    if (defaultForCall) emitAgentText({ ...ctx, move: EVENT_MOVES.defaultName }, SKIPPED_NAME_REPLY);
     const out = await runTool(ctx, "start_call", {});
     if (!out.startsWith("error")) {
       recordAsk(s, null);
@@ -326,7 +352,9 @@ export async function handleUserMessageInner(
       const hadName = s.slots.userName.status === "filled";
       if (e) await applyExtracted(s, { ...e, agentName: null }, async () => {});
       const name = !hadName && s.slots.userName.status === "filled" ? s.slots.userName.value : null;
-      emitAgentText(ctx, name ? `nice to meet you ${name}! calling you now.` : "calling you now.");
+      ensureCard(ctx);
+      const ring = pick(s, "call-now", ["sure, calling you now. it'll be quick and help get you set up.", "calling you now. quick one, just to get you set up.", "on it, calling you now. it won't take long."]);
+      emitAgentText(ctx, name ? `nice to meet you ${name}! ${ring}` : ring);
       return { session: s, newMessages: [userMsg, ...(early?.msgs ?? []), ...ctx.newMessages], chips: computeDirective(s, channel).chips, actions: ctx.actions };
     }
   }
@@ -411,6 +439,7 @@ export async function handleUserMessageInner(
   // "skip all this, just find me sushi": setup ends now, in code, and the request gets answered.
   if (!s.call.active && s.phase !== "graduated" && SKIP_SETUP.test(clean)) {
     s.phase = "graduated";
+    s.graduatedAt ??= new Date().toISOString();
     s.graduatedReason = "they skipped setup";
     for (const k of Object.keys(s.slots) as SlotKey[]) if (s.slots[k].status === "missing") s.slots[k].status = "deferred";
     const bare = /^\s*(ok(ay)?,?\s*)?(can we |let'?s |i want to |just )?skip( all( of)?)?( this| that| it| setup| the setup| the rest)*\W*$/i.test(clean);
@@ -474,7 +503,7 @@ export async function handleUserMessageInner(
     const first = r.newMessages.findIndex((x) => x.role === "agent");
     r.newMessages.splice(first >= 0 ? first : r.newMessages.length, 0, m);
   }
-  if (channel === "voice" && s.call.holding && s.call.active) r.actions.push({ type: "patience", ms: 90000 });
+  if (channel === "voice" && s.call.holding && s.call.active) r.actions.push({ type: "patience", ms: HOLD_MS });
   // Image bytes were for this one reply; storing them would bloat every later read and write.
   if (userMsg.attachments?.some((a) => a.dataUrl)) {
     const i = s.transcript.indexOf(userMsg);
@@ -489,7 +518,7 @@ export async function handleUserMessageInner(
   await Promise.all(named?.pending ?? []);
   const e = await heard;
   // Only rename the assistant from the extractor when they clearly meant to (answering the ask, or "call you X").
-  const meantAgentName = s.lastAskedSlot === "agentName" || /\b(call (you|yourself)|your name|name you|rename)\b/i.test(clean);
+  const meantAgentName = s.lastAskedSlot === "agentName" || /\b(call (you|yourself)|your name|name you|rename)\b/i.test(clean) || NAME_HINT.test(clean);
   await applyExtracted(s, meantAgentName ? e : { ...e, agentName: null }, async (value) => {
     const ctx: Ctx = { s, channel, actions: [], newMessages: [] };
     await runTool(ctx, "set_slot", { slot: "agentName", value });
@@ -504,15 +533,20 @@ export async function handleUserMessageInner(
 }
 
 export async function nameFirst(s: Session, channel: Channel, text: string, heard: ReturnType<typeof extract>): Promise<{ msgs: Msg[]; note: string } | null> {
-  if (channel !== "text" || s.call.active || s.slots.agentName.status !== "missing") return null;
+  // The "Persona" default is a placeholder: naming it for real goes through here too (ack + card before anything else).
+  if (channel !== "text" || s.call.active || (s.slots.agentName.status !== "missing" && !s.agentNameDefaulted)) return null;
   if (s.lastAskedSlot !== "agentName" && !NAME_HINT.test(text)) return null;
   const e = await heard.catch(() => null);
-  const value = e?.agentName?.trim().replace(/\b\p{L}/gu, (c) => c.toUpperCase());
+  const value = (e?.agentName ?? hintedAgentName(text) ?? (s.lastAskedSlot === "agentName" ? firstSentenceName(text) : null))?.trim().replace(/\b\p{L}/gu, (c) => c.toUpperCase());
   if (!value || value.length > 30) return null;
   const ctx: Ctx = { s, channel, actions: [], newMessages: [] };
   if ((await runTool(ctx, "set_slot", { slot: "agentName", value })).startsWith("error")) return null;
   await Promise.all(ctx.pending ?? []);
-  const ack = msg("agent", "text", `${nameAck(value)} here's my contact card so you know it's me.`);
+  // "julia. my name is krish": their name gets said back in the same beat.
+  const theirs = s.slots.userName.status !== "filled" ? (e?.userName?.trim() || ownNameIn(text)) : null;
+  const meet = theirs && theirs.toLowerCase() !== value.toLowerCase() ? theirs.replace(/^\p{L}/u, (c) => c.toUpperCase()) : null;
+  if (meet) s.slots.userName = { ...s.slots.userName, value: meet, status: "filled", source: channel, updatedAt: Date.now() };
+  const ack = msg("agent", "text", `${nameAck(value)}${meet ? ` nice to meet you, ${meet.toLowerCase()}.` : ""} here's my contact card so you know it's me.`);
   s.transcript.push(ack);
   const msgs = [ack];
   if (ctx.newCard) {
@@ -526,8 +560,7 @@ export function nameAck(name: string) {
   return INSULT_NAME.test(name.trim()) ? `ouch, ${name.toLowerCase()}? harsh, but i'll wear it. ${name} it is.` : `${name} it is.`;
 }
 
-export const SKIPPED_NAME = "hey, looks like you skipped my name. i'll go by persona for now, you can rename me anytime";
-export const SKIPPED_NAME_REPLY = "ha, you skipped my name. i'll go by persona for now, rename me anytime";
+export const SKIPPED_NAME_REPLY = "i'll go by persona for now, rename me anytime";
 
 // They didn't pick a name: go by "Persona" (a default they can change with one text) instead of stalling on it.
 export function defaultAgentName(s: Session) {

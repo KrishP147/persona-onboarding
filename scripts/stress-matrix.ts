@@ -170,12 +170,12 @@ const ROWS: Row[] = [
   },
   {
     case: "silence (on a call)",
-    expected: "one check-in on first silence, a spoken goodbye then hangup on the second",
+    expected: "quiet is fine for a long time: a check-in that picks up where they were (25s, 45s after \"hold on\"), a softer one 30s later, a heads-up at about 2 min, then a goodbye and hangup 12s after; never re-pitches setup",
     code: [
       { file: "src/lib/engine/events.ts", symbol: "EVENT_HANDLERS.silence", pattern: /^  silence: async /m },
       { file: "src/lib/engine/events.ts", symbol: "MAX_SILENCE_STRIKES", pattern: /MAX_SILENCE_STRIKES/ },
     ],
-    smoke: { kind: "checks", labels: ["1st silence only checks in", "2nd silence warns and hangs up", "says goodbye before hanging up"] },
+    smoke: { kind: "checks", labels: ["1st silence only checks in", "check-in picks up where they were, never re-pitches setup", "2nd silence: a softer check-in, still no hangup", "at ~2 min: a heads-up, then a gap before the hangup", "then it says goodbye and hangs up", "says goodbye before hanging up"] },
     persona: "silent-caller",
   },
   {

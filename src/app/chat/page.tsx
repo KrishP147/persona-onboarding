@@ -25,6 +25,7 @@ export default function Home() {
   const vw = useViewportWidth();
   // reasoning: off until asked for, remembered
   const [showWhy, setShowWhy] = usePref("persona-show-reasoning", false);
+  const [typingHints, setTypingHints] = usePref("persona-typing-hints", true);
   const [menuOpen, setMenuOpen] = useState(false); // phone: picker, reasoning, restart
   const [hoverId, setHoverRaw] = useState<string | null>(null);
   const [activeId, setActive] = useState<string | null>(null);
@@ -117,7 +118,7 @@ export default function Home() {
 
   return (
     <main className="min-h-dvh bg-canvas text-ink flex flex-col overflow-x-clip">
-      <TopBar skin={picked?.id ?? null} setSkin={setSkin} pill={pill(vw < 768)} onRestart={restart} mock={chat.mock} />
+      <TopBar skin={picked?.id ?? null} setSkin={setSkin} pill={pill(vw < 768)} typingHints={typingHints} toggleTypingHints={() => setTypingHints(!typingHints)} onRestart={restart} mock={chat.mock} />
       {/* phones sit centered; a call adds a second phone and the map joins on the right, all gliding to share the middle (lg+) */}
       <Stage
         sig={[call ? "call" : "", showWhy && lg ? "map" : ""].join("|")}
@@ -166,6 +167,8 @@ export default function Home() {
             const last = turns[turns.length - 1];
             if (last) select(last.m.id);
           }}
+          typingHints={typingHints}
+          setTypingHints={setTypingHints}
           mock={chat.mock}
           onClose={() => setMenuOpen(false)}
           onRestart={() => {

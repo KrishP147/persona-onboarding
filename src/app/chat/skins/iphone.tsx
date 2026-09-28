@@ -3,7 +3,7 @@
 // values + sources in docs/design/phone-ui-spec.md A1 and its fidelity pass
 import type { CSSProperties, ReactNode } from "react";
 import type { BubbleProps, CallProps, ComposerProps, HeaderProps, Pos, RichCardProps, Skin, UnknownProps } from "./types";
-import { AGENT_NUMBER, BubbleBody, BubbleIcon, GoogleG, MicIcon, PersonaLogo, PersonSilhouette, PhoneIcon, RecTimer, callLog, eventKind, isToday, time, useClock, useElapsed } from "./shared";
+import { AGENT_NUMBER, BubbleBody, BubbleIcon, GoogleG, MicIcon, PauseIcon, PersonaLogo, PersonSilhouette, PhoneIcon, RecTimer, callLog, eventKind, isToday, time, useClock, useElapsed } from "./shared";
 
 const BLUE = "var(--ios-blue)";
 const RECV = "var(--ios-recv)";
@@ -176,7 +176,7 @@ function Typing() {
   );
 }
 
-function Composer({ draft, setDraft, onSubmit, onAttach, canSend, recording, transcribing, onMic }: ComposerProps) {
+function Composer({ draft, setDraft, onSubmit, onAttach, canSend, recording, transcribing, onMic, hint }: ComposerProps) {
   return (
     <form
       className="relative z-10 flex items-end gap-2 px-3 pt-2 pb-[calc(var(--sb-bottom)+8px)]"
@@ -200,7 +200,7 @@ function Composer({ draft, setDraft, onSubmit, onAttach, canSend, recording, tra
           <input
             value={draft}
             onChange={(e) => setDraft(e.target.value)}
-            placeholder="iMessage"
+            placeholder={hint ?? "iMessage"}
             aria-label="Message"
             className="flex-1 min-w-0 bg-transparent outline-none text-[17px] leading-[22px] tracking-[-0.4px] py-[7px] text-[var(--ios-ink)] placeholder:text-[var(--ios-placeholder)]"
           />
@@ -393,7 +393,8 @@ function UnknownNotice({ onDismiss }: UnknownProps) {
 
 function CallScreen(p: CallProps) {
   const timer = useElapsed(p.startedAt);
-  const state = p.muted ? "muted" : p.speaking ? "speaking" : p.listening ? "listening" : "";
+  const holdTimer = useElapsed(p.heldAt ?? null);
+  const state = p.held ? "" : p.muted ? "muted" : p.speaking ? "speaking" : p.listening ? "listening" : "";
   // ios 26 phone: 77pt glass circles with a light rim, 15pt labels (apple press, hold assist)
   const circle = "w-[76px] h-[76px] rounded-full flex items-center justify-center";
   const glassDark: CSSProperties = { background: "var(--ios-call-glass)", backdropFilter: "blur(20px) saturate(160%)", WebkitBackdropFilter: "blur(20px) saturate(160%)", border: "1px solid var(--ios-call-rim)" };
@@ -405,7 +406,7 @@ function CallScreen(p: CallProps) {
       {p.status === "connecting" && "calling…"}
       {p.status === "active" && (
         <>
-          <span className="tabular-nums">{timer}</span>
+          <span className="tabular-nums">{p.held ? `on hold · ${holdTimer}` : timer}</span>
           {state && <span className="text-white/50"> · {state}</span>}
         </>
       )}
@@ -427,7 +428,7 @@ function CallScreen(p: CallProps) {
         <div className="text-[34px] leading-[41px] font-semibold tracking-[0.4px]">{p.name}</div>
         {!above && status}
       </div>
-      {p.status === "active" && (
+      {p.status === "active" && !p.held && (
         <div className="mt-8 px-8 space-y-3 text-[16px] leading-[21px] text-center max-w-full">
           {p.said && (
             <div data-caption="agent" className="text-white/90">
@@ -470,6 +471,14 @@ function CallScreen(p: CallProps) {
                   <MicIcon off={p.muted} size={26} />
                 </button>
                 <span className="text-[15px] leading-[20px]" aria-hidden>{p.muted ? "Unmute" : "Mute"}</span>
+              </div>
+            )}
+            {p.onHold && p.status === "active" && (
+              <div className="flex flex-col items-center gap-1.5">
+                <button onClick={p.onHold} aria-pressed={!!p.held} aria-label={p.held ? "Unhold" : "Hold"} className={`${circle} ${p.held ? "bg-white text-black" : ""}`} style={p.held ? undefined : glassDark}>
+                  <PauseIcon size={26} />
+                </button>
+                <span className="text-[12px]" aria-hidden>{p.held ? "Unhold" : "Hold"}</span>
               </div>
             )}
           </div>

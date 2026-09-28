@@ -23,6 +23,16 @@ export function MicIcon({ off, size = 20, stroke = 2 }: { off?: boolean; size?: 
   );
 }
 
+// hold: two bars, like a pause
+export function PauseIcon({ size = 20 }: { size?: number }) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 24 24" fill="currentColor" aria-hidden>
+      <rect x="6" y="4.5" width="4" height="15" rx="1.2" />
+      <rect x="14" y="4.5" width="4" height="15" rx="1.2" />
+    </svg>
+  );
+}
+
 export function BubbleIcon({ size = 20 }: { size?: number }) {
   return (
     <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinejoin="round" aria-hidden>

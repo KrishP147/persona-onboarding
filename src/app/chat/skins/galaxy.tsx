@@ -2,7 +2,7 @@
 // samsung messages on one ui 8, light + dark. see docs/design/phone-ui-spec.md "fidelity pass / galaxy"
 import type { CSSProperties, ReactNode } from "react";
 import type { BubbleProps, CallProps, ComposerProps, HeaderProps, Pos, RichCardProps, Skin, UnknownProps } from "./types";
-import { AGENT_NUMBER, BubbleBody, BubbleIcon, GoogleG, MicIcon, PersonaLogo, PersonSilhouette, PhoneIcon, RecTimer, callLog, eventKind, time, useClock, useElapsed } from "./shared";
+import { AGENT_NUMBER, BubbleBody, BubbleIcon, GoogleG, MicIcon, PauseIcon, PersonaLogo, PersonSilhouette, PhoneIcon, RecTimer, callLog, eventKind, time, useClock, useElapsed } from "./shared";
 
 // colors are --sam-* vars on .sk-sam (globals.css), light + dark
 const C = {
@@ -159,7 +159,7 @@ function Typing() {
   );
 }
 
-function Composer({ draft, setDraft, onSubmit, onAttach, canSend, recording, transcribing, onMic }: ComposerProps) {
+function Composer({ draft, setDraft, onSubmit, onAttach, canSend, recording, transcribing, onMic, hint }: ComposerProps) {
   return (
     <form
       className="flex items-center gap-2 px-2 pt-2 pb-[calc(var(--sb-bottom)+8px)]"
@@ -183,7 +183,7 @@ function Composer({ draft, setDraft, onSubmit, onAttach, canSend, recording, tra
           <input
             value={draft}
             onChange={(e) => setDraft(e.target.value)}
-            placeholder="Enter message"
+            placeholder={hint ?? "Enter message"}
             aria-label="Message"
             className="flex-1 min-w-0 bg-transparent outline-none text-[16px] placeholder:text-[var(--sam-placeholder)]"
             style={{ color: C.ink }}
@@ -379,7 +379,8 @@ function UnknownNotice({ onAdd, onDismiss }: UnknownProps) {
 // circle inside it. dark in both themes, like the call background
 function CallScreen(p: CallProps) {
   const timer = useElapsed(p.startedAt);
-  const state = p.muted ? "muted" : p.speaking ? "speaking" : p.listening ? "listening" : "";
+  const holdTimer = useElapsed(p.heldAt ?? null);
+  const state = p.held ? "" : p.muted ? "muted" : p.speaking ? "speaking" : p.listening ? "listening" : "";
   const tile = "w-[76px] h-14 rounded-[18px] flex items-center justify-center transition-colors";
   return (
     <div
@@ -395,7 +396,7 @@ function CallScreen(p: CallProps) {
           {p.status === "connecting" && "Calling…"}
           {p.status === "active" && (
             <span>
-              <span className="tabular-nums">{timer}</span>
+              <span className="tabular-nums">{p.held ? `on hold · ${holdTimer}` : timer}</span>
               {state && ` · ${state}`}
             </span>
           )}
@@ -409,7 +410,7 @@ function CallScreen(p: CallProps) {
           </div>
         )}
       </div>
-      {p.status === "active" && (
+      {p.status === "active" && !p.held && (
         <div className="mt-6 px-8 space-y-3 text-[15px] leading-[21px] text-center">
           {p.said && (
             <div data-caption="agent" className="text-white/90">
@@ -454,6 +455,14 @@ function CallScreen(p: CallProps) {
                   <MicIcon off={p.muted} size={25} stroke={1.7} />
                 </button>
                 <span className="text-[13px] text-white/90" aria-hidden>{p.muted ? "Unmute" : "Mute"}</span>
+              </div>
+            )}
+            {p.onHold && p.status === "active" && (
+              <div className="flex flex-col items-center gap-1">
+                <button onClick={p.onHold} aria-pressed={!!p.held} aria-label={p.held ? "Unhold" : "Hold"} className={`${tile} ${p.held ? "bg-white text-black" : ""}`}>
+                  <PauseIcon size={22} />
+                </button>
+                <span className="text-[13px] text-white/90" aria-hidden>{p.held ? "Unhold" : "Hold"}</span>
               </div>
             )}
           </div>

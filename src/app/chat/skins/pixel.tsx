@@ -3,7 +3,7 @@
 // (globals.css): dark measured off the user's own pixel, light = gm3 baseline. see phone-ui-spec.md fidelity pass
 import type { CSSProperties, ReactNode } from "react";
 import type { BubbleProps, CallProps, ComposerProps, HeaderProps, Pos, RichCardProps, Skin, UnknownProps } from "./types";
-import { AGENT_NUMBER, BubbleBody, BubbleIcon, GoogleG, MicIcon, PersonaLogo, PersonSilhouette, PhoneIcon, RecTimer, callLog, eventKind, isToday, time, useClock, useElapsed } from "./shared";
+import { AGENT_NUMBER, BubbleBody, BubbleIcon, GoogleG, MicIcon, PauseIcon, PersonaLogo, PersonSilhouette, PhoneIcon, RecTimer, callLog, eventKind, isToday, time, useClock, useElapsed } from "./shared";
 
 const C = {
   app: "var(--gm-app)",
@@ -163,7 +163,7 @@ function Typing() {
   );
 }
 
-function Composer({ draft, setDraft, onSubmit, onAttach, canSend, recording, transcribing, onMic }: ComposerProps) {
+function Composer({ draft, setDraft, onSubmit, onAttach, canSend, recording, transcribing, onMic, hint }: ComposerProps) {
   return (
     <form
       className="flex items-center gap-2 px-3 pt-2 pb-[calc(var(--sb-bottom)+8px)]"
@@ -189,7 +189,7 @@ function Composer({ draft, setDraft, onSubmit, onAttach, canSend, recording, tra
           <input
             value={draft}
             onChange={(e) => setDraft(e.target.value)}
-            placeholder="RCS message"
+            placeholder={hint ?? "RCS message"}
             aria-label="Message"
             className="flex-1 min-w-0 bg-transparent outline-none pl-2 text-[16px] text-[var(--gm-ink)] placeholder:text-[var(--gm-mute)]"
           />
@@ -413,7 +413,8 @@ function Cookie({ size, color }: { size: number; color: string }) {
 // in a rounded-top panel. follows the page theme like the real phone app
 function CallScreen(p: CallProps) {
   const timer = useElapsed(p.startedAt);
-  const state = p.muted ? "muted" : p.speaking ? "speaking" : p.listening ? "listening" : "";
+  const holdTimer = useElapsed(p.heldAt ?? null);
+  const state = p.held ? "" : p.muted ? "muted" : p.speaking ? "speaking" : p.listening ? "listening" : "";
   const oval = "w-20 h-16 rounded-full flex items-center justify-center transition-[border-radius] active:rounded-[20px]";
   return (
     <div
@@ -429,7 +430,7 @@ function CallScreen(p: CallProps) {
           {p.status === "connecting" && "Calling…"}
           {p.status === "active" && (
             <span>
-              <span className="tabular-nums">{timer}</span>
+              <span className="tabular-nums">{p.held ? `on hold · ${holdTimer}` : timer}</span>
               {state && ` · ${state}`}
             </span>
           )}
@@ -444,7 +445,7 @@ function CallScreen(p: CallProps) {
           <div className="relative">{p.saved ? <PersonaLogo size={108} /> : <UnknownAvatar size={108} />}</div>
         </div>
       </div>
-      {p.status === "active" && (
+      {p.status === "active" && !p.held && (
         <div className="mt-5 px-8 space-y-3 text-[15px] leading-[21px] text-center">
           {p.said && (
             <div data-caption="agent" className="text-[var(--gm-ink)]">
@@ -488,6 +489,14 @@ function CallScreen(p: CallProps) {
                   <MicIcon off={p.muted} size={24} />
                 </button>
                 <span className="text-[14px]" style={{ color: C.mute }} aria-hidden>{p.muted ? "Unmute" : "Mute"}</span>
+              </div>
+            )}
+            {p.onHold && p.status === "active" && (
+              <div className="flex flex-col items-center gap-2">
+                <button onClick={p.onHold} aria-pressed={!!p.held} aria-label={p.held ? "Unhold" : "Hold"} className={oval} style={p.held ? { background: "var(--gm-call-on)", color: "var(--gm-call-on-ink)", borderRadius: 20 } : { background: "var(--gm-call-btn)" }}>
+                  <PauseIcon size={24} />
+                </button>
+                <span className="text-[14px]" style={{ color: C.mute }} aria-hidden>{p.held ? "Unhold" : "Hold"}</span>
               </div>
             )}
           </div>

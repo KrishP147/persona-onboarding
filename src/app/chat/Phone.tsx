@@ -125,6 +125,7 @@ export function PhoneScreen({
       <S.Composer
         draft={chat.draft}
         setDraft={chat.setDraft}
+        hint={chat.hint}
         onSubmit={() => void chat.send(chat.draft)}
         onAttach={() => fileRef.current?.click()}
         canSend={!!chat.draft.trim() || chat.pending.length > 0}
@@ -176,6 +177,9 @@ export function CallPhone({ skin, chat, zoom }: { skin: Skin; chat: Chat; zoom: 
             onHangup={() => call.hangUp("user_hangup")}
             muted={call.muted}
             onMute={call.toggleMute}
+            held={call.held}
+            heldAt={call.heldAt}
+            onHold={call.toggleHold}
           />
           <MicTrouble call={call} />
         </div>
