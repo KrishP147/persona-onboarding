@@ -15,7 +15,7 @@ export const LAUGH_LEAD = new RegExp(`^\\s*${LAUGH_TOKEN}[!., ]+`, "iu");
 export const THANKS = /^\s*(thanks|thank you|thx|ty|tysm|appreciate it)[!. ]*\s*$/i;
 
 // The phrases that hang up a call with no model involved (stricter than USER_BYE: no bare "later" or "i'm good").
-export const CLEAR_BYE = /\b(end (the |this )?call|hang up|you can go|let'?s end|bye|goodbye|gotta go|got to go|talk (to you )?(soon|later)|see (you|ya)|that'?s all|that'?s it)\b/i;
+export const CLEAR_BYE = /\b(end (the |this )?call|hang up|you can go|let'?s end|bye|goodbye|gotta go|got to go|talk (to you )?(soon|later)|see (you|ya)|that'?s all for now)\b/i;
 export const WANTS_OUT = /\b(skip|not now|later|no more questions|stop asking|just (help|do|get)|let'?s (just )?(start|go)|that'?s (it|all)|i'?m good|i'?m done|enough setup|just let me (use|try)|stop)\b/i;
 // They're wrapping up: only then does the agent hang up on its own.
 export const USER_BYE = /\b(end (the |this )?call|hang up|you can go|let'?s end|that'?s enough|bye|goodbye|gotta go|got to go|have to go|need to go|talk (to you )?(soon|later)|that'?s (all|it)|i'?m (done|good|all set)|see (you|ya)|catch you later|later then|laters|hang up|nothing else)\b/i;
@@ -31,6 +31,8 @@ export function saysBye(text: string, phrases: RegExp = USER_BYE) {
   const last = parts[parts.length - 1] ?? "";
   // A question at the end means they're still talking ("i'll do it later, can you check my inbox?").
   if (last.trim().endsWith("?")) return false;
+  // A question anywhere ("what do you mean you're bad? that's it.") means they're still in it, unless it plainly says bye.
+  if (t.includes("?") && !/\b(bye|goodbye|gotta go|got to go)\b/i.test(last)) return false;
   return phrases.test(last) && last.split(/\s+/).length <= 10;
 }
 export function userWrappingUp(s: Session) {
@@ -65,6 +67,8 @@ export const SKIP_OFFER = /\b(skip|jump (right )?in|get (right )?started|start (
 // Agreement that doesn't start with "yes" ("that'd be great", "please do").
 export const AGREE = /\b(that'?d be (great|good|nice|awesome|perfect|amazing)|that would be (great|good|nice|awesome|perfect)|sounds (good|great|perfect)|please do|go for it|absolutely|definitely|of course|for sure|yes please)\b/i;
 // "stop talking", "shh", "enough": on a call, the agent yields.
+// They're asking what setup involves ("what do i need to set up?", "how does this work?").
+export const SETUP_Q = /\b(set ?up|what do (i|you) need|what('?s| is) (next|left)|how does (this|it) work|what('?s| is) involved|what are the steps)\b/i;
 export const STOP_TALKING = /^\s*(ok(ay)?,? )?(stop( talking| it)?|shh+|hush|quiet|be quiet|enough|stop stop|zip it)[.! ]*$/i;
 export const YES = /^\s*((oh|ah|um+|uh+|well|hmm+|haha)[,.!]?\s+)?(yes|yeah|yep|yup|sure|ok(ay)?|do it|please|go ahead|let'?s do it|sounds good|perfect)\b/i;
 
@@ -205,7 +209,7 @@ export const INTENTS: Record<string, IntentDef> = {
   MASCULINE: { re: MASCULINE, means: "a name that sounds masculine (voice pick)", says: ["max", "Jarvis"], notSays: ["julia", "maximus"] },
   LAUGH: { re: LAUGH, means: "the whole message is laughter", says: ["haha", "lol lol", "😂"], notSays: ["haha that's funny", "hello"] },
   THANKS: { re: THANKS, means: "the whole message is thanks", says: ["thanks!", "thank you", "ty"], notSays: ["thanks, can you check my inbox?"] },
-  CLEAR_BYE: { re: CLEAR_BYE, means: "a goodbye clear enough to hang up with no model", says: ["bye", "gotta go", "talk soon"], notSays: ["i'm good", "later i need help with email"] },
+  CLEAR_BYE: { re: CLEAR_BYE, means: "a goodbye clear enough to hang up with no model", says: ["bye", "gotta go", "talk soon"], notSays: ["i'm good", "later i need help with email", "that's it"] },
   WANTS_OUT: { re: WANTS_OUT, means: "they want out of setup", says: ["skip", "stop asking me stuff", "just help me"], notSays: ["my name is kate", "help with my calendar"] },
   USER_BYE: { re: USER_BYE, means: "they're wrapping up", says: ["ok bye", "that's all", "catch you later"], notSays: ["i'll do it later", "what can you do?"] },
   DONT_BYE: { re: DONT_BYE, means: "the opposite of a bye", says: ["don't hang up", "i'm not done", "no need to go yet"], notSays: ["ok bye", "don't forget my list"] },
@@ -216,6 +220,7 @@ export const INTENTS: Record<string, IntentDef> = {
   SKIP_OFFER: { re: SKIP_OFFER, means: "our offer to skip ahead", says: ["want to skip the rest?", "want to jump right in?"], notSays: ["what should i call you?"] },
   YES: { re: YES, means: "a yes at the start", says: ["yes", "oh, yeah sure", "sounds good"], notSays: ["no", "maybe yes", "haha"] },
   AGREE: { re: AGREE, means: "agreement without a leading yes", says: ["that'd be great", "please do", "sounds good"], notSays: ["that's a lot", "i'm good"] },
+  SETUP_Q: { re: SETUP_Q, means: "asking what setup involves", says: ["what do i need to set up?", "how does this work?"], notSays: ["what's up", "set the table"] },
   STOP_TALKING: { re: STOP_TALKING, means: "stop talking (on a call: yield)", says: ["Stop talking.", "shh", "ok, stop"], notSays: ["stop by the store later", "don't stop"] },
   CALL_OK: { re: CALL_OK, means: "ok to ring them", says: ["sure", "call me", "k"], notSays: ["haha", "hmm"] },
   DELEGATE: { re: DELEGATE, means: "they hand us the choice", says: ["you pick", "idk", "surprise me"], notSays: ["luna", "i pick luna"] },

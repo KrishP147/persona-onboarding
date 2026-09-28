@@ -12,7 +12,7 @@ export async function mockReply(ctx: Ctx, runTool: RunTool): Promise<string> {
   const last = [...s.transcript].reverse().find((m) => m.role === "user");
   const text = last?.text.toLowerCase() ?? "";
 
-  const agentName = text.match(/(?:call you|name you|you(?:'re| are))\s+([a-z]+)/)?.[1];
+  const agentName = text.match(/(?:call you|name you)\s+([a-z]+)/)?.[1]; // "you're bad" is a reaction, not a name
   const userName = text.match(/(?:call me|i'm|i am|my name is|name's)\s+([a-z]+)/)?.[1];
   const need = text.match(/(?:help (?:me )?with|i need|i want)\s+(.+)/)?.[1];
 

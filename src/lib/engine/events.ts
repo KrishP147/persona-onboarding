@@ -123,7 +123,14 @@ export const EVENT_HANDLERS: { [K in SessionEvent["type"]]: EventHandler<K> } = 
           : "The line dropped on our side.";
     // One strict pass over the call fills slots still empty (never overwrites); the recap says what it caught.
     const caught = await reconcileCall(s);
-    const r = await turn(s, "text", `${RECAP_INSTRUCTION} ${how} Call lasted ${secs}s.${Object.keys(caught).length ? " A separate line after yours says what you caught from the call; don't repeat it." : ""}`, recapFallback(s, e.reason), {
+    // Nothing to recap (no need heard): written in code. The model once "remembered" job applications nobody mentioned.
+    const r: TurnResult = !s.slots.helpNeed.value
+      ? (() => {
+          const ctx: Ctx = { s, channel: "text", actions: [], newMessages: [], move: EVENT_MOVES.recap, guards: ["recap written by code (nothing to recap)"] };
+          emitAgentText(ctx, recapFallback(s, e.reason));
+          return { session: s, newMessages: ctx.newMessages, chips: computeDirective(s, "text").chips, actions: [] };
+        })()
+      : await turn(s, "text", `${RECAP_INSTRUCTION} ${how} Call lasted ${secs}s.${Object.keys(caught).length ? " A separate line after yours says what you caught from the call; don't repeat it." : ""}`, recapFallback(s, e.reason), {
       move: EVENT_MOVES.recap,
       avoid: e.reason === "agent_ended" ? /\b(cut off|dropped|lost you|got disconnected)\b/i : undefined,
     });

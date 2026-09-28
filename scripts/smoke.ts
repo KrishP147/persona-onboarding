@@ -1,6 +1,6 @@
 // Keyless smoke test of the engine's safety nets (mock mode). Run: pnpm tsx scripts/smoke.ts
 import { getSecret, loadSession, newSession, saveSession, setSecret, withSession } from "../src/lib/store";
-import { CLAIMS_LINK, GUARD_PIPELINE, fixCallTypos, INTENTS, cleanModelText, cutRepeatQuestions, fence, fromEmailOnly, runTool, handleEvent, normQuestion, saysBye, softenGmailDemand, handleUserMessage, nowLine, parseTypedEmail, MAX_BUBBLES, emitAgentText } from "../src/lib/engine";
+import { CLAIMS_LINK, GUARD_PIPELINE, fixCallTypos, makeGuardEnv, INTENTS, cleanModelText, cutRepeatQuestions, fence, fromEmailOnly, runTool, handleEvent, normQuestion, saysBye, softenGmailDemand, handleUserMessage, nowLine, parseTypedEmail, MAX_BUBBLES, emitAgentText } from "../src/lib/engine";
 import { crc32, pick } from "../src/lib/moves";
 import { readMood } from "../src/lib/mood";
 import { DEMO_INBOX, scoreItem } from "../src/lib/triage";
@@ -476,7 +476,7 @@ async function main() {
   // language: two bubbles max, no accusations, no guesses stated as fact, the name used well
   const step = async (name: string, ss: typeof s, text: string) => {
     const ctx = { s: ss, channel: "text" as const, actions: [], newMessages: [] } as Parameters<typeof emitAgentText>[0];
-    const env = { ctx, s: ss, channel: "text" as const, text, failed: false, usedFallback: false, opts: {}, fix(label: string, next: string) { if (next !== env.text) { env.text = next; (ctx.guards ??= []).push(label); } } };
+    const env = { ctx, s: ss, channel: "text" as const, text, failed: false, usedFallback: false, opts: {}, fix(label: string, next: string) { if (next !== env.text) { env.text = next; (ctx.guards ??= []).push(label); } }, trim(label: string, next: string) { env.fix(label, next); } };
     await GUARD_PIPELINE.find((g) => g.name === name)!.run(env);
     return { text: env.text, guards: ctx.guards ?? [] };
   };
@@ -603,6 +603,28 @@ async function main() {
   const nameOnly = await first("julia. you can call me krish");
   check("'you can call me krish' is their name, not a ring", !nameOnly.rang && nameOnly.f.slots.userName.value === "Krish", nameOnly.lines.join(" | "));
   check("typo'd call words", ["clal me", "cal me", "caal me", "cll me"].every((x) => fixCallTypos(x) === "call me") && fixCallTypos("tell me") === "tell me" && fixCallTypos("all me") === "all me", "");
+
+  // replay of a call where it "didn't listen" (session kGvKVGwpTIQc): cuts left fragments, "that's it" hung up, the recap invented a need
+  const lis = await onCall();
+  const said1 = (t: string) => lis.c.transcript.push({ id: `u${lis.c.transcript.length}`, role: "user", channel: "voice", ts: Date.now(), text: t });
+  const runStep = async (name: string, text: string) => {
+    const ctx = { s: lis.c, channel: "voice" as const, actions: [], newMessages: [] } as Parameters<typeof emitAgentText>[0];
+    const env = makeGuardEnv({ ctx, s: lis.c, channel: "voice", text, failed: false, usedFallback: false, opts: {} });
+    await GUARD_PIPELINE.find((g) => g.name === name)!.run(env);
+    return { text: env.text, guards: ctx.guards ?? [] };
+  };
+  said1("curious.");
+  const frag = await runStep("gmail-by-the-book", "Makes sense. Connecting your gmail is the main thing, so I can actually help with your email. Sound useful?");
+  check("a cut that would leave a fragment keeps the reply whole", /help with your email/.test(frag.text) && frag.guards.some((g) => g.startsWith("kept whole")), `${frag.text} ${frag.guards}`);
+  said1("Exactly do I need to set up?");
+  const setup = await runStep("gmail-by-the-book", "Just a couple things: your name, and connecting your gmail so I can help with email. And then we figure out what you want me working on.");
+  check("'what do i need to set up?': gmail is the answer, never held", /connecting your gmail/.test(setup.text) && !setup.guards.includes("gmail pitch held for its own turn"), setup.text);
+  const notBye = await handleUserMessage(lis.c, "voice", "What do mean you're bad? That's it.");
+  check("\"what do you mean...? that's it.\" is not a bye", !notBye.actions.some((a) => a.type === "end_call") && lis.c.call.active, said(notBye));
+  lis.c.slots.helpNeed = { ...lis.c.slots.helpNeed, value: null, status: "missing" };
+  const endR = await handleEvent(lis.c, { type: "call_ended", reason: "user_hangup" });
+  const recapT = endR.newMessages.filter((m) => m.role === "agent" && m.channel === "text" && !m.kind);
+  check("no need heard: one code-written recap, nothing invented", recapT.length === 1 && !/job|application|recruit/i.test(recapT[0].text) && !!recapT[0].guards?.some((g) => g.startsWith("recap written by code")), recapT.map((m) => m.text).join(" | "));
 
   // the guard pipeline runs in a fixed, named order (goodbye before hangup comes before the gmail rules, etc.)
   const order = GUARD_PIPELINE.map((g) => g.name);

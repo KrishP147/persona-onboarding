@@ -13,7 +13,7 @@ import { currentMeter, metered, percentile, recordTurn, type Meter } from "../us
 import { type Ctx, emitAgentText, ensureCard, goodbyeLine, guard, msg, outageLine } from "./context";
 import { CALL_NO, CARD_ASK, LAUGH_LEAD, CARD_WANT, CLEAR_BYE, DELEGATE, firstSentenceName, fixCallTypos, hintedAgentName, ownNameIn, DEMO_YES, GMAIL_TROUBLE, HOLD, INSULT_NAME, LAUGH, NAME_ASK, NAME_HINT, NEGATED_CALL, NOT_A_NAME, NO_CALLS, OFFERED_CALL, OWN_NAME, SEND_CMD, SEND_REQUEST, SENT_Q, SKIP_SETUP, STOP_TALKING, THANKS, USER_BYE, WAITING_ON_THEM, WANTS_OUT, YES, asTurnBy, asksForLink, gmailConsent, lastUserText, saidNow, saysBye } from "./intents";
 import { cleanModelText, dropDraftEcho, fence, nowLine, parseTypedEmail } from "./text";
-import { GMAIL_ASK_MARK, GUARD_PIPELINE, type GuardEnv, type TurnOpts, rememberQuestions, sealGoodbye } from "./guards";
+import { GMAIL_ASK_MARK, GUARD_PIPELINE, type TurnOpts, makeGuardEnv, rememberQuestions, sealGoodbye } from "./guards";
 import { LOOKUP_TOOLS, MAX_TOOL_ROUNDS, TERMS_LINK, TOOLS, WEB_TOOLS, gifAllowed, makeGif, runTool, saveDraftTool, sendEmailTool } from "./tools";
 import { handleEvent } from "./events";
 
@@ -151,15 +151,7 @@ export async function turn(
     }
   }
   // Every post-model safety net, in order (guards.ts). Each names itself in Msg.guards when it changes the reply.
-  const env: GuardEnv = {
-    ctx, s, channel, text, failed, usedFallback, extraInstruction, fallback, opts,
-    fix(label, next) {
-      if (next !== env.text) {
-        env.text = next;
-        guard(ctx, label);
-      }
-    },
-  };
+  const env = makeGuardEnv({ ctx, s, channel, text, failed, usedFallback, extraInstruction, fallback, opts });
   for (const step of GUARD_PIPELINE) await step.run(env);
   text = env.text;
   rememberQuestions(s, text);

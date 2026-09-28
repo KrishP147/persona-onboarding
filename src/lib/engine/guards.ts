@@ -2,7 +2,7 @@ import { type Channel, type InboxItem, type Move, type Session, type TurnResult 
 import { provider, quick } from "../llm";
 import { EVENT_MOVES } from "../moves";
 import { type Ctx, emitAgentText, ensureCard, goodbyeLine, guard, msg, shortNeed } from "./context";
-import { CARD_ASK, NAME_ASK, SEND_REQUEST, gmailConsent, saidNow, userWrappingUp } from "./intents";
+import { CARD_ASK, NAME_ASK, SEND_REQUEST, SETUP_Q, gmailConsent, saidNow, userWrappingUp } from "./intents";
 import { runTool } from "./tools";
 import { ACCUSING, ASSUMING, NARRATION, STAGE_DIRECTION, CLAIMS_LINK, CLAIMS_SENT, GOODBYE, SENTENCE_BREAK, capSentences, cleanModelText } from "./text";
 
@@ -142,6 +142,30 @@ export interface GuardEnv {
   fallback?: string;
   opts: TurnOpts;
   fix(label: string, next: string): void;
+  // A style cut (not a safety one): skipped when it would leave a fragment ("Got it." from a real answer).
+  trim(label: string, next: string): void;
+}
+// fix() swaps in a guarded version and names the guard if it changed anything. trim() is for style cuts:
+// it refuses to leave a fragment (under 6 words and under half the reply), keeping the reply whole instead.
+export function makeGuardEnv(init: Omit<GuardEnv, "fix" | "trim">): GuardEnv {
+  const env: GuardEnv = {
+    ...init,
+    fix(label, next) {
+      if (next !== env.text) {
+        env.text = next;
+        guard(env.ctx, label);
+      }
+    },
+    trim(label, next) {
+      const words = (x: string) => x.split(/\s+/).filter(Boolean).length;
+      if (next !== env.text && words(next) < 6 && words(next) < words(env.text) * 0.5) {
+        guard(env.ctx, `kept whole: "${label}" would have left a fragment`);
+        return;
+      }
+      env.fix(label, next);
+    },
+  };
+  return env;
 }
 export interface GuardStep {
   name: string;
@@ -224,14 +248,15 @@ export const GUARD_PIPELINE: GuardStep[] = [
       const { ctx, s, channel } = e;
       // Gmail, by the book: the gmail turn ends with the code-written question; other turns don't pitch it.
       if ((!e.extraInstruction || ctx.softInstruction) && s.slots.gmail.status === "missing" && !ctx.newMessages.some((m) => m.kind === "gmail_link")) {
-        const raisedIt = /\b(gmail|email|inbox|link)\b/i.test(saidNow(s));
+        // "what do i need to set up?": gmail is part of the answer, never held back.
+        const raisedIt = /\b(gmail|email|inbox|link)\b/i.test(saidNow(s)) || SETUP_Q.test(saidNow(s));
         const help = e.text.split(SENTENCE_BREAK).filter((x) => !GMAIL_PITCH.test(x) && !(ctx.move?.id === "ask-gmail" && /\b(without your (ok|okay)|won.?t send)/i.test(x))).join(" ").trim();
         if (ctx.move?.id === "ask-gmail") {
           // On a call: one sentence of help, then the ask, so the question is never cut off.
           const lead = channel === "voice" ? capSentences(help.replace(/\?[^?]*$/, "."), 1) : help;
           e.fix("gmail ask written by code", `${lead}${lead ? (channel === "voice" ? " " : "\n\n") : ""}${gmailAsk(s, channel)}`.trim());
         }
-        else if (!raisedIt && help) e.fix("gmail pitch held for its own turn", help);
+        else if (!raisedIt && help) e.trim("gmail pitch held for its own turn", help);
         // Even when they brought up their inbox, gmail is never a demand ("first though, i'll need your gmail
         // connected"): that line becomes the one polite, skippable ask (once, never while a link is out).
         else if (ctx.move?.id !== "ask-gmail") e.fix("gmail demand softened", softenGmailDemand(s, channel, e.text));
@@ -247,7 +272,7 @@ export const GUARD_PIPELINE: GuardStep[] = [
       const linkWaiting = linkPending(s) && !ctx.newMessages.some((m) => m.kind === "gmail_link");
       if ((s.slots.gmail.status !== "missing" || linkWaiting) && !/\b(gmail|google|link|connect)\b/i.test(saidNow(s))) {
         const kept = e.text.split(SENTENCE_BREAK).filter((x) => !GMAIL_ASKISH.test(x)).join(" ").trim();
-        if (kept) e.fix("repeat gmail ask dropped", kept);
+        if (kept) e.trim("repeat gmail ask dropped", kept);
       }
     },
   },
@@ -261,7 +286,7 @@ export const GUARD_PIPELINE: GuardStep[] = [
         const lastTwo = s.transcript.filter((m) => m.role === "agent" && m.channel === "voice" && m.move?.id !== "silence").slice(-2);
         if (lastTwo.length === 2 && lastTwo.every((m) => m.text.trim().endsWith("?"))) {
           const kept = e.text.split(SENTENCE_BREAK).filter((x) => !x.trim().endsWith("?")).join(" ").trim();
-          if (kept) e.fix("blocked a third question in a row", kept);
+          if (kept) e.trim("blocked a third question in a row", kept);
         }
       }
     },
@@ -273,7 +298,7 @@ export const GUARD_PIPELINE: GuardStep[] = [
       // Already named: never ask "what should i go by?" again (it did, on a call, right after being named).
       if (s.slots.agentName.status === "filled" && NAME_ASK.test(e.text)) {
         const kept = e.text.split(SENTENCE_BREAK).filter((x) => !NAME_ASK.test(x)).join(" ").trim();
-        if (kept) e.fix("blocked repeat name question", kept);
+        if (kept) e.trim("blocked repeat name question", kept);
       }
     },
   },
@@ -386,7 +411,8 @@ export const GUARD_PIPELINE: GuardStep[] = [
       // One question per message, and never one it already asked: a targeted rewrite on a miss, else the cut.
       if (!e.usedFallback && ctx.move?.id !== "ask-gmail") {
         const fixed = await noRepeatQuestions(s, e.text);
-        if (fixed.label) e.fix(fixed.label, fixed.text);
+        if (fixed.label === "rewrote a repeat question") e.fix(fixed.label, fixed.text);
+        else if (fixed.label) e.trim(fixed.label, fixed.text);
       }
     },
   },
