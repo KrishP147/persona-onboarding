@@ -166,7 +166,7 @@ function toTurns(s: Session): Turn[] {
     // Two streams: what's said on the call, and what's in the text chat. Label both once a call exists.
     const hadCall = s.call.active || s.transcript.some((x) => x.channel === "voice");
     const prefix = !hadCall ? "" : m.role === "user" ? (m.channel === "voice" ? "(said on the call) " : "(texted in the chat) ") : m.channel === "text" ? "(posted in the chat) " : "";
-    let text = m.kind === "gmail_link" ? `${prefix}[the Connect Gmail link card]` : m.kind === "gif" ? `${prefix}[a gif]` : prefix + m.text;
+    let text = m.kind === "gmail_link" ? `${prefix}[the Connect Gmail link card]` : m.kind === "gif" ? `${prefix}[a gif]` : prefix + (m.role === "user" ? fence("user_said", m.text) : m.text);
     if (m.cutOff) text += " [they cut in here; the rest wasn't heard]";
     if (m.attachments?.length) text += "\n" + m.attachments.map(attachmentText).join("\n");
     const parts: Part[] = [];
@@ -472,7 +472,7 @@ async function runTool(ctx: Ctx, name: string, input: Record<string, unknown>): 
       if (!items) return "error: your access to their inbox has expired. tell them honestly and offer to send the link again to reconnect. don't guess what's in there";
       if (!items.length) return `no messages match "${query}".`;
       return items
-        .map((m, i) => `${i + 1}. from ${m.fromName} | ${m.subject || "(no subject)"} | ${new Date(m.date).toLocaleDateString("en-US", { month: "short", day: "numeric" })} | ${m.snippet.slice(0, 140)}`)
+        .map((m, i) => `${i + 1}. ${new Date(m.date).toLocaleDateString("en-US", { month: "short", day: "numeric" })} ${fence("email_content", `from ${m.fromName} | ${m.subject || "(no subject)"} | ${m.snippet.slice(0, 140)}`)}`)
         .join("\n");
     }
     case "save_draft":
@@ -539,7 +539,11 @@ async function generate(ctx: Ctx, extraInstruction?: string): Promise<string> {
   state += `\n${nowLine(s.tz)}`;
   if (!webEnabled()) state += "\nNo web access right now: help from memory and say so.";
   const tools = webEnabled() ? TOOLS : TOOLS.filter((t) => !WEB_TOOLS.has(t.name));
-  const r = await runToolLoop({ system: SYSTEM_PROMPT, state, turns: toTurns(s), tools, maxRounds: MAX_TOOL_ROUNDS, lookup: LOOKUP_TOOLS }, (c) => runTool(ctx, c.name, c.input));
+  const r = await runToolLoop({ system: SYSTEM_PROMPT, state, turns: toTurns(s), tools, maxRounds: MAX_TOOL_ROUNDS, lookup: LOOKUP_TOOLS }, async (c) => {
+    // Our own "error: ..." notes stay bare (the loop keys off that prefix); everything a tool brought back is fenced.
+    const out = (await runTool(ctx, c.name, c.input)).replace(/<\/?\s*tool_result\b[^>]*>/gi, "");
+    return out.startsWith("error") ? out : `<tool_result name="${c.name}">${out}</tool_result>`;
+  });
   if (r.refused) return "hmm, i can't help with that one. anything else on your mind?";
   // It typed an email out instead of using save_draft: save it for it, so "send" has something real to send.
   if (!ctx.shownDraft && ctx.channel === "text") {
@@ -633,7 +637,7 @@ function narratesAbout(x: string, userName?: string | null) {
 
 export function cleanModelText(t: string, userName?: string | null) {
   // The chat shows plain text, like sms: markdown bold/headers would show as literal symbols.
-  const cleaned = t.replace(/\*\*([^*\n]+)\*\*/g, "$1").replace(/^#{1,4}\s+/gm, "").replace(TOOL_NAMES, " ").replace(STAGE_BRACKETS, keepFillIns).replace(/^\s*\[|\]\s*$/gm, "").replace(/[ \t]{2,}/g, " ").trim();
+  const cleaned = unfence(t).replace(/\*\*([^*\n]+)\*\*/g, "$1").replace(/^#{1,4}\s+/gm, "").replace(TOOL_NAMES, " ").replace(STAGE_BRACKETS, keepFillIns).replace(/^\s*\[|\]\s*$/gm, "").replace(/[ \t]{2,}/g, " ").trim();
   return cleaned
     .split(/\n\s*\n/)
     .map((b) => b.split(SENTENCE_BREAK).filter((x) => !META.test(x) && !LEAK.test(x) && !/\bSTATE\b/.test(x) && !EMPTY_PROMISE.test(x) && !CANT_DO.test(x) && !narratesAbout(x, userName)).join(" "))
@@ -1655,3 +1659,10 @@ const DEMO_MARK = "demo inbox";
 const DEMO_ASK = `want to try it with a ${DEMO_MARK} instead? sample emails, same idea`;
 const DEMO_YES = /\b(yes|yeah|yep|yup|ya|sure|ok(ay)?|k|do it|go ahead|let'?s|please|pls|demo|try it|fine|alright|sounds good)\b/i;
 const GMAIL_TROUBLE = /\b(access blocked|blocked|not verified|unverified|403|access denied|test users?|won'?t let me|can'?t (sign|log) ?in|(doesn'?t|didn'?t|isn'?t|not) work(ing)?|error)\b/i;
+
+// Fences: what the user typed, what tools returned, and what emails say reach the model inside tags, and the
+// prompt treats anything fenced as data, never instructions. Tag look-alikes inside the content are dropped,
+// so a message can't close its own fence.
+const FENCE_TAGS = /<\/?\s*(user_said|email_content|tool_result)\b[^>]*>/gi;
+export const unfence = (t: string) => t.replace(FENCE_TAGS, "");
+export const fence = (tag: "user_said" | "email_content", t: string) => `<${tag}>${unfence(t)}</${tag}>`;
