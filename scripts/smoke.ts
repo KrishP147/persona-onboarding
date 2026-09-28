@@ -9,6 +9,7 @@ import { POST as DemoPOST } from "../src/app/api/auth/google/demo/route";
 import { GET as StartGET } from "../src/app/api/auth/google/start/route";
 import { popupPage } from "../src/app/api/auth/google/popup";
 import { keyterms } from "../src/lib/voice";
+import { reconcileHooks } from "../src/lib/extract";
 import { costOf, metered, percentile, recordUsage } from "../src/lib/usage";
 import { GET as SessionGET } from "../src/app/api/session/route";
 
@@ -345,6 +346,35 @@ async function main() {
   const kts = keyterms(kt);
   check("keyterms: agent name, user name, Persona, Gmail", JSON.stringify(kts) === JSON.stringify(["Nova", "Krish", "Persona", "Gmail"]), kts.join(","));
   check("keyterms dedupe a default name", JSON.stringify(keyterms({ ...newSession(), slots: { ...newSession().slots, agentName: { ...newSession().slots.agentName, value: "Persona", status: "filled" } } })) === JSON.stringify(["Persona", "Gmail"]));
+
+  // post-hangup reconcile: fills empty slots only, only with words they said on the call, and the recap says so
+  const realRun = reconcileHooks.run;
+  let asked: string[] = [];
+  reconcileHooks.run = async (_lines, open) => {
+    asked = open;
+    return { userName: "Priya", helpNeed: "moving my dentist appointment" };
+  };
+  const rc = newSession();
+  await handleEvent(rc, { type: "call_started" });
+  rc.transcript.push({ id: "v1", role: "user", channel: "voice", text: "oh yeah it's priya, i gotta move my dentist thing", ts: Date.now() });
+  const rcEnd = await handleEvent(rc, { type: "call_ended", reason: "user_hangup" });
+  check("reconcile fills empty slots from the call", rc.slots.userName.value === "Priya" && rc.slots.helpNeed.value === "moving my dentist appointment", JSON.stringify(rc.slots));
+  check("recap says what it caught after the hangup", /caught after you hung up: you go by Priya/.test(said(rcEnd)), said(rcEnd));
+  const rk = newSession();
+  rk.slots.userName = { ...rk.slots.userName, value: "Dana", status: "filled" };
+  rk.slots.helpNeed = { ...rk.slots.helpNeed, status: "declined" };
+  await handleEvent(rk, { type: "call_started" });
+  rk.transcript.push({ id: "v2", role: "user", channel: "voice", text: "priya here, dentist stuff", ts: Date.now() });
+  asked = [];
+  const rkEnd = await handleEvent(rk, { type: "call_ended", reason: "agent_ended" });
+  check("reconcile never overwrites or un-declines", rk.slots.userName.value === "Dana" && rk.slots.helpNeed.status === "declined" && asked.length === 0 && !/caught after/.test(said(rkEnd)), `${JSON.stringify(asked)} ${said(rkEnd)}`);
+  reconcileHooks.run = async () => ({ userName: "Bob", helpNeed: "password reset for IT" });
+  const rb = newSession();
+  await handleEvent(rb, { type: "call_started" });
+  rb.transcript.push({ id: "v3", role: "user", channel: "voice", text: "just the recruiter emails honestly", ts: Date.now() });
+  await handleEvent(rb, { type: "call_ended", reason: "user_hangup" });
+  check("reconcile rejects values they never said", rb.slots.userName.status === "missing" && rb.slots.helpNeed.status === "missing", JSON.stringify(rb.slots));
+  reconcileHooks.run = realRun;
 
   console.log(fails ? `\n${fails} failed` : "\nall passed");
   process.exit(fails ? 1 : 0);

@@ -9,7 +9,7 @@ import { connectDemo, readInbox, saveDraft, sendDraft } from "./google";
 import { getSecret } from "./store";
 import { EVENT_MOVES, chooseMove, markUsed, pick, withAngle } from "./moves";
 import { GIF_MIN_GAP, GIF_MOODS, GIFS, gifUrl, type GifMood } from "./gifs";
-import { applyExtracted, extract } from "./extract";
+import { applyExtracted, extract, reconcileCall } from "./extract";
 import { readPage, webEnabled, webSearch } from "./web";
 import type { Move } from "./types";
 import { currentMeter, metered, percentile, recordTurn, type Meter } from "./usage";
@@ -1431,7 +1431,9 @@ async function handleEventInner(s: Session, e: SessionEvent): Promise<TurnResult
           : e.reason === "user_hangup"
             ? "They hung up (maybe on purpose, maybe not)."
             : "The line dropped on our side.";
-      const r = await turn(s, "text", `${RECAP_INSTRUCTION} ${how} Call lasted ${secs}s.`, recapFallback(s, e.reason), {
+      // One strict pass over the call fills slots still empty (never overwrites); the recap says what it caught.
+      const caught = await reconcileCall(s);
+      const r = await turn(s, "text", `${RECAP_INSTRUCTION} ${how} Call lasted ${secs}s.${Object.keys(caught).length ? " A separate line after yours says what you caught from the call; don't repeat it." : ""}`, recapFallback(s, e.reason), {
         move: EVENT_MOVES.recap,
         avoid: e.reason === "agent_ended" ? /\b(cut off|dropped|lost you|got disconnected)\b/i : undefined,
       });
@@ -1449,6 +1451,9 @@ async function handleEventInner(s: Session, e: SessionEvent): Promise<TurnResult
         r.newMessages = r.newMessages.filter((m) => !extra.has(m));
         s.transcript = s.transcript.filter((m) => !extra.has(m));
       }
+      const got = [caught.userName && `you go by ${caught.userName}`, caught.helpNeed && `you want help with ${caught.helpNeed}`].filter(Boolean);
+      const recap = r.newMessages.find((m) => m.role === "agent" && m.channel === "text" && !m.kind);
+      if (got.length && recap) recap.text = `${recap.text.trim()} caught after ${e.reason === "user_hangup" ? "you" : "we"} hung up: ${got.join(", and ")}.`;
       return r;
     }
     case "silence": {
