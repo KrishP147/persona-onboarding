@@ -3,7 +3,7 @@
 // (globals.css): dark measured off the user's own pixel, light = gm3 baseline. see phone-ui-spec.md fidelity pass
 import type { CSSProperties, ReactNode } from "react";
 import type { BubbleProps, CallProps, ComposerProps, HeaderProps, Pos, RichCardProps, Skin, UnknownProps } from "./types";
-import { AGENT_NUMBER, BubbleBody, BubbleIcon, GoogleG, MicIcon, PauseIcon, PersonaLogo, PersonSilhouette, PhoneIcon, RecTimer, callLog, eventKind, isToday, time, useClock, useElapsed } from "./shared";
+import { AGENT_NUMBER, BubbleBody, BubbleIcon, GoogleG, MicIcon, onComposerKeyDown, PauseIcon, PersonaLogo, PersonSilhouette, PhoneIcon, RecTimer, callLog, eventKind, isToday, time, useAutoGrow, useClock, useElapsed } from "./shared";
 
 const C = {
   app: "var(--gm-app)",
@@ -164,37 +164,49 @@ function Typing() {
 }
 
 function Composer({ draft, setDraft, onSubmit, onAttach, canSend, recording, transcribing, onMic, hint }: ComposerProps) {
+  const grow = useAutoGrow(draft, 156);
+  const showCount = draft.length > 80 || draft.includes("\n");
   return (
     <form
-      className="flex items-center gap-2 px-3 pt-2 pb-[calc(var(--sb-bottom)+8px)]"
+      className="flex items-end gap-2 px-3 pt-2 pb-[calc(var(--sb-bottom)+8px)]"
       style={{ background: C.surface }}
       onSubmit={(e) => {
         e.preventDefault();
         onSubmit();
       }}
     >
-      <div className="flex-1 min-w-0 h-[52px] rounded-full flex items-center pl-1.5 pr-3" style={{ background: C.recv }}>
-        <button type="button" aria-label="Attach" onClick={onAttach} className="w-10 h-10 rounded-full flex items-center justify-center text-[var(--gm-mute)] hover:bg-[var(--gm-hover)]">
+      <div className="flex-1 min-w-0 min-h-[52px] rounded-[26px] flex items-end pl-1.5 pr-3 py-1.5" style={{ background: C.recv }}>
+        <button type="button" aria-label="Attach" onClick={onAttach} className="w-10 h-10 shrink-0 rounded-full flex items-center justify-center text-[var(--gm-mute)] hover:bg-[var(--gm-hover)]">
           <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" aria-hidden>
             <circle cx="12" cy="12" r="9" />
             <path d="M12 8v8M8 12h8" strokeLinecap="round" />
           </svg>
         </button>
         {recording ? (
-          <span className="flex-1 pl-2 flex items-center gap-2 text-[16px] text-[var(--gm-error)]">
+          <span className="flex-1 pl-2 flex items-center gap-2 text-[16px] text-[var(--gm-error)] h-10">
             <span className="w-2 h-2 rounded-full bg-[var(--gm-error)] sk-pulse" />
             <RecTimer startedAt={recording.startedAt} />
           </span>
         ) : (
-          <input
-            value={draft}
-            onChange={(e) => setDraft(e.target.value)}
-            placeholder={hint ?? "RCS message"}
-            aria-label="Message"
-            className="flex-1 min-w-0 bg-transparent outline-none pl-2 text-[16px] text-[var(--gm-ink)] placeholder:text-[var(--gm-mute)]"
-          />
+          <div className="relative flex-1 min-w-0 self-center">
+            <textarea
+              ref={grow}
+              rows={1}
+              value={draft}
+              onChange={(e) => setDraft(e.target.value)}
+              onKeyDown={onComposerKeyDown(onSubmit)}
+              placeholder={hint ?? "RCS message"}
+              aria-label="Message"
+              className="w-full resize-none bg-transparent outline-none pl-2 pr-6 text-[16px] leading-6 text-[var(--gm-ink)] placeholder:text-[var(--gm-mute)]"
+            />
+            {showCount && (
+              <span className="pointer-events-none absolute right-1 bottom-0 text-[10px] tabular-nums" style={{ color: C.mute }}>
+                {draft.length}
+              </span>
+            )}
+          </div>
         )}
-        <span className="flex items-center gap-4 text-[var(--gm-mute)] pl-2" aria-hidden>
+        <span className="self-center flex items-center gap-4 text-[var(--gm-mute)] pl-2" aria-hidden>
           <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8">
             <circle cx="12" cy="12" r="9" />
             <circle cx="9" cy="10" r="1" fill="currentColor" />

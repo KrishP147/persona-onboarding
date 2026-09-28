@@ -2,7 +2,7 @@
 // samsung messages on one ui 8, light + dark. see docs/design/phone-ui-spec.md "fidelity pass / galaxy"
 import type { CSSProperties, ReactNode } from "react";
 import type { BubbleProps, CallProps, ComposerProps, HeaderProps, Pos, RichCardProps, Skin, UnknownProps } from "./types";
-import { AGENT_NUMBER, BubbleBody, BubbleIcon, GoogleG, MicIcon, PauseIcon, PersonaLogo, PersonSilhouette, PhoneIcon, RecTimer, callLog, eventKind, time, useClock, useElapsed } from "./shared";
+import { AGENT_NUMBER, BubbleBody, BubbleIcon, GoogleG, MicIcon, onComposerKeyDown, PauseIcon, PersonaLogo, PersonSilhouette, PhoneIcon, RecTimer, callLog, eventKind, time, useAutoGrow, useClock, useElapsed } from "./shared";
 
 // colors are --sam-* vars on .sk-sam (globals.css), light + dark
 const C = {
@@ -160,9 +160,11 @@ function Typing() {
 }
 
 function Composer({ draft, setDraft, onSubmit, onAttach, canSend, recording, transcribing, onMic, hint }: ComposerProps) {
+  const grow = useAutoGrow(draft, 156);
+  const showCount = draft.length > 80 || draft.includes("\n");
   return (
     <form
-      className="flex items-center gap-2 px-2 pt-2 pb-[calc(var(--sb-bottom)+8px)]"
+      className="flex items-end gap-2 px-2 pt-2 pb-[calc(var(--sb-bottom)+8px)]"
       onSubmit={(e) => {
         e.preventDefault();
         onSubmit();
@@ -173,23 +175,33 @@ function Composer({ draft, setDraft, onSubmit, onAttach, canSend, recording, tra
           <path d="M11 3v16M3 11h16" />
         </svg>
       </button>
-      <div className="flex-1 min-w-0 h-11 rounded-full bg-[var(--sam-field)] flex items-center pl-4 pr-1.5">
+      <div className="flex-1 min-w-0 min-h-11 rounded-[22px] bg-[var(--sam-field)] flex items-end pl-4 pr-1.5 py-1">
         {recording ? (
-          <span className="flex-1 flex items-center gap-2 text-[16px]" style={{ color: C.red }}>
+          <span className="flex-1 flex items-center gap-2 text-[16px] h-9" style={{ color: C.red }}>
             <span className="w-2 h-2 rounded-full sk-pulse" style={{ background: C.red }} />
             <RecTimer startedAt={recording.startedAt} />
           </span>
         ) : (
-          <input
-            value={draft}
-            onChange={(e) => setDraft(e.target.value)}
-            placeholder={hint ?? "Enter message"}
-            aria-label="Message"
-            className="flex-1 min-w-0 bg-transparent outline-none text-[16px] placeholder:text-[var(--sam-placeholder)]"
-            style={{ color: C.ink }}
-          />
+          <div className="relative flex-1 min-w-0 self-center">
+            <textarea
+              ref={grow}
+              rows={1}
+              value={draft}
+              onChange={(e) => setDraft(e.target.value)}
+              onKeyDown={onComposerKeyDown(onSubmit)}
+              placeholder={hint ?? "Enter message"}
+              aria-label="Message"
+              className="w-full resize-none bg-transparent outline-none pr-6 text-[16px] leading-6 placeholder:text-[var(--sam-placeholder)]"
+              style={{ color: C.ink }}
+            />
+            {showCount && (
+              <span className="pointer-events-none absolute right-0 bottom-0 text-[10px] tabular-nums" style={{ color: C.mute }}>
+                {draft.length}
+              </span>
+            )}
+          </div>
         )}
-        <span className="w-9 h-9 flex items-center justify-center" style={{ color: C.icon }} aria-hidden>
+        <span className="self-center w-9 h-9 flex items-center justify-center" style={{ color: C.icon }} aria-hidden>
           <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8">
             <circle cx="12" cy="12" r="9" />
             <circle cx="9" cy="10" r="1" fill="currentColor" />
@@ -202,7 +214,7 @@ function Composer({ draft, setDraft, onSubmit, onAttach, canSend, recording, tra
           aria-label={recording ? "Stop and send voice note" : "Record a voice note"}
           onClick={onMic}
           disabled={transcribing}
-          className="w-9 h-9 rounded-full flex items-center justify-center disabled:opacity-60"
+          className="self-center w-9 h-9 rounded-full flex items-center justify-center disabled:opacity-60"
           style={recording ? { background: C.red, color: "#fff" } : { color: C.icon }}
         >
           {recording ? (
