@@ -2,6 +2,7 @@
   "git": {
     "deploymentEnabled": {
       "*": false,
+      "krish/*": false,
       "master": true
     }
   }
