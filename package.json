@@ -11,6 +11,7 @@
     "typecheck": "tsc --noEmit",
     "smoke": "tsx scripts/smoke.ts",
     "stress-matrix": "tsx scripts/stress-matrix.ts",
+    "funnel": "tsx --env-file-if-exists=.env.local scripts/funnel.ts",
     "e2e": "tsx scripts/e2e.ts",
     "metrics": "tsx scripts/metrics.ts"
   },
