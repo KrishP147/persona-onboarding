@@ -49,3 +49,7 @@ next-env.d.ts
 
 # dev server log
 .start.log
+
+# agent tooling files (next dev re-creates AGENTS.md)
+AGENTS.md
+CLAUDE.md
