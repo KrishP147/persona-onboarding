@@ -23,7 +23,7 @@ flowchart TD
   EV --> TURN
   subgraph engine["src/lib/engine"]
     TURN[1 parse<br/>intents.ts, extract.ts] --> DECIDE[2 decide<br/>policy.ts, moves.ts]
-    DECIDE --> GEN[3 generate<br/>llm.ts: gemini 2.5 flash, or claude with tools]
+    DECIDE --> GEN[3 generate<br/>llm.ts: claude haiku 4.5 with tools, gemini fallback]
     GEN --> GUARD[4 guard<br/>guards.ts, text.ts]
     GUARD --> COMMIT[5 commit<br/>session, move, guards, cost, latency]
   end
@@ -45,7 +45,7 @@ flowchart TD
 
 ## the model layer
 
-`src/lib/llm.ts` picks gemini 2.5 flash by default (free tier, walking a chain of fallback gemini models when one runs out of quota), or claude when `LLM_PROVIDER=anthropic` is set (`claude-sonnet-5` for the full agent loop, `claude-haiku-4-5` for the small parse-time passes, both env-overridable). the numbers in the README and `harness/ROUNDS.md` were measured against the claude path, since that's the config the harness grading ran on; the deployed default on prod is still gemini. an optional `LLM_FALLBACK=anthropic` gives free-tier gemini a capped claude insurance policy when every gemini model is out of quota.
+`src/lib/llm.ts` runs claude when `LLM_PROVIDER=anthropic` is set, which is how prod runs: `AGENT_MODEL` and `FAST_MODEL` are both `claude-haiku-4-5` there (the code default is `claude-sonnet-5` for the agent loop, env-overridable). with no provider set it falls back to gemini, walking a chain of free-tier models when one runs out of quota. the numbers in the README and `harness/ROUNDS.md` were measured on claude haiku 4.5, the same model prod runs. an optional `LLM_FALLBACK=anthropic` gives free-tier gemini a capped claude insurance policy when every gemini model is out of quota.
 
 ## the guards
 
@@ -76,7 +76,7 @@ the guards run as one ordered pipeline (`src/lib/engine/guards.ts`). every guard
 |---|---|
 | the model errors or times out | a scripted line goes out instead. a second failure on a call says so and hangs up, and the conversation carries on over text |
 | the claude budget cap is hit (claude path only) | same as a model failure: scripted lines, never a silent chat |
-| gemini's free tier runs out mid-session | the next model in the fallback chain takes over; if every gemini model and the optional claude insurance are both out, a scripted line goes out |
+| the claude spend cap is hit, or the model errors | a scripted line goes out instead of silence (the engine never waits on a reply that won't come); with no provider set, gemini walks its free-tier fallback chain first |
 | they hang up mid-sentence | a recap text always follows, written by code if the model's is empty. a name or need they said but we missed gets caught after the hangup |
 | silence on a call | quiet is fine for a long time: a check-in that picks up where you were after 25s (45s after "hold on"), a softer one 30s later, a heads-up at about two minutes, then a goodbye and a hangup 12s after that |
 | left on read over text | at most one short double text, written by code, and never a third text in a row; before your first message, one gentle line after a minute; nothing right after a call's recap; and only when something's actually pending (an unanswered question, a call offer, a link) |
@@ -100,7 +100,7 @@ measured by `pnpm metrics` over the last full harness run (claude haiku 4.5 as t
 | post-hangup catch-up pass | about $0.001 per call, only when something is still missing |
 | latency | p50 2.0s, p95 4.8s (turn time, a little high; new sessions record model latency) |
 
-gemini's free tier is the default on prod, so day-to-day cost there is close to zero until the free quota chain is exhausted; the claude path checks a hard spend cap before every call. speech (deepgram) and voice (elevenlabs / cartesia) aren't metered here yet.
+prod runs on claude haiku 4.5, about a third of a cent a reply, and checks a hard spend cap before every call. speech (deepgram) and voice (elevenlabs / cartesia) aren't metered here yet.
 
 ## what i'd change
 

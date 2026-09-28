@@ -15,7 +15,7 @@ a landing page in persona's own design language, then an onboarding for a person
 
 most onboarding bots hide their logic in a prompt, so you find out what they do by poking at them. this one's logic is in code you can watch: the "examine reasoning" pill (top right on desktop, in the ⋮ menu on phones) opens the move it made for that turn, the research behind it, and every time code stepped in to fix a reply (a leaked internal note, a claim it couldn't back up, a missing goodbye) as "checks that ran" chips. the model writes the words. code decides what has to happen.
 
-> **coming next, not yet on master (`krish/draft-card-composer`):** the draft card collapses with an expand arrow, and gets `Edit` (inline, in place of asking for changes over chat) and `Discard` next to `Send` / `Not yet`, plus an auto-growing composer with a character count. <!-- TODO-verify: confirm this shipped, then fold it into the `save_draft`/`send_email` bullet above and delete this callout. -->
+> the email draft is one card, collapsed to who, subject and a one-line snippet. `show full email` expands it in place, `Edit` edits it right there, and `Send` (5 seconds to undo) / `Not yet` / `Discard` sit under it. older versions shrink to one line, so a long dictation never fills the thread with copies. the composer grows with a long message, like a phone's, and shows a character count.
 
 ## try to break it
 
@@ -29,7 +29,7 @@ most onboarding bots hide their logic in a prompt, so you find out what they do 
 | harness score | **8.9 / 10** avg over 16 simulated difficult users (round 3; 7.9 in round 1) | [harness/ROUNDS.md](harness/ROUNDS.md) |
 | cost | **$0.0152 per onboarding**, $0.0030 per reply (claude haiku 4.5, the model used for the harness runs above) | `pnpm metrics` |
 | latency | **p50 2.0s, p95 4.8s** per reply | `pnpm metrics` |
-| checks | 229 keyless smoke checks in CI (`pnpm -s smoke \| grep -c PASS`), 25 browser checks with a fake mic, 23 manual scripts | `pnpm smoke`, `pnpm e2e`, [docs/manual-tests.md](docs/manual-tests.md) |
+| checks | 231 keyless smoke checks in CI (`pnpm -s smoke \| grep -c PASS`), 25 browser checks with a fake mic, 23 manual scripts | `pnpm smoke`, `pnpm e2e`, [docs/manual-tests.md](docs/manual-tests.md) |
 | post-fix funnel | _placeholder: `pnpm funnel --since <deploy time>` after friends try it_ | [FUNNEL.md](FUNNEL.md) |
 | eval | _placeholder: final harness round_ | [harness/ROUNDS.md](harness/ROUNDS.md) |
 
@@ -41,7 +41,7 @@ every message, typed or spoken, goes through the same five steps:
 
 1. **parse** (code): what did they actually say? names, yes or no, bye, "no calls", "skip this". a small model pass pulls out names and needs in parallel.
 2. **decide** (code): what's still missing, whether to offer a call, and which one conversation move to make this turn (e.g. "ask about a specific recent moment", from *the mom test*).
-3. **generate** (model): gemini 2.5 flash by default (free tier, with a chain of fallback gemini models), or claude when `LLM_PROVIDER=anthropic` is set, writes the words and can use tools (look something up, read the inbox, draft an email). what the user typed, what tools returned, and email text all reach it fenced as data, never instructions.
+3. **generate** (model): claude haiku 4.5 on prod (`LLM_PROVIDER=anthropic`), or gemini with a chain of free-tier fallbacks when that's unset, writes the words and can use tools (look something up, read the inbox, draft an email). what the user typed, what tools returned, and email text all reach it fenced as data, never instructions.
 4. **guard** (code): 31 named safety nets, run as one ordered pipeline in `guards.ts`, check the reply. a leaked internal note gets dropped, a "sent!" that wasn't sent gets corrected, a third question in a row gets cut, a hangup without a goodbye gets one. the email tools add their own checks on top: no address that wasn't given by the user or a real inbox, and a plain warning before anything that would be a duplicate send.
 5. **commit** (code): the session is saved, with the move, the guards, and the turn's cost and latency.
 
@@ -86,7 +86,7 @@ i built this with ai agents, the way i'd want a small team to work. one orchestr
 pnpm install
 cp .env.example .env.local   # GEMINI_API_KEY for the default path, or ANTHROPIC_API_KEY + LLM_PROVIDER=anthropic. with neither, a mock mode
 pnpm dev                      # http://localhost:3000 (chrome or edge for the voice call)
-pnpm smoke                    # 229 keyless checks of the safety nets
+pnpm smoke                    # 231 keyless checks of the safety nets
 pnpm stress-matrix            # regenerates STRESS_TESTS.md from the source
 pnpm harness                  # 16 simulated difficult users vs a local dev server, graded (ALLOW_TEST_EVENTS=1). prints its cost
 pnpm metrics                  # latest harness run as one table: p50/p95 latency, $ per onboarding
@@ -96,6 +96,6 @@ pnpm e2e                      # real chrome walkthrough with a fake mic: 25 chec
 
 ## tests and CI
 
-every push and PR to `master` runs `.github/workflows/ci.yml`, keyless (no api keys, mock mode): `next typegen`, `tsc` typecheck, lint, the 229 smoke checks, 2000 seeded fuzzed event sequences with invariants checked after each step, a regenerate-and-diff of `STRESS_TESTS.md` (fails if the table has drifted from the source), and a production build. the harness (`pnpm harness`, 16 simulated difficult users, LLM-graded) and the real-browser `pnpm e2e` walkthrough need a model key and aren't run in CI; they're run by hand and recorded in [harness/ROUNDS.md](harness/ROUNDS.md).
+every push and PR to `master` runs `.github/workflows/ci.yml`, keyless (no api keys, mock mode): `next typegen`, `tsc` typecheck, lint, the 231 smoke checks, 2000 seeded fuzzed event sequences with invariants checked after each step, a regenerate-and-diff of `STRESS_TESTS.md` (fails if the table has drifted from the source), and a production build. the harness (`pnpm harness`, 16 simulated difficult users, LLM-graded) and the real-browser `pnpm e2e` walkthrough need a model key and aren't run in CI; they're run by hand and recorded in [harness/ROUNDS.md](harness/ROUNDS.md).
 
-prod runs on vercel + upstash, auto-deploying from `master`, on gemini 2.5 flash by default. the harness numbers above were measured on claude haiku 4.5 (`LLM_PROVIDER=anthropic`) under a hard spend cap (`CLAUDE_BUDGET_USD`, checked before every call), since that's the config the grading actually ran against.
+prod runs on vercel + upstash, deployed from `master` after CI passes, on claude haiku 4.5 (`LLM_PROVIDER=anthropic`) under a hard spend cap (`CLAUDE_BUDGET_USD`, checked before every call). the harness numbers above were measured on the same model.
