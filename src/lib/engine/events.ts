@@ -195,6 +195,8 @@ export const EVENT_HANDLERS: { [K in SessionEvent["type"]]: EventHandler<K> } = 
     if (countNudges(since) >= MAX_IDLE_NUDGES) return idle();
     // They signed off ("thanks, bye"), or we already said goodbye: nothing to chase.
     if (!firstTime && saysBye(s.transcript[lastUserIdx].text)) return idle();
+    // A call just ended and the recap went out: that text already covers it.
+    if (since.some((m) => m.move?.id === "recap" || (m.kind === "event" && m.text.startsWith("Call ended")))) return idle();
     const ctx: Ctx = { s, channel: "text", actions: [], newMessages: [], move: EVENT_MOVES.nudge };
     const name = s.slots.userName.value;
     if (firstTime) {
@@ -221,7 +223,10 @@ export const EVENT_HANDLERS: { [K in SessionEvent["type"]]: EventHandler<K> } = 
       recordAsk(s, q ? "helpNeed" : null, !!q);
       return { session: s, newMessages: ctx.newMessages, chips: computeDirective(s, "text").chips, actions: [] };
     }
-    return turn(s, "text", IDLE_INSTRUCTION, name ? `no rush ${name}, i'm around whenever` : "no rush, i'm around whenever", { move: EVENT_MOVES.nudge, avoid: /\b(just checking in|are you (still )?there|still there|did you (see|get) my)\b/i });
+    // Written by code, never the model: a model asked for "a nudge" once narrated instead ("i'll wait for them...").
+    emitAgentText(ctx, `no rush${name ? ` ${name}` : ""}, i'm around whenever`);
+    recordAsk(s, null);
+    return { session: s, newMessages: ctx.newMessages, chips: computeDirective(s, "text").chips, actions: [] };
   },
   forget_slot: async ({ s, e, idle }) => {
     const slot = s.slots[e.slot];
@@ -325,8 +330,6 @@ export const EVENT_HANDLERS: { [K in SessionEvent["type"]]: EventHandler<K> } = 
 export const MAX_IDLE_NUDGES = 1;
 export const IDLE_FIRST_MS = 60000; // before their first message: they may still be reading the intro
 export const IDLE_MIN_MS = 20000;
-export const IDLE_INSTRUCTION =
-  "They haven't answered your last text for a bit (left on read). Send ONE short, relaxed double text, like a friend who doesn't take it personally. Don't repeat or rephrase your last question and don't say \"just checking in\" or \"are you there\". Either suggest one concrete, easy next thing tied to what they told you, leading with what it gets them (a few words, no explanation), or make a light joke about the silence and leave the door open. No guilt, no pitch, no list.";
 // Double texts sent since their last message (a two-bubble nudge counts once).
 export function countNudges(msgs: Msg[]) {
   const isNudge = (m?: Msg) => m?.move?.id === "nudge" || m?.move?.id === "default-name";

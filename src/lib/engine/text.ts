@@ -153,3 +153,9 @@ export const ACCUSING =
   /\b(you (skipped|forgot|missed|ignored)\b|you never (gave|told|answered|named|replied|said|picked)|you (didn'?t|did not|haven'?t|have not) (answer|reply|respond|say|give|tell|name|pick|get back)|why (didn'?t|haven'?t|won'?t|wouldn'?t) you|did you forget|left me on read)/i;
 // A guess about them stated as fact. Say what they said, or ask.
 export const ASSUMING = /\b(sounds like you('re| are| have| must)|you must (be|have|feel)|you seem( to be)?|seems like you|you('re| are) (clearly|obviously|probably))\b/i;
+
+// Reasoning written as if nobody's reading: the user in the third person, the agent narrating its own plan or
+// state, or a stage direction. Every word goes to them as a text, so these sentences never go out.
+export const NARRATION =
+  /\b(the (user|person|caller|human)|i'?ll (just )?(wait|hold off|stay quiet|keep quiet|stand by|sit tight|leave it)|(wait(ing)?|until) for (them|him|her|a reply|a response|their)|for (them|him|her) to (text|reply|respond|get back|answer|say)|(the call'?s|the call (has|is|was)) (already )?(ended|over|done|finished)|no (response|reply|message|action) (is )?(needed|necessary|required)|nothing (to say|needed|to add)|(they|he|she) (hasn'?t|haven'?t|didn'?t|isn'?t|aren'?t|is|are|seems?|might|may|will|'ll|'re|'s) (still )?(busy|away|gone|typing|reading|responding|replying|quiet|silent|there|ready|thinking|not)\b)/i;
+export const STAGE_DIRECTION = /^\s*[(*[][^)*\]]*[)*\]]\s*[.!]?\s*$/;

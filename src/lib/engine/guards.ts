@@ -4,7 +4,7 @@ import { EVENT_MOVES } from "../moves";
 import { type Ctx, emitAgentText, ensureCard, goodbyeLine, guard, msg, shortNeed } from "./context";
 import { CARD_ASK, NAME_ASK, SEND_REQUEST, gmailConsent, saidNow, userWrappingUp } from "./intents";
 import { runTool } from "./tools";
-import { ACCUSING, ASSUMING, CLAIMS_LINK, CLAIMS_SENT, GOODBYE, SENTENCE_BREAK, capSentences, cleanModelText } from "./text";
+import { ACCUSING, ASSUMING, NARRATION, STAGE_DIRECTION, CLAIMS_LINK, CLAIMS_SENT, GOODBYE, SENTENCE_BREAK, capSentences, cleanModelText } from "./text";
 
 // The gmail ask is written by code (one clear question, the reason, the reassurance, an easy no).
 export const GMAIL_ASK_MARK = "text you a link to connect your gmail";
@@ -153,6 +153,30 @@ export const GUARD_PIPELINE: GuardStep[] = [
     async run(e) {
       // Some things must never be said in this moment (e.g. "got cut off" after we hung up ourselves).
       if (e.opts.avoid && e.fallback && e.opts.avoid.test(e.text)) e.fix("blocked a line not allowed here", e.fallback);
+    },
+  },
+  {
+    name: "narration",
+    async run(e) {
+      // "The call's already ended. I'll wait for them to text back." is the model thinking out loud, not talking
+      // to them. Drop those sentences; if nothing's left, send nothing (a scripted fallback still covers recaps).
+      let hit = false;
+      const kept = e.text
+        .split(/\n\s*\n/)
+        .map((b) =>
+          b
+            .split(SENTENCE_BREAK)
+            .filter((x) => {
+              const bad = NARRATION.test(x) || STAGE_DIRECTION.test(x);
+              hit ||= bad;
+              return !bad;
+            })
+            .join(" ")
+            .trim(),
+        )
+        .filter(Boolean)
+        .join("\n\n");
+      if (hit) e.fix("narration dropped", kept);
     },
   },
   {

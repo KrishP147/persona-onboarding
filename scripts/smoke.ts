@@ -494,6 +494,39 @@ async function main() {
   check("reacting to their situation is fine", fine.guards.length === 0, fine.text);
   check("code-written default-name line never accuses", !/skipped|never|forgot/.test(said(sk)), said(sk));
 
+  // narration: the model thinking out loud never reaches them (the exact prod leak, plus variants)
+  const leaks = [
+    "The call's already ended. I'll wait for them to text back.",
+    "i'll wait for them to reply.",
+    "no response needed here.",
+    "they haven't replied yet, so i'll hold off.",
+    "waiting for the user to respond.",
+    "(waits quietly)",
+  ];
+  for (const l of leaks) {
+    const r = await step("narration", bub, l);
+    check(`narration dropped: "${l}"`, r.text === "" && r.guards.includes("narration dropped"), r.text);
+  }
+  const mixed = await step("narration", bub, "got it.\n\nthe call's over, i'll wait for them.");
+  check("narration dropped, the real line kept", mixed.text === "got it.", mixed.text);
+  for (const ok of ["the recruiter said they'll get back to you friday.", "their office called back? want me to draft a reply?", "i'll text you a recap."]) {
+    const r = await step("narration", bub, ok);
+    check(`talking to them survives: "${ok}"`, r.text === ok && r.guards.length === 0, r.text);
+  }
+  const afterCall = newSession();
+  afterCall.transcript.push(
+    { id: "u-c", role: "user", channel: "voice", text: "ok bye", ts: Date.now() - 90000 },
+    { id: "e-c", role: "event", channel: "text", text: "Call ended (40s)", ts: Date.now() - 80000, kind: "event" },
+    { id: "a-c", role: "agent", channel: "text", text: "thanks for the chat! text me anytime.", ts: Date.now() - 80000, move: { id: "recap", label: "", source: "" } },
+  );
+  const ac = await handleEvent(afterCall, { type: "text_idle" });
+  check("no left-on-read nudge right after a call's recap", ac.newMessages.length === 0, said(ac));
+  const plain = newSession();
+  plain.slots.agentName = { ...plain.slots.agentName, value: "Nova", status: "filled" };
+  plain.transcript.push({ id: "u-p", role: "user", channel: "text", text: "mostly school stuff", ts: Date.now() - 61000 }, { id: "a-p", role: "agent", channel: "text", text: "that's a lot to juggle", ts: Date.now() - 60000 });
+  const pl = await handleEvent(plain, { type: "text_idle" });
+  check("left-on-read line is code-written", said(pl) === "no rush, i'm around whenever", said(pl));
+
   // their name: always in re-engagement lines, otherwise about once every 3 turns and never twice in a row
   const nm = newSession();
   nm.slots.userName = { ...nm.slots.userName, value: "Krish", status: "filled" };
@@ -553,7 +586,7 @@ async function main() {
 
   // the guard pipeline runs in a fixed, named order (goodbye before hangup comes before the gmail rules, etc.)
   const order = GUARD_PIPELINE.map((g) => g.name);
-  check("guard pipeline order", order.join(",") === "avoid,force-end,placing-call,goodbye-before-hangup,hang-up-after-goodbye,gmail-by-the-book,no-repeat-gmail-ask,no-third-question,no-repeat-name-ask,no-accusing-or-assuming,name-rate,no-false-sent,call-offer-and-link-claims,long-text-to-chat,link-said-aloud,no-repeat-questions", order.join(","));
+  check("guard pipeline order", order.join(",") === "avoid,narration,force-end,placing-call,goodbye-before-hangup,hang-up-after-goodbye,gmail-by-the-book,no-repeat-gmail-ask,no-third-question,no-repeat-name-ask,no-accusing-or-assuming,name-rate,no-false-sent,call-offer-and-link-claims,long-text-to-chat,link-said-aloud,no-repeat-questions", order.join(","));
 
   // the intent table: every example it claims, it catches; every near miss, it doesn't
   for (const [name, d] of Object.entries(INTENTS)) {

@@ -50,9 +50,9 @@ export function toTurns(s: Session): Turn[] {
     if (prev && prev.role === role) prev.parts.push(...parts);
     else out.push({ role, parts });
   });
-  if (out.length === 0 || out[0].role !== "user") out.unshift({ role: "user", parts: [{ type: "text", text: "(user opened the chat)" }] });
+  if (out.length === 0 || out[0].role !== "user") out.unshift({ role: "user", parts: [{ type: "text", text: "[chat opened]" }] });
   // APIs need a final user turn; if the agent spoke last (e.g. event-triggered turn), add a nudge.
-  if (out[out.length - 1].role !== "user") out.push({ role: "user", parts: [{ type: "text", text: "(no new message from the user)" }] });
+  if (out[out.length - 1].role !== "user") out.push({ role: "user", parts: [{ type: "text", text: "[no new message]" }] });
   return out;
 }
 
@@ -180,7 +180,9 @@ export async function turn(
 
 // Right after the agent asks for its name, a short reply like "Julia" or "call you Max" is the name.
 export async function captureAgentName(s: Session, channel: Channel, text: string): Promise<{ card?: Msg; pending: Promise<void>[] } | undefined> {
-  if (channel !== "text" || s.slots.agentName.status !== "missing" || s.lastAskedSlot !== "agentName") return;
+  // A late name also replaces the "persona" default they got for moving on ("call me", then "luna").
+  const renamingDefault = !!s.agentNameDefaulted && s.slots.agentName.value === "Persona";
+  if (channel !== "text" || (!renamingDefault && (s.slots.agentName.status !== "missing" || s.lastAskedSlot !== "agentName"))) return;
   // Only as the direct answer to the name question: a later "send" or "help" is never a name.
   // The name question was asked in the last couple of exchanges ("call me" first, then "luna" still answers it).
   const askIdx = s.transcript.findLastIndex((m) => m.role === "agent" && NAME_ASK.test(m.text));
@@ -198,7 +200,8 @@ export async function captureAgentName(s: Session, channel: Channel, text: strin
   const value = m[1].replace(/\b\p{L}/gu, (c) => c.toUpperCase());
   const ctx: Ctx = { s, channel, actions: [], newMessages: [] };
   await runTool(ctx, "set_slot", { slot: "agentName", value });
-  return { card: ctx.newCard, pending: ctx.pending ?? [] };
+  // A rename updates the one card in place; it still goes out again so they see the new name.
+  return { card: ctx.newCard ?? ctx.newMessages.find((x) => x.kind === "contact_card"), pending: ctx.pending ?? [] };
 }
 
 export async function handleUserMessage(...args: Parameters<typeof handleUserMessageInner>): Promise<TurnResult> {
@@ -343,8 +346,12 @@ export async function handleUserMessageInner(
     !NEGATED_CALL.test(clean);
   // A short yes ("sure", "yeah call me") is a yes; "yes but u aren't listening..." is not (it rang once).
   const saidYesToOffer = !!prevText && OFFERED_CALL.test(prevText.text) && YES.test(clean.replace(LAUGH_LEAD, "")) && !/\bbut\b/i.test(clean) && (clean.trim().split(/\s+/).length <= 4 || /\b(call|ring)\b/i.test(clean));
+  // "call me" instead of a name: they moved on without naming it, so it goes by the default (with its card).
+  const defaultForCall = channel === "text" && !s.call.active && asksForCall && !CALL_NO.test(clean) && s.slots.agentName.status === "missing" && s.lastAskedSlot === "agentName";
+  if (defaultForCall) defaultAgentName(s);
   if (channel === "text" && !s.call.active && s.slots.agentName.status !== "missing" && (asksForCall || saidYesToOffer) && !CALL_NO.test(clean)) {
     const ctx: Ctx = { s, channel, actions: [], newMessages: [], move: EVENT_MOVES.callNow };
+    if (defaultForCall) emitAgentText({ ...ctx, move: EVENT_MOVES.defaultName }, SKIPPED_NAME_REPLY);
     const out = await runTool(ctx, "start_call", {});
     if (!out.startsWith("error")) {
       recordAsk(s, null);
