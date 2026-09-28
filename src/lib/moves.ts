@@ -32,7 +32,7 @@ export function pick<T>(s: Session, salt: string, options: readonly T[]): T {
 // Different ways into the same move, so the wording doesn't repeat across sessions.
 const ANGLES: Record<string, readonly string[]> = {
   discover: [
-    "ask about the last week (what ate the most time).",
+    "ask about the last week (what took up most of your time).",
     "ask about something they keep putting off.",
     "ask what the most annoying part of their day was lately.",
   ],
@@ -72,7 +72,7 @@ export const MOVES = {
     label: "ask about a specific recent moment",
     source: "fitzpatrick, the mom test (2013)",
     instruction:
-      "Find what they could use help with by asking about THEIR recent life, not about you: a specific, past moment. e.g. \"what ate the most time this week?\" or \"what's something you kept putting off lately?\" No hypotheticals like \"would you use...\". No pitching.",
+      "Find what they could use help with by asking about THEIR recent life, not about you: a specific, past moment. e.g. \"what took up most of your time this week?\" or \"what's something you kept putting off lately?\" No hypotheticals like \"would you use...\". No pitching.",
   },
   dig: {
     id: "dig",

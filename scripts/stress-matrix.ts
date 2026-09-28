@@ -225,7 +225,7 @@ const ROWS: Row[] = [
   {
     case: "switches to another language",
     expected: "model instructed to reply in the user's language; no deterministic detection or translation logic",
-    code: [{ file: "src/lib/prompt.ts", symbol: "\"Reply in the user's language.\"", pattern: /Reply in the user's language\./ }],
+    code: [{ file: "src/lib/prompt.ts", symbol: "\"Reply in the user's language, all of it\"", pattern: /Reply in the user's language, all of it/ }],
     smoke: { kind: "manual", note: "language switching is prompt-only; smoke.ts runs in mock mode with no model to exercise it" },
     persona: "gibberish-spanish",
   },

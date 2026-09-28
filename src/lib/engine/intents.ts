@@ -21,6 +21,18 @@ export const WANTS_OUT = /\b(skip|not now|later|no more questions|stop asking|ju
 export const USER_BYE = /\b(end (the |this )?call|hang up|you can go|let'?s end|that'?s enough|bye|goodbye|gotta go|got to go|have to go|need to go|talk (to you )?(soon|later)|that'?s (all|it)|i'?m (done|good|all set)|see (you|ya)|catch you later|later then|laters|hang up|nothing else)\b/i;
 // "don't hang up", "i'm not done", "no need to go": the opposite of a bye.
 export const DONT_BYE = /\b(don'?t|do not|not|never|no need to)\b[^.!?]{0,12}\b(hang up|go|end|leave|done|bye)\b/i;
+// On a call: "hang up and call me back in a few", "i'm busy right now", "gotta go". Their call, not ours to argue.
+export const HANGUP_ASK = /\b((?<!\b(don'?t|do not|never|no need to|please don'?t) )hang up|end (the|this) call|you can (go|hang up)|let me go|(gotta|got to|have to|need to) (go|run)|i'?m (busy|in a rush|in a hurry|driving|in a meeting)|(can'?t|cannot) talk|call me back|not a good time)\b/i;
+// "in a few minutes" / "in a minute" / "in 5 mins": when to ring back (ms). "later" / "tomorrow": no timer, just text.
+export function callbackIn(t: string): number | null {
+  const m = t.match(/\bin,?\s*(?:like,?\s*|maybe\s*|about\s*|say\s*)?(a|an|one|1|a couple(?: of)?|two|2|a few|few|\d+)\s*(min(?:ute)?s?|sec(?:ond)?s?)\b/i);
+  if (!m) return /\b(call|ring) me back\b|\bcall back\b/i.test(t) && !/\b(later|tomorrow|tonight|next week)\b/i.test(t) ? 3 * 60_000 : null;
+  const n = /^(a|an|one|1)$/i.test(m[1]) ? 1 : /couple|two|2/i.test(m[1]) ? 2 : /few/i.test(m[1]) ? 3 : Number(m[1]);
+  const unit = /^sec/i.test(m[2]) ? 1000 : 60_000;
+  return Math.min(Math.max(n * unit, 20_000), 15 * 60_000);
+}
+// In a rush: no pitches (gmail, a call), just what they need.
+export const RUSHED_NOW = /\b(i'?m (busy|in a rush|in a hurry|driving|in a meeting)|(gotta|got to|have to|need to) (go|run)|(can'?t|cannot) talk|not a good time|no time|quick(ly)? please)\b/i;
 // "call me back later" asks for a callback, not a goodbye.
 export const CALLBACK = /\b(call|ring) me (back|later|tomorrow|tonight|again|in (a|an|\d))/i;
 const CLOSER = /^(ok(ay)?[, ]*)?((i )?(really )?(appreciate (it|you|that)|thanks?( (so much|a lot|again))?|thank you( (so much|again))?|cheers)|i think i'?ve (got(ten)?|had) (my|what i|all the) (help|needed|need)|that (helped|was great|was helpful))[.! ]*$/i;
@@ -251,6 +263,7 @@ export const INTENTS: Record<string, IntentDef> = {
   STOP_TALKING: { re: STOP_TALKING, means: "stop talking (on a call: yield)", says: ["Stop talking.", "shh", "ok, stop"], notSays: ["stop by the store later", "don't stop"] },
   CALL_OK: { re: CALL_OK, means: "ok to ring them", says: ["sure", "call me", "k"], notSays: ["haha", "hmm"] },
   DELEGATE: { re: DELEGATE, means: "they hand us the choice", says: ["you pick", "idk", "surprise me"], notSays: ["luna", "i pick luna"] },
+  HANGUP_ASK: { re: HANGUP_ASK, means: "on a call: hang up now (maybe call back)", says: ["can you hang up and call me back in a minute?", "i'm busy right now", "gotta go"], notSays: ["don't hang up", "hang on a sec", "i'm not busy"] },
   CALL_NO: { re: CALL_NO, means: "no to a call", says: ["nah", "text is fine", "don't call"], notSays: ["sure", "yes call me"] },
   OFFERED_CALL: { re: OFFERED_CALL, means: "our message offered a call", says: ["want me to give you a quick call?"], notSays: ["i'll call you in a sec.", "what's up?", "what do you want to call me?"] },
   NEGATED_CALL: { re: NEGATED_CALL, means: "a call mentioned only to refuse it", says: ["please don't call me", "i didn't want you to call"], notSays: ["call me", "can you call me?"] },

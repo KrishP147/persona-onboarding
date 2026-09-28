@@ -554,7 +554,7 @@ async function main() {
   const egg1 = await handleUserMessage(egg, "text", "i'm zach");
   check("team name: 'woah, is this THE zach, founder of persona?'", /is this THE zach, founder of persona\?/.test(said(egg1)) && egg.teamGuess === "zach", said(egg1));
   await handleUserMessage(egg, "text", "haha yes");
-  check("...a yes: they're recognized (bio goes to the model), asked only once", egg.teamMember === "zach" && !/is this THE/.test(said(await handleUserMessage(egg, "text", "anyway i need help with email"))));
+  check("...a yes: they're recognized (bio goes to the model), asked only once", (egg.teamYes ?? []).includes("zach") && !/is this THE/.test(said(await handleUserMessage(egg, "text", "anyway i need help with email"))));
   check("...the yes gets a code-written 'no way, an honor!'", egg.transcript.some((m) => m.role === "agent" && m.text === "no way, an honor!"));
   // "can you call my dentist?" is a call for someone else, never a ring to them; "can you call?" is
   const dent = newSession();
@@ -571,12 +571,66 @@ async function main() {
   // (keyless: no extractor to re-read the name, so set it as prod's extractor would)
   egg.slots.userName = { ...egg.slots.userName, value: "Julia" };
   const eggJ = await handleUserMessage(egg, "text", "actually im julia");
-  check("...switching to another team name asks again ('is this THE julia?')", /is this THE julia, from talent at persona\?/.test(said(eggJ)) && egg.teamGuess === "julia" && !egg.teamMember, said(eggJ));
+  check("...switching to another team name asks again ('is this THE julia?')", /is this THE julia, from talent at persona\?/.test(said(eggJ)) && egg.teamGuess === "julia" && !(egg.teamYes ?? []).includes("julia"), said(eggJ));
+  // ...and back to zach: no third ask (a repeat would have been blocked into "i'm here."), the earlier yes still counts
+  egg.slots.userName = { ...egg.slots.userName, value: "Zach" };
+  const eggZ = await handleUserMessage(egg, "text", "jk i'm zach");
+  check("zach -> julia -> zach: no re-ask, still recognized as zach", !/is this THE|i'm here/.test(said(eggZ)) && (egg.teamAsked ?? []).join() === "zach,julia" && (egg.teamYes ?? []).includes("zach"), said(eggZ));
+  // replay of a real call: "hang up and call me back in a minute" -> goodbye, hang up, ring back; the text says when
+  const hb = newSession();
+  await handleEvent(hb, { type: "open" });
+  await handleUserMessage(hb, "text", "julia");
+  await handleEvent(hb, { type: "call_started" });
+  const hbR = await handleUserMessage(hb, "voice", "Hey, Julia. Can you actually hang up and call me back in, like, a minute?");
+  const ringIn = hbR.actions.find((a) => a.type === "ring_later");
+  check("'hang up and call me back in a minute': bye, hang up, ring back", hbR.actions.some((a) => a.type === "end_call") && !!ringIn && "ms" in ringIn && ringIn.ms === 60_000 && /call you back in a minute/.test(said(hbR)), said(hbR));
+  const hbEnd = await handleEvent(hb, { type: "call_ended", reason: "agent_ended" });
+  check("...the text after says when, not 'got cut off'", /call you back in/.test(said(hbEnd)) && !/cut off/.test(said(hbEnd)), said(hbEnd));
+  const hbBack = await handleEvent(hb, { type: "call_started" });
+  check("...and the callback opens with 'calling you back like i said'", /calling you back like i said/.test(said(hbBack)), said(hbBack));
+  const bz = newSession();
+  await handleEvent(bz, { type: "open" });
+  await handleUserMessage(bz, "text", "julia");
+  await handleEvent(bz, { type: "call_started" });
+  const bzR = await handleUserMessage(bz, "voice", "sorry i'm busy right now");
+  check("'i'm busy right now' on a call: lets them go, no gmail, no timer", bzR.actions.some((a) => a.type === "end_call") && !bzR.actions.some((a) => a.type === "ring_later") && !/gmail/i.test(said(bzR)), said(bzR));
+  const nb = newSession();
+  await handleEvent(nb, { type: "open" });
+  await handleUserMessage(nb, "text", "julia");
+  await handleEvent(nb, { type: "call_started" });
+  const nbR = await handleUserMessage(nb, "voice", "no i'm not busy, don't hang up");
+  check("...'not busy, don't hang up' keeps the call", !nbR.actions.some((a) => a.type === "end_call"), said(nbR));
+  // persona's review: a question isn't skipping the name, "hi" keeps the name question, mic line in the right tense
+  const wq = newSession();
+  await handleEvent(wq, { type: "open" });
+  const wqR = await handleUserMessage(wq, "text", "what can you do?");
+  check("'what can you do?' after the name question isn't a skip", !wq.agentNameDefaulted && !/go by persona/.test(said(wqR)), said(wqR));
+  const hiS = newSession();
+  await handleEvent(hiS, { type: "open" });
+  const hiR = await handleUserMessage(hiS, "text", "hi");
+  check("'hi' after the name question: hi back, name question kept", /call me|go by/.test(said(hiR)) && hiS.lastAskedSlot === "agentName", said(hiR));
+  const mic2 = newSession();
+  await handleEvent(mic2, { type: "open" });
+  await handleUserMessage(mic2, "text", "julia");
+  const micR = await handleEvent(mic2, { type: "mic_denied" });
+  check("no mic: code line, no 'trying to ring you now'", /mic isn't coming through/.test(said(micR)) && !/trying to ring/i.test(said(micR)), said(micR));
   const ph = newSession();
   await handleEvent(ph, { type: "open" });
   await handleUserMessage(ph, "text", "nova");
   const phR = await handleUserMessage(ph, "text", "can you call a pharmacy for me");
   check("'can you call a pharmacy for me' doesn't ring them", !phR.actions.some((a) => a.type === "start_call"), said(phR));
+  // on a call, the egg is spoken with its own emphasis; "THE" is said "thee" while the caption keeps THE
+  const ev = newSession();
+  await handleEvent(ev, { type: "open" });
+  await handleUserMessage(ev, "text", "aarav");
+  await handleEvent(ev, { type: "call_started" });
+  const evR = await handleUserMessage(ev, "voice", "hey aarav, i'm zach");
+  ev.slots.userName = { ...ev.slots.userName, value: "Zach", status: "filled" };
+  const evR2 = evR.newMessages.some((m) => /THE zach/.test(m.text)) ? evR : await handleUserMessage(ev, "voice", "hey, i'm zach");
+  const spokenEgg = evR2.actions.filter((a) => a.type === "speak").map((a) => ("text" in a ? a.text : "")).join(" ");
+  check("egg on a call: spoken as 'thee zach', caption keeps THE", /thee zach/.test(spokenEgg) && evR2.newMessages.some((m) => m.channel === "voice" && /THE zach/.test(m.text)), spokenEgg);
+  const saidOut = await import("../src/lib/engine/context").then((c) => c.speakable("ok rn idk, lol. btw u can text me w/ questions"));
+  check("texting shorthand becomes words on a call", saidOut === "ok right now i don't know, by the way you can text me with questions", saidOut);
   const egg2 = newSession();
   egg2.slots.userName = { value: "Sam", status: "filled", asks: 1, source: "text", updatedAt: Date.now() };
   check("...other names: nothing", !/is this THE/.test(said(await handleUserMessage(egg2, "text", "hey"))) && !egg2.teamGuess);

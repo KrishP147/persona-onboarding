@@ -4,7 +4,7 @@
 
 **live: https://persona-onboarding-gold.vercel.app** (chrome or edge for the call; the reasoning map runs side by side with the phone from 1024px up)
 
-<!-- GIF placeholder: 20s loop of a text, the call, a hangup mid-sentence, and the recap text landing. record it last, save as docs/design/demo.gif, and add ![demo](docs/design/demo.gif) here. -->
+![naming it, the contact card, the call offer, and the call picking up where the texts left off, with the reasoning map filling in beside it](docs/design/demo.gif)
 
 a landing page in persona's own design language, then an onboarding for a persona style personal assistant, built as a phone in the browser: a text thread plus a voice call. the landing page says plainly, top and bottom, that it's *"a trial demo by Krish for Persona, not the real product"*, with a link to the real yourpersona.com.
 

@@ -818,14 +818,19 @@ export function useVoiceCall(opts: {
     // Thinking out loud, like a person: a short "hmm" if the reply takes over ~1s, and "let me think
     // that through" if it's still coming at ~3s (clark & fox tree 2002: uh/um mark short vs long
     // delays; shiwa et al. 2008: fillers soften slow replies). Never on fast replies, never stacked twice.
+    // Which pause fits depends on what they said: nobody says "let me think" to "i'm zach". A simple answer
+    // (a name, a yes, a few words) gets silence, and only a plain "one sec." if the reply is really slow; a real
+    // question or request can get a "hmm", then "let me think about that" once it's clearly taking a while.
     clear(fillerTimer);
     const stillWaiting = () => waitingRef.current && queueRef.current === 0 && !micOff() && activeRef.current && !hushed;
+    const kind = pauseKind(text);
+    const thinking = kind !== "plain";
     fillerTimer.current = setTimeout(() => {
       if (!stillWaiting()) return;
-      if (Math.random() < 0.5) void speak(pickFiller(SHORT_FILLERS, lastFillerRef), true);
+      if (thinking && Math.random() < 0.35) void speak(pickFiller(SHORT_FILLERS, lastFillerRef), true);
       fillerTimer.current = setTimeout(() => {
-        if (stillWaiting()) void speak(pickFiller(LONG_FILLERS, lastFillerRef), true);
-      }, 2000);
+        if (stillWaiting()) void speak(pickFiller(kind === "lookup" ? LOOKUP_FILLERS : kind === "inbox" ? INBOX_FILLERS : thinking ? LONG_FILLERS : HOLD_FILLERS, lastFillerRef), true);
+      }, thinking ? 2000 : 2600);
     }, 1100);
     optsRef.current.onUtterance(text, interrupted, heardBefore).finally(() => {
       waitingRef.current = false;
@@ -1104,8 +1109,21 @@ export function useVoiceCall(opts: {
 }
 
 const BACK_LINE = "i'm back, go ahead.";
-const SHORT_FILLERS = ["hmm.", "mm, okay.", "oh, okay.", "yeah, hmm."];
-const LONG_FILLERS = ["um, let me think that through for a second.", "hmm, give me a sec to think.", "okay, let me think about that."];
+const SHORT_FILLERS = ["hmm.", "hmm, okay."];
+const LONG_FILLERS = ["let me think about that for a second.", "good question, give me a second."];
+// a slow reply to something simple: just hold, no pretend thinking
+const HOLD_FILLERS = ["one sec.", "hold on."];
+// say what's actually happening when it's slow: a lookup, the inbox, real thinking, or just a hold
+const LOOKUP_FILLERS = ["let me look that up.", "one sec, let me check."];
+const INBOX_FILLERS = ["let me check your inbox.", "one sec, looking at your email."];
+// what the wait is probably for, from their words (the reply arrives all at once, so the browser has to guess)
+function pauseKind(t: string): "lookup" | "inbox" | "think" | "plain" {
+  const w = t.trim().split(/\s+/).length;
+  if (/\b(inbox|e-?mails?|gmail|unread)\b/i.test(t) && /\b(check|look|read|any|what|show|find|urgent|new|sort|go through)\b/i.test(t)) return "inbox";
+  if (/\b(weather|forecast|hours|price|prices|cost|near me|nearby|news|score|flights?|restaurants?|look (it |that )?up|search|google)\b/i.test(t)) return "lookup";
+  if (/\?\s*$/.test(t.trim()) || (w >= 6 && /\b(how|why|what|which|should|could|can you|help|find|plan|compare|explain|figure)\b/i.test(t))) return "think";
+  return "plain";
+}
 function pickFiller(list: string[], last: { current: string }) {
   const options = list.filter((f) => f !== last.current);
   const f = options[Math.floor(Math.random() * options.length)] ?? list[0];

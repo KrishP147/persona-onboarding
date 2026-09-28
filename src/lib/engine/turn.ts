@@ -8,11 +8,11 @@ import { connectDemo } from "../google";
 import { EVENT_MOVES, chooseMove, markUsed, pick, withAngle } from "../moves";
 import { applyExtracted, extract } from "../extract";
 import { webEnabled } from "../web";
-import { teamLine, teamMatch, teamNote, teamYes } from "../team";
+import { teamActive, teamLine, teamLineVoice, teamMatch, teamNote, teamYes, teamYesVoice } from "../team";
 
 import { currentMeter, metered, percentile, recordTurn, type Meter } from "../usage";
 import { type Ctx, emitAgentText, ensureCard, goodbyeLine, guard, msg, outageLine } from "./context";
-import { CALL_NO, CARD_ASK, LAUGH_LEAD, CARD_WANT, CLEAR_BYE, DELEGATE, firstSentenceName, fixCallTypos, hintedAgentName, ownNameIn, DEMO_YES, GMAIL_TROUBLE, HOLD, INSULT_NAME, LAUGH, NAME_ASK, NAME_HINT, NEGATED_CALL, NOT_A_NAME, NO_CALLS, OFFERED_CALL, OWN_NAME, SEND_CMD, SEND_REQUEST, SENT_Q, SKIP_SETUP, JUST_DO, SIGN_OFF, STOP_TALKING, repliedElsewhere, THANKS, USER_BYE, WAITING_ON_THEM, WANTS_OUT, YES, asTurnBy, asksForLink, gmailConsent, lastUserText, saidNow, saysBye } from "./intents";
+import { CALL_NO, CARD_ASK, LAUGH_LEAD, CARD_WANT, CLEAR_BYE, DELEGATE, firstSentenceName, fixCallTypos, hintedAgentName, ownNameIn, DEMO_YES, GMAIL_TROUBLE, HOLD, INSULT_NAME, LAUGH, NAME_ASK, NAME_HINT, NEGATED_CALL, NOT_A_NAME, NO_CALLS, OFFERED_CALL, OWN_NAME, SEND_CMD, SEND_REQUEST, SENT_Q, SKIP_SETUP, JUST_DO, SIGN_OFF, HANGUP_ASK, DONT_BYE, callbackIn, STOP_TALKING, repliedElsewhere, THANKS, USER_BYE, WAITING_ON_THEM, WANTS_OUT, YES, asTurnBy, asksForLink, gmailConsent, lastUserText, saidNow, saysBye } from "./intents";
 import { cleanModelText, dropDraftEcho, dropSelfAck, fence, nowLine, parseTypedEmail } from "./text";
 import { GMAIL_ASK_MARK, GUARD_PIPELINE, type TurnOpts, makeGuardEnv, sealGoodbye } from "./guards";
 import { LOOKUP_TOOLS, MAX_TOOL_ROUNDS, TERMS_LINK, TOOLS, WEB_TOOLS, gifAllowed, makeGif, runTool, saveDraftTool, sendEmailTool } from "./tools";
@@ -77,7 +77,8 @@ export async function generate(ctx: Ctx, extraInstruction?: string): Promise<str
   const typed = s.transcript.filter((m) => m.role === "user" && m.channel === "text");
   const keep = [...new Set([...typed.filter((m) => /https?:\/\/|www\.|\S@\S/.test(m.text)).slice(-4), ...(s.call.active ? typed.slice(-3) : [])])];
   if (keep.length) state += `\nTHEY TYPED IN THE CHAT (recent; "the link i sent" means these): ${keep.map((m) => JSON.stringify(m.text.slice(0, 240))).join(", ")}`;
-  if (s.teamMember) state += `\n${teamNote(s.teamMember)}`;
+  const member = teamActive(s);
+  if (member) state += `\n${teamNote(member)}`;
   if (extraInstruction) state += `\n\nINSTRUCTION: ${extraInstruction}`;
   if (!extraInstruction || ctx.softInstruction) {
     // One research-backed move per turn, chosen in code, so the principles actually get applied.
@@ -412,19 +413,20 @@ export async function nameAmbiguity(s: Session, channel: Channel, text: string, 
 export async function handleUserMessage(...args: Parameters<typeof handleUserMessageInner>): Promise<TurnResult> {
   const [s, channel, text] = args;
   // easter egg follow up: a yes to "is this THE zach?" (anything else just moves on)
-  if (s.teamGuess && !s.teamMember && s.transcript.findLast((m) => m.role === "agent" && (!m.kind || m.kind === "text"))?.move?.id === "team") {
-    if (YES.test(text.replace(LAUGH_LEAD, "")) || /\b(it'?s me|that'?s me|the one|in the flesh|guilty)\b/i.test(text)) s.teamMember = s.teamGuess;
+  const guess = s.teamGuess;
+  if (guess && !(s.teamYes ?? []).includes(guess) && s.transcript.findLast((m) => m.role === "agent" && (!m.kind || m.kind === "text"))?.move?.id === "team") {
+    if (YES.test(text.replace(LAUGH_LEAD, "")) || /\b(it'?s me|that'?s me|the one|in the flesh|guilty)\b/i.test(text)) (s.teamYes ??= []).push(guess);
   }
-  const justMet = !!s.teamMember && !s.teamGreeted;
-  if (justMet) s.teamGreeted = true;
+  const justMet = !!guess && (s.teamYes ?? []).includes(guess) && !(s.teamGreetedFor ?? []).includes(guess);
+  if (justMet) (s.teamGreetedFor ??= []).push(guess);
   const [r, meter] = await metered(async () => sealGoodbye(s, await asTurnBy(s, "user", () => handleUserMessageInner(...args))));
   noteMetrics(s, meter);
   // their name is on the persona team: "woah, is this THE zach?" in place of this turn's words (cards, links,
   // a ringing call or a send stay; then it's back to normal)
   // a yes to "is this THE zach?": a code-written "no way" first (a run's model skipped straight to the call offer)
-  if (justMet && s.teamMember) {
+  if (justMet && guess) {
     const ctx: Ctx = { s, channel: s.call.active ? "voice" : channel, actions: [], newMessages: [], move: { id: "team", label: "a familiar name", source: "easter egg" } };
-    emitAgentText(ctx, teamYes(s.teamMember));
+    emitAgentText(ctx, ctx.channel === "voice" ? teamYesVoice(guess) : teamYes(guess));
     const [m] = ctx.newMessages;
     const first = r.newMessages.findIndex((x) => x.role === "agent");
     s.transcript.splice(s.transcript.indexOf(m), 1);
@@ -435,8 +437,8 @@ export async function handleUserMessage(...args: Parameters<typeof handleUserMes
   }
   const key = teamMatch(s);
   if (key) {
-    // a new name ("actually i'm julia") is a new ask; the old yes doesn't carry over
-    if (s.teamGuess) s.teamMember = s.teamGreeted = undefined;
+    // a new name ("actually i'm julia") is a new ask; a yes stays with its name (back to zach: still zach)
+    (s.teamAsked ??= []).push(key);
     s.teamGuess = key;
     const busy = r.actions.some((a) => a.type === "start_call" || a.type === "end_call") || !!s.lastSent;
     const words = busy ? [] : r.newMessages.filter((m) => m.role === "agent" && (!m.kind || m.kind === "text") && !m.move?.id?.startsWith("default"));
@@ -444,7 +446,7 @@ export async function handleUserMessage(...args: Parameters<typeof handleUserMes
     r.newMessages = r.newMessages.filter((m) => !words.includes(m));
     if (words.length) r.actions = r.actions.filter((a) => a.type !== "speak");
     const ctx: Ctx = { s, channel: s.call.active ? "voice" : channel, actions: [], newMessages: [], move: { id: "team", label: "a familiar name", source: "easter egg" } };
-    emitAgentText(ctx, teamLine(key));
+    emitAgentText(ctx, ctx.channel === "voice" ? teamLineVoice(key) : teamLine(key));
     r.newMessages.push(...ctx.newMessages);
     r.actions.push(...ctx.actions);
   }
@@ -568,6 +570,21 @@ export async function handleUserMessageInner(
     }
     // "i'll let you know once it's connected": they're off doing something, so wait like after "hold on".
     s.call.holding = WAITING_ON_THEM.test(clean);
+    // "hang up and call me back in a few" / "i'm busy right now": do it. A short goodbye, hang up, ring back when
+    // asked. A run argued ("actually, i'll stay on"), pitched gmail, then filled the silence with "no rush".
+    if (s.call.active && HANGUP_ASK.test(clean) && !DONT_BYE.test(clean) && !/\b(not|isn'?t) (busy|a bad time)\b/i.test(clean)) {
+      const name = s.slots.userName.value?.toLowerCase();
+      const ms = callbackIn(clean);
+      const when = ms ? (ms < 90_000 ? "in a minute" : `in about ${Math.round(ms / 60_000)} minutes`) : null;
+      const back = /\b(call|ring) me back\b|\bcall back\b/i.test(clean);
+      const ctx: Ctx = { s, channel, actions: [], newMessages: [], move: EVENT_MOVES.recap };
+      emitAgentText(ctx, when ? `of course${name ? `, ${name}` : ""}. i'll call you back ${when}. talk soon!` : back ? `of course${name ? `, ${name}` : ""}. i'll text you, and we can talk whenever you're free.` : `no problem${name ? `, ${name}` : ""}, i'll let you go. talk soon!`);
+      guard(ctx, "hung up when asked");
+      s.callbackAt = ms ? Date.now() + ms : undefined;
+      ctx.actions.push({ type: "end_call", final: true });
+      if (ms) ctx.actions.push({ type: "ring_later", ms });
+      return { session: s, newMessages: [userMsg, ...ctx.newMessages], chips: computeDirective(s, channel).chips, actions: ctx.actions };
+    }
     // They said bye: say it back (always, and audibly), then hang up. No model, nothing to go wrong.
     if (saysBye(clean, CLEAR_BYE) && clean.split(/\s+/).length <= 12 && s.call.active) {
       const name = s.slots.userName.value;
@@ -587,6 +604,14 @@ export async function handleUserMessageInner(
   const heard = extract(s, clean);
   // "call you nova, and can you check my email": the name and its contact card come first, then the rest.
   const early = named ? null : await nameFirst(s, channel, clean, heard);
+  // "hi" right after "what do you want to call me?": say hi back and keep the question (a run's "hey! what's up"
+  // dropped it, and the name never came up again).
+  if (channel === "text" && !s.call.active && s.slots.agentName.status === "missing" && s.lastAskedSlot === "agentName" && nameAskIsNewest(s, userMsg) && /^\s*(hi+|hey+|hello|yo+|sup|hiya|heya|howdy)[!.\s]*$/i.test(clean)) {
+    const ctx: Ctx = { s, channel, actions: [], newMessages: [], move: EVENT_MOVES.named };
+    emitAgentText(ctx, pick(s, "hi-back", ["hey! so what do you want to call me? anything works", "hi! first thing, what should i go by?", "hey hey. what do you want to call me?"]));
+    recordAsk(s, "agentName");
+    return { session: s, newMessages: [userMsg, ...(early?.msgs ?? []), ...ctx.newMessages], chips: computeDirective(s, channel).chips, actions: [] };
+  }
   // Pure laughter or thanks, over text, when a gif is allowed: answer with one.
   if (channel === "text" && !s.call.active && (LAUGH.test(clean) || THANKS.test(clean)) && gifAllowed(s)) {
     const gif = makeGif(s, LAUGH.test(clean) ? "lol" : "ok");
@@ -782,7 +807,7 @@ export async function handleUserMessageInner(
   // They answered something else instead of naming it ("i need help with my inbox"): follow them, then a
   // double text takes "persona" as a default they can change. A short "hi" or "?" gets one more chance.
   let skippedName = false;
-  if (channel === "text" && !s.call.active && s.phase !== "graduated" && s.slots.agentName.status === "missing" && s.lastAskedSlot === "agentName" && !repliedElsewhere(s, userMsg) && !OWN_NAME.test(clean.trim()) && !DELEGATE.test(clean) && !LAUGH.test(clean) && !NAME_HINT.test(clean)) {
+  if (channel === "text" && !s.call.active && s.phase !== "graduated" && s.slots.agentName.status === "missing" && s.lastAskedSlot === "agentName" && !repliedElsewhere(s, userMsg) && !/\?\s*$/.test(clean.trim()) && !OWN_NAME.test(clean.trim()) && !DELEGATE.test(clean) && !LAUGH.test(clean) && !NAME_HINT.test(clean)) {
     const askIdx = s.transcript.findLastIndex((m) => m.role === "agent" && NAME_ASK.test(m.text));
     const replies = s.transcript.slice(askIdx + 1).filter((m) => m.role === "user").length;
     const e0 = await heard.catch(() => null);

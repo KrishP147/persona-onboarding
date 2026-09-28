@@ -21,7 +21,7 @@ a draft email used to arrive as a long text. when gmail is connected it's now a 
 
 - first visit shows a short note for reviewers: what this is, use chrome or edge for the call, and three things to try. it never blocks the opening texts, which arrive underneath. esc or a tap outside closes it and it stays closed; `?intro=1` brings it back.
 - reasoning is off by default and remembered. (this used to be a folded lane of cards beside the phone; 17 replaced it with a map you open from a pill.)
-- when the server sends them, the checks that ran on a reply show as small shield chips beside its node in the map, and the node's detail has the how it decides panel with turns, cost and p50 for the session.
+- when the server sends them, the checks that ran on a reply show as small shield chips beside its node in the map, and the node's detail has the decision process panel with turns, cost and p50 for the session.
 
 ## sources
 
