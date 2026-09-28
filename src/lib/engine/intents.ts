@@ -91,7 +91,7 @@ export const AGREE = /\b(that'?d be (great|good|nice|awesome|perfect|amazing)|th
 // They're asking what setup involves ("what do i need to set up?", "how does this work?").
 export const SETUP_Q = /\b(set ?up|what do (i|you) need|what('?s| is) (next|left)|how does (this|it) work|what('?s| is) involved|what are the steps)\b/i;
 export const STOP_TALKING = /^\s*(ok(ay)?,? )?(stop( talking| it)?|shh+|hush|quiet|be quiet|enough|stop stop|zip it)[.! ]*$/i;
-export const YES = /^\s*((oh|ah|um+|uh+|well|hmm+|haha)[,.!]?\s+)?(yes|yeah|yea|ye|ya|yep|yup|sure|ok(ay)?|do it|please|go ahead|let'?s do it|sounds good|perfect|si|dale|claro|vale|oui|sim)\b|^\s*sí(?![a-z])/i;
+export const YES = /^\s*((oh|ah|um+|uh+|well|hmm+|haha|i mean|honestly|alright|so)[,.!]?\s+)?(yes|yeah|yea|ye|ya|yep|yup|sure|ok(ay)?|do it|please|go ahead|let'?s do it|sounds good|perfect|si|dale|claro|vale|oui|sim)\b|^\s*sí(?![a-z])/i;
 
 export function lastUserText(s: Session) {
   return [...s.transcript].reverse().find((m) => m.role === "user")?.text ?? "";

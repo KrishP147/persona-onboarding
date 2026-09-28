@@ -611,6 +611,22 @@ async function main() {
   callNo.transcript.push(msg("agent", "text", "want me to give you a quick call?"), msg("user", "text", "nah let's just text, easier for me rn"));
   await applyExtracted(callNo, { agentName: null, userName: null, helpNeed: null, declined: ["gmail"] }, async () => {});
   check("turning down the call never marks gmail declined", callNo.slots.gmail.status === "missing", callNo.slots.gmail.status);
+  // harness run: "I mean sure, send it over" wasn't a yes, and "the link's in your texts now" (the whole reply) went out with no link
+  const linkOnly = async (said: string) => {
+    const x = newSession();
+    await handleEvent(x, { type: "open" });
+    await handleUserMessage(x, "text", "julia");
+    await handleEvent(x, { type: "call_started" });
+    x.transcript.push(msg("agent", "voice", "want me to text you a link to connect your gmail?"), msg("user", "voice", said));
+    const ctx = { s: x, channel: "voice" as const, actions: [], newMessages: [] } as Parameters<typeof emitAgentText>[0];
+    const env = makeGuardEnv({ ctx, s: x, channel: "voice", text: "My bad, you said sure, so the link's in your texts now.", failed: false, usedFallback: false, opts: {} });
+    await GUARD_PIPELINE.find((g) => g.name === "call-offer-and-link-claims")!.run(env);
+    return { text: env.text, link: ctx.newMessages.some((m) => m.kind === "gmail_link") };
+  };
+  const meanSure = await linkOnly("I mean sure, send it over. but are you always this chatty");
+  check("'i mean sure, send it over' is a yes: the claimed link really goes out", meanSure.link, meanSure.text);
+  const noYes = await linkOnly("what do you mean?");
+  check("a false 'link's in your texts' that's the whole reply becomes a question, never kept", !noYes.link && noYes.text.endsWith("?") && !/in your texts/.test(noYes.text), noYes.text);
   const trash = cleanModelText("i can trash the promos for you. i can draft replies too.");
   check("no 'i can trash' (no delete tool)", !/trash/.test(trash) && trash.includes("draft replies"), trash);
   const vendor = cleanModelText("I'm Claude, an AI assistant made by Anthropic. So, what should I call you?");

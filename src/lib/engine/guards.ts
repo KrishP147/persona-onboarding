@@ -402,7 +402,8 @@ export const GUARD_PIPELINE: GuardStep[] = [
           guard(ctx, "sent the link it said it sent");
         }
         // Never say it's sent when it isn't: drop the claim instead of sending a link they didn't ask for.
-        else e.fix("dropped a false 'link sent' claim", sentences.filter((x) => !(CLAIMS_LINK.test(x) && !x.trim().endsWith("?"))).join(" ").trim() || e.text);
+        // If the claim was the whole reply, ask instead (keeping it once let "the link's in your texts now" out with no link).
+        else e.fix("dropped a false 'link sent' claim", sentences.filter((x) => !(CLAIMS_LINK.test(x) && !x.trim().endsWith("?"))).join(" ").trim() || (channel === "voice" ? "want me to text you that link now?" : "want me to send you that link now?"));
       }
     },
   },
