@@ -6,6 +6,7 @@ import { DEMO_INBOX, triageInbox } from "../triage";
 import { EVENT_MOVES, pick } from "../moves";
 import { reconcileCall } from "../extract";
 import { metered } from "../usage";
+import { setSecret } from "../store";
 import { type Ctx, emitAgentText, eventMsg, heardThemThisCall, msg, recapFallback } from "./context";
 import { OFFERED_CALL, asTurnBy, saysBye } from "./intents";
 import { linkPending, rememberEmails, sealGoodbye } from "./guards";
@@ -21,7 +22,8 @@ export type SessionEvent =
   | { type: "contact_saved" }
   | { type: "mic_denied" }
   | { type: "gmail_connected"; email?: string }
-  | { type: "gmail_failed"; error: string };
+  | { type: "gmail_failed"; error: string }
+  | { type: "forget_slot"; slot: Exclude<SlotKey, "agentName"> }; // "forget" on the what-i-know card
 
 export async function handleEvent(s: Session, e: SessionEvent): Promise<TurnResult> {
   const start = s.transcript.length;
@@ -208,6 +210,22 @@ export async function handleEventInner(s: Session, e: SessionEvent): Promise<Tur
         return { session: s, newMessages: ctx.newMessages, chips: computeDirective(s, "text").chips, actions: [] };
       }
       return turn(s, "text", IDLE_INSTRUCTION, name ? `no rush ${name}, i'm around whenever` : "no rush, i'm around whenever", { move: EVENT_MOVES.nudge, avoid: /\b(just checking in|are you (still )?there|still there|did you (see|get) my)\b/i });
+    }
+    case "forget_slot": {
+      const slot = s.slots[e.slot];
+      if (!slot.value && slot.status !== "filled") return idle();
+      // declined, not missing: forgetting is their call, so it never restarts the asks
+      s.slots[e.slot] = { value: null, status: "declined", asks: Math.max(slot.asks, 1), updatedAt: Date.now() };
+      if (e.slot === "gmail") {
+        // overwrite the stored google tokens so nothing can reach the inbox again (no delete in the store)
+        await Promise.all([setSecret(`gtoken:${s.id}`, "", 60), setSecret(`gscope:${s.id}`, "", 60)]).catch(() => {});
+        s.gmailEmail = undefined;
+        s.gmailVerified = undefined;
+        s.gmailUnread = undefined;
+        s.alerts = undefined;
+      }
+      eventMsg(s, `Forgot your ${e.slot === "userName" ? "name" : e.slot === "helpNeed" ? "request" : "Gmail connection"}`);
+      return idle();
     }
     case "contact_saved": {
       if (s.contactSaved) return idle();

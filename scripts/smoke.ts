@@ -1,5 +1,5 @@
 // Keyless smoke test of the engine's safety nets (mock mode). Run: pnpm tsx scripts/smoke.ts
-import { loadSession, newSession, saveSession, withSession } from "../src/lib/store";
+import { getSecret, loadSession, newSession, saveSession, setSecret, withSession } from "../src/lib/store";
 import { INTENTS, cleanModelText, cutRepeatQuestions, fence, fromEmailOnly, runTool, handleEvent, normQuestion, saysBye, softenGmailDemand, handleUserMessage, nowLine, parseTypedEmail } from "../src/lib/engine";
 import { crc32, pick } from "../src/lib/moves";
 import { readMood } from "../src/lib/mood";
@@ -311,6 +311,25 @@ async function main() {
   process.env.GOOGLE_CLIENT_SECRET ||= "y";
   const start = await (await StartGET(new Request("http://x/api/auth/google/start?s=abc123"))).text();
   check("start: google sign-in first, demo inbox second", start.indexOf("Sign in with Google") >= 0 && start.indexOf("Sign in with Google") < start.indexOf("demo inbox"), start.slice(0, 80));
+  // "forget" on the what-i-know card: each slot clears, stays declined (no re-asks), gmail drops its tokens
+  const fg = newSession();
+  fg.phase = "graduated";
+  fg.slots.userName = { value: "Krish", status: "filled", asks: 1 };
+  fg.slots.helpNeed = { value: "inbox triage", status: "filled", asks: 1 };
+  fg.slots.gmail = { value: "k@example.com", status: "filled", asks: 1 };
+  fg.gmailEmail = "k@example.com";
+  await setSecret(`gtoken:${fg.id}`, "tok", 600);
+  await setSecret(`gscope:${fg.id}`, "compose", 600);
+  for (const slot of ["userName", "helpNeed", "gmail"] as const) {
+    const r = await handleEvent(fg, { type: "forget_slot", slot });
+    check(`forget ${slot} clears it`, fg.slots[slot].value === null && fg.slots[slot].status === "declined", fg.slots[slot].status);
+    check(`forget ${slot} says so, doesn't ask`, r.newMessages.some((m) => m.kind === "event" && /^Forgot/.test(m.text)) && !r.newMessages.some((m) => m.role === "agent"));
+  }
+  check("forget gmail drops tokens + email", !(await getSecret(`gtoken:${fg.id}`)) && !(await getSecret(`gscope:${fg.id}`)) && !fg.gmailEmail);
+  const fgAgain = await handleEvent(fg, { type: "forget_slot", slot: "userName" });
+  check("forgetting twice is a no-op", fgAgain.newMessages.length === 0);
+  const fgAfter = await handleUserMessage(fg, "text", "what's the weather like");
+  check("no onboarding nag after forgetting", !/your name|what should i call you|connect (your )?gmail/i.test(said(fgAfter)), said(fgAfter));
 
   // per-session metrics: the turn meter sees every model call (even unawaited ones), latency is timed per reply
   const [, meter] = await metered(async () => {

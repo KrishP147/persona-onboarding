@@ -182,8 +182,8 @@ const ROWS: Row[] = [
     case: '"mhm" while it talks',
     expected: "read as a backchannel ack, not a barge-in and not an answer; agent keeps talking",
     code: [
-      { file: "src/app/useVoiceCall.ts", symbol: "STOP_WORDS", pattern: /const STOP_WORDS = / },
-      { file: "src/app/useVoiceCall.ts", symbol: "duringUs (echo/backchannel guard)", pattern: /const duringUs = / },
+      { file: "src/app/chat/useVoiceCall.ts", symbol: "STOP_WORDS", pattern: /const STOP_WORDS = / },
+      { file: "src/app/chat/useVoiceCall.ts", symbol: "duringUs (echo/backchannel guard)", pattern: /const duringUs = / },
     ],
     smoke: { kind: "manual", note: "backchannel filtering lives in the browser-only voice hook; smoke.ts runs server-side only" },
     persona: null,
@@ -192,7 +192,7 @@ const ROWS: Row[] = [
     case: "barge-in (talks over the agent mid-sentence)",
     expected: "agent stops talking, only what was actually heard is kept in its own history, responds to the interruption instead of repeating the cut line",
     code: [
-      { file: "src/app/useVoiceCall.ts", symbol: "interruptedRef / cutsIn", pattern: /interruptedRef\.current = true/ },
+      { file: "src/app/chat/useVoiceCall.ts", symbol: "interruptedRef / cutsIn", pattern: /interruptedRef\.current = true/ },
       { file: "src/lib/engine/turn.ts", symbol: "interrupted + heardBefore handling", pattern: /if \(interrupted && heardBefore !== undefined && channel === "voice"\)/ },
     ],
     smoke: { kind: "manual", note: "no smoke test passes interrupted/heardBefore into handleUserMessage" },
