@@ -66,9 +66,12 @@ body {
   -webkit-font-smoothing: antialiased;
 }
 
-* {
-  scrollbar-width: thin;
-  scrollbar-color: var(--p-scrollbar) transparent;
+/* in base so utilities (e.g. the carousel's [scrollbar-width:none]) can override it */
+@layer base {
+  * {
+    scrollbar-width: thin;
+    scrollbar-color: var(--p-scrollbar) transparent;
+  }
 }
 
 /* phone skins: os type stacks (each skin sets its own; never the page's) */
