@@ -920,7 +920,7 @@ export async function handleUserMessage(
     if (s.phase === "intro") s.phase = "call_offered";
     recordAsk(s, null);
     const ctx: Ctx = { s, channel, actions: [], newMessages: [], move: EVENT_MOVES.named };
-    emitAgentText(ctx, `${nameAck(name)} save my contact card so you know it's me, and i'll walk you through setup on a quick call.\n\nwant me to call?`);
+    emitAgentText(ctx, `${nameAck(name)} save my contact card so you know it's me\n\nwant me to give you a quick call to get you set up? way easier than typing it all out`);
     s.transcript.push(named.card);
     ctx.newMessages.push(named.card);
     await Promise.all(named.pending);
@@ -1036,13 +1036,25 @@ export async function handleUserMessage(
     skip.newMessages.unshift(userMsg, ...(early?.msgs ?? []));
     return skip;
   }
+  // They answered something else instead of naming it ("i need help with my inbox"): follow them, then a
+  // double text takes "persona" as a default they can change. A short "hi" or "?" gets one more chance.
+  let skippedName = false;
+  if (channel === "text" && !s.call.active && s.phase !== "graduated" && s.slots.agentName.status === "missing" && s.lastAskedSlot === "agentName" && !OWN_NAME.test(clean.trim()) && !DELEGATE.test(clean) && !LAUGH.test(clean) && !NAME_HINT.test(clean)) {
+    const askIdx = s.transcript.findLastIndex((m) => m.role === "agent" && NAME_ASK.test(m.text));
+    const replies = s.transcript.slice(askIdx + 1).filter((m) => m.role === "user").length;
+    const e0 = await heard.catch(() => null);
+    if (!e0?.agentName && (clean.trim().split(/\s+/).length >= 3 || replies >= 2)) {
+      defaultAgentName(s);
+      skippedName = true;
+    }
+  }
   // They typed in the chat while we're on the call: answer out loud, and say we saw their text.
   const replyChannel: Channel = channel === "text" && s.call.active ? "voice" : channel;
   const sawText = channel === "text" && s.call.active ? "They just TEXTED this in the chat while you're on the call. Answer out loud on the call and mention you saw their text." : undefined;
   const r = await turn(
     s,
     replyChannel,
-    [early?.note, linkNote ?? sawText].filter(Boolean).join(" ") || (interrupted ? "They talked over you mid-sentence. Drop what you were saying and respond to what they just said; don't repeat your cut-off line unless they ask." : undefined),
+    [early?.note, linkNote ?? sawText, skippedName ? "They skipped naming you. You're going by Persona for now and a separate text right after yours tells them, so don't mention your name or ask for one. Just respond to what they said." : undefined].filter(Boolean).join(" ") || (interrupted ? "They talked over you mid-sentence. Drop what you were saying and respond to what they just said; don't repeat your cut-off line unless they ask." : undefined),
     linkNote ? (channel === "voice" ? "okay, i'm texting you the link right now. it's the card that says connect your google account, tap it whenever you're ready." : "here you go, it's the card right there. signing in takes a few seconds.") : channel === "voice" ? "sorry, i missed that. say it one more time?" : "sorry, i lost my train of thought for a sec. can you say that again?",
     // A note about an interruption or a text mid-call still gets this turn's move (like the gmail offer).
     { soft: !linkNote },
@@ -1054,6 +1066,11 @@ export async function handleUserMessage(
   }
   if (early) r.newMessages.unshift(...early.msgs);
   r.newMessages.unshift(userMsg);
+  if (skippedName && !r.actions.some((a) => a.type === "start_call")) {
+    const ctx: Ctx = { s, channel: "text", actions: [], newMessages: [], move: EVENT_MOVES.defaultName };
+    emitAgentText(ctx, SKIPPED_NAME);
+    r.newMessages.push(...ctx.newMessages);
+  }
   if (channel === "voice" && s.call.holding && s.call.active) r.actions.push({ type: "patience", ms: 90000 });
   // Image bytes were for this one reply; storing them would bloat every later read and write.
   if (userMsg.attachments?.some((a) => a.dataUrl)) {
@@ -1089,6 +1106,7 @@ export type SessionEvent =
   | { type: "call_declined" }
   | { type: "call_ended"; reason: "user_hangup" | "agent_ended" | "error" }
   | { type: "silence" }
+  | { type: "text_idle" } // over text, their turn and they went quiet (left on read)
   | { type: "contact_saved" }
   | { type: "mic_denied" }
   | { type: "gmail_connected"; email?: string }
@@ -1217,6 +1235,55 @@ async function handleEventInner(s: Session, e: SessionEvent): Promise<TurnResult
       const ctx: Ctx = { s, channel: "voice", actions: [{ type: "patience", ms: s.call.holding ? 30000 : 20000 }], newMessages: [], move: EVENT_MOVES.silence };
       emitAgentText(ctx, line);
       return { session: s, newMessages: ctx.newMessages, chips: computeDirective(s, "voice").chips, actions: ctx.actions };
+    }
+    case "text_idle": {
+      // Left on read over text. A friend doesn't go silent and doesn't nag: one easy double text,
+      // a lighter one much later, then quiet until they're back.
+      if (s.call.active) return idle();
+      const lastUserIdx = s.transcript.findLastIndex((m) => m.role === "user");
+      const since = s.transcript.slice(lastUserIdx + 1);
+      const lastAgent = since.findLast((m) => m.role === "agent" && (!m.kind || m.kind === "text"));
+      if (!lastAgent || Date.now() - lastAgent.ts < IDLE_MIN_MS) return idle(); // their message is newer, or another tab just nudged
+      const nudges = countNudges(since);
+      if (nudges >= MAX_IDLE_NUDGES) return idle();
+      // They signed off ("thanks, bye"), or we already said goodbye: nothing to chase.
+      if (lastUserIdx >= 0 && USER_BYE.test(s.transcript[lastUserIdx].text) && nudges === 0) return idle();
+      const ctx: Ctx = { s, channel: "text", actions: [], newMessages: [], move: EVENT_MOVES.nudge };
+      const name = s.slots.userName.value;
+      if (nudges >= 1) {
+        // The second one never asks anything: it just leaves the door open.
+        emitAgentText(ctx, name ? `all good ${name}, no rush. i'm here whenever` : "all good, no rush. i'm here whenever");
+        recordAsk(s, null);
+        return { session: s, newMessages: ctx.newMessages, chips: computeDirective(s, "text").chips, actions: [] };
+      }
+      // They never answered "what do you want to call me?": take a default they can change, keep moving.
+      if (s.slots.agentName.status === "missing" && s.lastAskedSlot === "agentName") {
+        defaultAgentName(s);
+        ctx.move = EVENT_MOVES.defaultName;
+        const d = computeDirective(s, "text");
+        const callAsk = d.offerCall && s.callOffers === 0;
+        if (callAsk) {
+          s.callOffers = 1;
+          if (s.phase === "intro") s.phase = "call_offered";
+        }
+        emitAgentText(ctx, `${SKIPPED_NAME}${callAsk ? `\n\nwant me to give you a quick call to get you set up? way easier than typing it all out` : ""}`);
+        recordAsk(s, null, callAsk);
+        return { session: s, newMessages: ctx.newMessages, chips: computeDirective(s, "text").chips, actions: [] };
+      }
+      // The link is sitting in their texts: they may be mid sign-in. Give room, no question.
+      if (linkPending(s)) {
+        emitAgentText(ctx, "no rush on the google sign in btw. the card's right up there whenever you're ready");
+        recordAsk(s, null);
+        return { session: s, newMessages: ctx.newMessages, chips: computeDirective(s, "text").chips, actions: [] };
+      }
+      // An unanswered call offer: take the pressure off and keep the conversation going over text.
+      if (OFFERED_CALL.test(lastAgent.text) && !s.call.active) {
+        const q = s.slots.helpNeed.status === "missing" ? " what's been eating your time lately?" : "";
+        emitAgentText(ctx, `no pressure on the call btw, texting works just as well.${q}`);
+        recordAsk(s, q ? "helpNeed" : null, !!q);
+        return { session: s, newMessages: ctx.newMessages, chips: computeDirective(s, "text").chips, actions: [] };
+      }
+      return turn(s, "text", IDLE_INSTRUCTION, name ? `no rush ${name}, i'm around whenever` : "no rush, i'm around whenever", { move: EVENT_MOVES.nudge, avoid: /\b(just checking in|are you (still )?there|still there|did you (see|get) my)\b/i });
     }
     case "contact_saved": {
       if (s.contactSaved) return idle();
@@ -1448,4 +1515,23 @@ const NO_CALLS = /\b(don'?t|do not|dont|pls don'?t|please don'?t|never) (call|ri
 const INSULT_NAME = /^(ugly|idiot|stupid|dumb|dummy|loser|trash|garbage|moron|clown|useless|lame|jerk|butthead|poopy?|bitch|asshole|dumbass)$/i;
 function nameAck(name: string) {
   return INSULT_NAME.test(name.trim()) ? `ouch, ${name.toLowerCase()}? harsh, but i'll wear it. ${name} it is.` : `${name} it is.`;
+}
+
+// Left on read over text: first double text after about 45s (client timer), a lighter one minutes later, then quiet.
+export const MAX_IDLE_NUDGES = 2;
+const IDLE_MIN_MS = 20000;
+const IDLE_INSTRUCTION =
+  "They haven't answered your last text for a bit (left on read). Send ONE short, relaxed double text, like a friend who doesn't take it personally. Don't repeat or rephrase your last question and don't say \"just checking in\" or \"are you there\". Either suggest one concrete, easy next thing tied to what they told you, leading with what it gets them (a few words, no explanation), or make a light joke about the silence and leave the door open. No guilt, no pitch, no list.";
+// Double texts sent since their last message (a two-bubble nudge counts once).
+export function countNudges(msgs: Msg[]) {
+  const isNudge = (m?: Msg) => m?.move?.id === "nudge" || m?.move?.id === "default-name";
+  return msgs.filter((m, i) => isNudge(m) && !(isNudge(msgs[i - 1]) && m.ts - msgs[i - 1].ts < 5000)).length;
+}
+const SKIPPED_NAME = "hey, looks like you skipped my name. i'll go by persona for now, you can rename me anytime";
+
+// They didn't pick a name: go by "Persona" (a default they can change with one text) instead of stalling on it.
+function defaultAgentName(s: Session) {
+  s.slots.agentName = { ...s.slots.agentName, value: "Persona", status: "filled", source: "text", updatedAt: Date.now() };
+  s.agentNameDefaulted = true;
+  if (s.lastAskedSlot === "agentName") s.lastAskedSlot = undefined;
 }

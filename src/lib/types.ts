@@ -88,6 +88,7 @@ export interface Session {
   graduateAfterCall?: boolean; // they asked to skip setup mid-call: graduate once the call ends
   callDeclinedAt?: number; // transcript length when they said no to a call (in words or by declining) // interruptions shown, with outcomes (see src/lib/triage.ts)
   graduatedReason?: string;
+  agentNameDefaulted?: boolean; // they skipped naming it: goes by "Persona" until they pick one
   transcript: Msg[];
 }
 

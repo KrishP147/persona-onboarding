@@ -110,6 +110,9 @@ export function computeDirective(s: Session, channel: Channel): Directive {
   if (s.phase === "post_call") {
     notes.push("The call has ended. Continue over text without re-asking anything already collected.");
   }
+  if (s.agentNameDefaulted && s.slots.agentName.value === "Persona") {
+    notes.push("They skipped naming you, so you're going by Persona for now (they were told). Don't ask for a name again; if they give you one later, take it with set_slot.");
+  }
   if (rushed && !canGraduate && s.phase !== "on_call") {
     notes.push("They seem in a hurry: offer to skip the rest of setup and just start with whatever they need. Graduate only if they say yes.");
   }

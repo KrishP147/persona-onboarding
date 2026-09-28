@@ -21,6 +21,7 @@ const Event = z.discriminatedUnion("type", [
   z.object({ type: z.literal("call_declined") }),
   z.object({ type: z.literal("call_ended"), reason: z.enum(["user_hangup", "agent_ended", "error"]) }),
   z.object({ type: z.literal("silence") }),
+  z.object({ type: z.literal("text_idle") }),
   z.object({ type: z.literal("contact_saved") }),
   z.object({ type: z.literal("mic_denied") }),
   z.object({ type: z.literal("gmail_connected"), email: z.string().email().optional() }),

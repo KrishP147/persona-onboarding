@@ -23,7 +23,8 @@ export const MOVES = {
     id: "ask-call",
     label: "permission with a reason, easy no",
     source: "brown & levinson, politeness (1987); tan et al., chi 2014",
-    instruction: "Ask permission for a quick call, give the reason (it's faster to get set up by voice, about a minute), and make texting an equally easy yes.",
+    instruction:
+      "Offer a quick call, benefit first and in a few words (e.g. \"want me to just call you? way faster than typing this out, like a minute\"), and make texting an equally easy yes. Don't explain how the call works.",
   },
   discover: {
     id: "discover",
@@ -132,6 +133,8 @@ export const EVENT_MOVES = {
   callNow: { id: "call-now", label: "they said yes: do it right away", source: "dixon et al. (2013): low effort" },
   honest: { id: "honest-status", label: "say exactly what did and didn't happen", source: "grice (1975): maxim of quality" },
   greet: { id: "greet", label: "pick up where the texts left off", source: "dixon et al. (2013): never make them repeat themselves" },
+  nudge: { id: "nudge", label: "left on read: one easy double text, then let it be", source: "pink, to sell is human (2012): buoyancy; brown & levinson (1987): low imposition" },
+  defaultName: { id: "default-name", label: "they skipped my name: a default they can change", source: "thaler & sunstein, nudge (2008): smart defaults; hulick (2014)" },
 } satisfies Record<string, Move>;
 
 export function chooseMove(s: Session, channel: Channel, opts: { callFirst: boolean; mayAsk: boolean }): MoveDef {

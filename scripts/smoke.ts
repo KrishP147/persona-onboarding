@@ -121,7 +121,7 @@ async function main() {
   check("normal replies survive the leak filter", keep.includes("keep an eye out") && keep.includes("time slots"), keep);
   const typed = parseTypedEmail("here's a draft:\n\nto: a@b.com\nsubject: late\n\nhi,\n\nrunning 10 min late.\n\nbest,\nkrish\n\nlet me know if you'd like any changes, or if you'd like me to send it.");
   check("typed email parsed, assistant chatter left out", typed?.to === "a@b.com" && typed.subject === "late" && typed.body === "hi,\n\nrunning 10 min late.\n\nbest,\nkrish", JSON.stringify(typed));
-  check("a later \"send\" is not a name", filler.slots.agentName.status === "missing" && !cmd.newMessages.some((m) => m.kind === "contact_card"), said(cmd));
+  check("a later \"send\" is not a name", !/send/i.test(filler.slots.agentName.value ?? "") && !cmd.newMessages.some((m) => m.kind === "contact_card"), said(cmd));
 
   // "no, text is fine" after a call offer means no more calls
   const nocall = newSession();
@@ -174,6 +174,51 @@ async function main() {
   check("lone ? reads confused", conf("?").mood === "confused");
   check("weak signal stays low confidence", conf("nah").confidence === "low");
   check("stretching raises intensity", conf("noooo").intensity === "high");
+
+  // left on read over text: default name + call offer, then one light no-question line, then quiet
+  const ago = (x: typeof s, ms: number) => x.transcript.forEach((m) => (m.ts -= ms));
+  const idle = newSession();
+  await handleEvent(idle, { type: "open" });
+  const tooSoon = await handleEvent(idle, { type: "text_idle" });
+  check("no double text seconds after its own text", tooSoon.newMessages.length === 0, said(tooSoon));
+  ago(idle, 60000);
+  const n1 = await handleEvent(idle, { type: "text_idle" });
+  check("skipped name: goes by persona, says so", idle.slots.agentName.value === "Persona" && /skipped my name/.test(said(n1)) && /rename/.test(said(n1)), said(n1));
+  check("skipped name double text offers the call with a reason", /call/.test(said(n1)) && /easier|faster/.test(said(n1)) && idle.callOffers === 1, said(n1));
+  ago(idle, 200000);
+  const n2 = await handleEvent(idle, { type: "text_idle" });
+  check("second nudge asks nothing", n2.newMessages.length === 1 && !said(n2).includes("?"), said(n2));
+  ago(idle, 200000);
+  const n3 = await handleEvent(idle, { type: "text_idle" });
+  check("then quiet until they're back", n3.newMessages.length === 0, said(n3));
+  const back = await handleUserMessage(idle, "text", "sure call me");
+  check("yes to the nudge's call offer rings", back.actions.some((a) => a.type === "start_call"), said(back));
+
+  // unanswered call offer: take the pressure off
+  const offer = newSession();
+  await handleEvent(offer, { type: "open" });
+  await handleUserMessage(offer, "text", "nova");
+  ago(offer, 60000);
+  const o1 = await handleEvent(offer, { type: "text_idle" });
+  check("unanswered call offer: no pressure, keep texting", /no pressure/.test(said(o1)) && offer.slots.agentName.value === "Nova", said(o1));
+  const onCallIdle = newSession();
+  onCallIdle.call.active = true;
+  check("no text nudges during a call", (await handleEvent(onCallIdle, { type: "text_idle" })).newMessages.length === 0);
+
+  // answering something else instead of a name: reply to them, then the persona double text
+  const skip = newSession();
+  await handleEvent(skip, { type: "open" });
+  const sk = await handleUserMessage(skip, "text", "i need help with my inbox honestly");
+  const last = sk.newMessages.at(-1);
+  check("skipped name in a reply: persona default as the last bubble", skip.slots.agentName.value === "Persona" && last?.move?.id === "default-name", said(sk));
+  const shortHi = newSession();
+  await handleEvent(shortHi, { type: "open" });
+  await handleUserMessage(shortHi, "text", "hi");
+  check("a bare \"hi\" gets another chance at naming", shortHi.slots.agentName.status === "missing");
+  await handleUserMessage(shortHi, "text", "call you luna");
+  check("real name after a default-free hi still lands", shortHi.slots.agentName.value === "Luna", shortHi.slots.agentName.value ?? "");
+  const renamed = await handleUserMessage(skip, "text", "actually call you max");
+  check("default name can be renamed later", skip.slots.agentName.value === "Max", `${skip.slots.agentName.value} | ${said(renamed)}`);
 
   console.log(fails ? `\n${fails} failed` : "\nall passed");
   process.exit(fails ? 1 : 0);
