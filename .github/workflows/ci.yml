@@ -34,4 +34,8 @@ jobs:
       - run: pnpm -s typecheck
       - run: pnpm -s lint
       - run: pnpm -s smoke
+
+      - run: pnpm -s stress-matrix
+      - run: git diff --exit-code STRESS_TESTS.md
+
       - run: pnpm build
