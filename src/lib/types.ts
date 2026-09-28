@@ -45,6 +45,7 @@ export interface Msg {
   cutOff?: boolean; // voice line they talked over: text holds only what they heard
   attachments?: Attachment[];
   move?: Move; // which research-backed move produced this agent message (shown in the side panel)
+  guards?: string[]; // safety nets in code that changed this reply this turn (shown in "why it said that")
 }
 
 export interface Move {

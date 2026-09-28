@@ -269,6 +269,13 @@ export interface Ctx {
   sentEmail?: boolean; // send_email actually went out this turn
   shownDraft?: string; // a draft was posted this turn (the reply shouldn't repeat it)
   softInstruction?: boolean; // the extra instruction is just context: still pick a move this turn
+  guards?: string[]; // code safety nets that fired this turn, copied onto the bubbles it emits
+}
+
+// Name a safety net that changed this turn's reply, so "why it said that" can show it.
+export function guard(ctx: Ctx, label: string) {
+  const g = (ctx.guards ??= []);
+  if (!g.includes(label)) g.push(label);
 }
 
 const WANTS_OUT = /\b(skip|not now|later|no more questions|stop asking|just (help|do|get)|let'?s (just )?(start|go)|that'?s (it|all)|i'?m good|i'?m done|enough setup|just let me (use|try)|stop)\b/i;
@@ -635,12 +642,29 @@ function narratesAbout(x: string, userName?: string | null) {
   return new RegExp(`\\b(text|message|tell|remind|let|ping|call) ${n}\\b|\\b${n} (is|was|has|hasn'?t|isn'?t|said|seems|wants)\\b`, "i").test(x);
 }
 
-export function cleanModelText(t: string, userName?: string | null) {
+// `hits` (optional) collects a guard label for each kind of sentence that got dropped.
+export function cleanModelText(t: string, userName?: string | null, hits?: string[]) {
+  const hit = (label: string) => {
+    if (hits && !hits.includes(label)) hits.push(label);
+  };
+  if (TOOL_NAMES.test(t)) hit("tool names stripped");
+  TOOL_NAMES.lastIndex = 0;
   // The chat shows plain text, like sms: markdown bold/headers would show as literal symbols.
   const cleaned = unfence(t).replace(/\*\*([^*\n]+)\*\*/g, "$1").replace(/^#{1,4}\s+/gm, "").replace(TOOL_NAMES, " ").replace(STAGE_BRACKETS, keepFillIns).replace(/^\s*\[|\]\s*$/gm, "").replace(/[ \t]{2,}/g, " ").trim();
+  const keep = (x: string) => {
+    if (META.test(x) || LEAK.test(x) || /\bSTATE\b/.test(x) || narratesAbout(x, userName)) {
+      hit("leak filtered");
+      return false;
+    }
+    if (EMPTY_PROMISE.test(x) || CANT_DO.test(x)) {
+      hit("dropped unsupported claim");
+      return false;
+    }
+    return true;
+  };
   return cleaned
     .split(/\n\s*\n/)
-    .map((b) => b.split(SENTENCE_BREAK).filter((x) => !META.test(x) && !LEAK.test(x) && !/\bSTATE\b/.test(x) && !EMPTY_PROMISE.test(x) && !CANT_DO.test(x) && !narratesAbout(x, userName)).join(" "))
+    .map((b) => b.split(SENTENCE_BREAK).filter(keep).join(" "))
     .filter((b) => b.trim())
     .join("\n\n")
     .trim();
@@ -705,7 +729,7 @@ function emitAgentText(ctx: Ctx, raw: string) {
         ? [text.replace(/^\s*-{3,}\s*$/gm, "").replace(/\n{3,}/g, "\n\n").trim()]
         : capBubbles(text.split(/\n\s*\n/).map((b) => b.trim()).filter(Boolean), 3);
   for (const b of bubbles.filter(Boolean)) {
-    const m = msg("agent", ctx.channel, b, ctx.move ? { move: ctx.move } : {});
+    const m = msg("agent", ctx.channel, b, { ...(ctx.move ? { move: ctx.move } : {}), ...(ctx.guards?.length ? { guards: [...ctx.guards] } : {}) });
     ctx.newMessages.push(m);
     ctx.s.transcript.push(m);
   }
@@ -723,13 +747,22 @@ async function turn(
   const ctx: Ctx = { s, channel, actions: [], newMessages: [], resendOk, move: opts.move, allowEnd: !!opts.forceEnd, softInstruction: opts.soft };
   let text = "";
   let failed = false;
+  // Swap in a guarded version of the reply, and name the guard only if it changed something.
+  const fix = (label: string, next: string) => {
+    if (next !== text) {
+      text = next;
+      guard(ctx, label);
+    }
+  };
   try {
     // Model latency: request to full reply, tool rounds included (a failed call isn't timed).
     const t0 = Date.now();
     const raw = await generate(ctx, extraInstruction);
     const meter = currentMeter();
     if (meter) meter.latencyMs = (meter.latencyMs ?? 0) + Date.now() - t0;
-    text = cleanModelText(raw, s.slots.userName.value);
+    const hits: string[] = [];
+    text = cleanModelText(raw, s.slots.userName.value, hits);
+    for (const h of hits) guard(ctx, h);
   } catch (err) {
     // Provider down or overloaded: fall through to the scripted line rather than go quiet.
     console.error("llm turn failed", err);
@@ -743,6 +776,7 @@ async function turn(
   let usedFallback = false;
   if (!text.trim() && fallback && (failed || !didSomething)) {
     usedFallback = true;
+    guard(ctx, failed ? "model failed: scripted line" : "empty reply: scripted line");
     // The same "say that again?" on repeat looks broken; after the first miss, be honest about it.
     text = failed && (s.llmFailures ?? 0) > 1 ? outageLine(s, channel) : fallback;
     // On a call, "i'll text you instead" means actually hanging up (with that line as the goodbye).
@@ -754,7 +788,7 @@ async function turn(
     }
   }
   // Some things must never be said in this moment (e.g. "got cut off" after we hung up ourselves).
-  if (opts.avoid && fallback && opts.avoid.test(text)) text = fallback;
+  if (opts.avoid && fallback && opts.avoid.test(text)) fix("blocked a line not allowed here", fallback);
   if (opts.forceEnd && !ctx.actions.some((a) => a.type === "end_call")) ctx.actions.push({ type: "end_call" });
   // Placing a call: the text is just the heads up; the talking happens on the call.
   if (channel === "text" && ctx.actions.some((a) => a.type === "start_call")) {
@@ -762,11 +796,12 @@ async function turn(
     ctx.move = EVENT_MOVES.callNow;
   }
   if (channel === "voice" && ctx.actions.some((a) => a.type === "end_call") && !GOODBYE.test(text)) {
-    text = `${text.trim()} ${goodbyeLine(s)}`.trim();
+    fix("goodbye added before hangup", `${text.trim()} ${goodbyeLine(s)}`.trim());
   }
   // Said goodbye on a call but didn't hang up: hang up (a silence prompt after "bye" is the worst).
   if (channel === "voice" && s.call.active && !failed && GOODBYE.test(text) && userWrappingUp(s) && !ctx.actions.some((a) => a.type === "end_call")) {
     ctx.actions.push({ type: "end_call" });
+    guard(ctx, "hung up after goodbye");
   }
   // Gmail, by the book: the gmail turn ends with the code-written question; other turns don't pitch it.
   if ((!extraInstruction || ctx.softInstruction) && s.slots.gmail.status === "missing" && !ctx.newMessages.some((m) => m.kind === "gmail_link")) {
@@ -775,19 +810,19 @@ async function turn(
     if (ctx.move?.id === "ask-gmail") {
       // On a call: one sentence of help, then the ask, so the question is never cut off.
       const lead = channel === "voice" ? capSentences(help.replace(/\?[^?]*$/, "."), 1) : help;
-      text = `${lead}${lead ? (channel === "voice" ? " " : "\n\n") : ""}${gmailAsk(s, channel)}`.trim();
+      fix("gmail ask written by code", `${lead}${lead ? (channel === "voice" ? " " : "\n\n") : ""}${gmailAsk(s, channel)}`.trim());
     }
-    else if (!raisedIt && help) text = help;
+    else if (!raisedIt && help) fix("gmail pitch held for its own turn", help);
     // Even when they brought up their inbox, gmail is never a demand ("first though, i'll need your gmail
     // connected"): that line becomes the one polite, skippable ask (once, never while a link is out).
-    else if (ctx.move?.id !== "ask-gmail") text = softenGmailDemand(s, channel, text);
+    else if (ctx.move?.id !== "ask-gmail") fix("gmail demand softened", softenGmailDemand(s, channel, text));
   }
   // Already connected, declined, or the link is already sitting in their texts: no more gmail asks
   // (the most common grader note: "repeated the gmail request after it was connected / agreed").
   const linkWaiting = linkPending(s) && !ctx.newMessages.some((m) => m.kind === "gmail_link");
   if ((s.slots.gmail.status !== "missing" || linkWaiting) && !/\b(gmail|google|link|connect)\b/i.test(lastUserText(s))) {
     const kept = text.split(SENTENCE_BREAK).filter((x) => !GMAIL_ASKISH.test(x)).join(" ").trim();
-    if (kept) text = kept;
+    if (kept) fix("repeat gmail ask dropped", kept);
   }
   // On a call, never three questions in a row: after two, it just responds and lets them talk
   // (a call went question, question, question, question...). The gmail ask is the one exception.
@@ -795,17 +830,17 @@ async function turn(
     const lastTwo = s.transcript.filter((m) => m.role === "agent" && m.channel === "voice" && m.move?.id !== "silence").slice(-2);
     if (lastTwo.length === 2 && lastTwo.every((m) => m.text.trim().endsWith("?"))) {
       const kept = text.split(SENTENCE_BREAK).filter((x) => !x.trim().endsWith("?")).join(" ").trim();
-      if (kept) text = kept;
+      if (kept) fix("blocked a third question in a row", kept);
     }
   }
   // Already named: never ask "what should i go by?" again (it did, on a call, right after being named).
   if (s.slots.agentName.status === "filled" && NAME_ASK.test(text)) {
     const kept = text.split(SENTENCE_BREAK).filter((x) => !NAME_ASK.test(x)).join(" ").trim();
-    if (kept) text = kept;
+    if (kept) fix("blocked repeat name question", kept);
   }
   // "sent!" only if send_email actually went out this turn.
   if (!ctx.sentEmail && !s.draft?.sent && SEND_REQUEST.test(lastUserText(s)) && CLAIMS_SENT.test(text)) {
-    text = s.draft && !s.draft.sent ? "i haven't sent it yet. want me to send the draft above as is?" : "i haven't sent anything. want me to write it up as a draft first?";
+    fix("blocked a false 'sent' claim", s.draft && !s.draft.sent ? "i haven't sent it yet. want me to send the draft above as is?" : "i haven't sent anything. want me to write it up as a draft first?");
   }
   const sentences = text.split(/(?<=[.!?])\s+|\n+/);
   // An offer to call made in words counts as an offer (so it isn't repeated next turn).
@@ -817,9 +852,12 @@ async function turn(
   // Keep words and actions in sync: if it SAYS the link is in their texts (not asks whether to send it), it is.
   const claimsLink = sentences.some((x) => CLAIMS_LINK.test(x) && !x.trim().endsWith("?") && !/\b(want me to|should i|can i|shall i)\b/i.test(x));
   if (claimsLink && s.slots.gmail.status === "missing" && !ctx.newMessages.some((m) => m.kind === "gmail_link")) {
-    if (gmailConsent(s)) await runTool(ctx, "send_gmail_link", {});
+    if (gmailConsent(s)) {
+      await runTool(ctx, "send_gmail_link", {});
+      guard(ctx, "sent the link it said it sent");
+    }
     // Never say it's sent when it isn't: drop the claim instead of sending a link they didn't ask for.
-    else text = sentences.filter((x) => !(CLAIMS_LINK.test(x) && !x.trim().endsWith("?"))).join(" ").trim() || text;
+    else fix("dropped a false 'link sent' claim", sentences.filter((x) => !(CLAIMS_LINK.test(x) && !x.trim().endsWith("?"))).join(" ").trim() || text);
   }
   // On a call, a draft (or anything long) is for reading, not listening: post it to the chat and say so.
   const looksLikeDraft = /---|\bsubject:|\bdear\b|\bhi \[|\[(landlord|name|recipient)[^\]]*\]/i.test(text) || text.length > 320;
@@ -829,11 +867,11 @@ async function turn(
     ctx.newMessages.push(posted);
     s.transcript.push(posted);
     const isDraft = /---|\bsubject:|\bdear\b|\bhi \[|\[(landlord|name|recipient)[^\]]*\]/i.test(draft);
-    text = isDraft ? "okay, i put the draft in our chat. take a look and tell me what to change." : "that's a lot to say out loud, so i put it in our chat.";
+    fix("long text moved to the chat", isDraft ? "okay, i put the draft in our chat. take a look and tell me what to change." : "that's a lot to say out loud, so i put it in our chat.");
   }
   // On a call, if the link just went to their texts, say so (the written ask alone isn't enough).
   if (channel === "voice" && ctx.newMessages.some((m) => m.kind === "gmail_link") && !/\b(text|link)\b/i.test(text)) {
-    text = `${text.trim()} i'm texting you the link right now. it's the card that says connect your google account, tap it whenever you're ready.`.trim();
+    fix("said out loud that the link is in texts", `${text.trim()} i'm texting you the link right now. it's the card that says connect your google account, tap it whenever you're ready.`.trim());
   }
   // Ask bookkeeping: credit a question to the slot this turn's move was about (never the fallback line).
   const isQuestion = !usedFallback && text.includes("?");
@@ -1204,7 +1242,7 @@ function eventMsg(s: Session, text: string): Msg {
 function sealGoodbye(s: Session, r: TurnResult): TurnResult {
   if (!r.actions.some((a) => a.type === "end_call")) return r;
   if (r.newMessages.some((m) => m.role === "agent" && m.channel === "voice" && GOODBYE.test(m.text))) return r;
-  const ctx: Ctx = { s, channel: "voice", actions: [], newMessages: [], move: EVENT_MOVES.recap };
+  const ctx: Ctx = { s, channel: "voice", actions: [], newMessages: [], move: EVENT_MOVES.recap, guards: ["goodbye added before hangup"] };
   emitAgentText(ctx, goodbyeLine(s));
   r.newMessages.push(...ctx.newMessages);
   return r;
@@ -1303,12 +1341,13 @@ async function handleEventInner(s: Session, e: SessionEvent): Promise<TurnResult
       // A text always follows a call. If the model's recap got filtered to nothing, the code-written one goes out.
       const recaps = r.newMessages.filter((m) => m.role === "agent" && m.channel === "text" && !m.kind);
       if (!recaps.length) {
-        const ctx: Ctx = { s, channel: "text", actions: [], newMessages: [], move: EVENT_MOVES.recap };
+        const ctx: Ctx = { s, channel: "text", actions: [], newMessages: [], move: EVENT_MOVES.recap, guards: ["recap written by code"] };
         emitAgentText(ctx, recapFallback(s, e.reason));
         r.newMessages.push(...ctx.newMessages);
       } else if (recaps.length > 1) {
         // Exactly one recap text: extra bubbles fold into the first.
         recaps[0].text = recaps.map((m) => m.text).join(" ");
+        recaps[0].guards = [...new Set([...(recaps[0].guards ?? []), "recap bubbles merged into one"])];
         const extra = new Set(recaps.slice(1));
         r.newMessages = r.newMessages.filter((m) => !extra.has(m));
         s.transcript = s.transcript.filter((m) => !extra.has(m));

@@ -48,6 +48,8 @@ async function main() {
   check("recap after user hangup", hang.newMessages.some((m) => m.role === "agent" && m.channel === "text"), said(hang));
   const oneText = (r: TurnResult) => r.newMessages.filter((m) => m.role === "agent" && m.channel === "text" && !m.kind).length === 1;
   check("exactly one recap text per call end", oneText(end) && oneText(hang), `${said(end)} || ${said(hang)}`);
+  const recapMsg = end.newMessages.find((m) => m.role === "agent" && m.channel === "text" && !m.kind);
+  check("a code-written recap names its guard", !!recapMsg?.guards?.length, JSON.stringify(recapMsg?.guards));
 
   // rename mid-call keeps voice until next call
   const t = newSession();
@@ -133,6 +135,9 @@ async function main() {
   check("promises it can't keep are dropped", cant === "got it, next wednesday.", cant);
   const canCall = cleanModelText("i'll call you in a sec. i can't call the dentist from here yet, but here's a script.");
   check("calling the user and honest can'ts survive", canCall.includes("call you") && canCall.includes("can't call the dentist"), canCall);
+  const hits: string[] = [];
+  cleanModelText("the system says i should wait. i'm calling dr. patel now. sure thing.", undefined, hits);
+  check("dropped sentences are named as guards", hits.includes("leak filtered") && hits.includes("dropped unsupported claim"), hits.join(", "));
   const demand = newSession();
   const soft = softenGmailDemand(demand, "voice", "Got it. Dentist and inbox, let's go. First though, I'll need your Gmail connected so I can see what we're working with.");
   check("a gmail demand becomes the one polite ask", !/need your gmail/i.test(soft) && /want me to text you a link/i.test(soft) && soft.startsWith("Got it."), soft);
