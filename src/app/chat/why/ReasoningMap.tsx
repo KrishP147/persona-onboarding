@@ -492,7 +492,7 @@ function NodeDetail({ t, how, setHow, metrics, onClose }: { t: Turn; how: boolea
   );
 }
 
-// the pill left of the phone: glyph + label, a soft glow when a new turn lands
+// the pill in the top bar, right side: glyph + label, a soft glow when a new turn lands
 export function ReasoningPill({ on, onClick, pulse, unseen, compact }: { on: boolean; onClick: () => void; pulse: number; unseen: number; compact?: boolean }) {
   return (
     <button

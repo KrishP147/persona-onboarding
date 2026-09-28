@@ -102,8 +102,7 @@ export function TopBar({ skin, setSkin, pill, typingHints, toggleTypingHints, on
       </div>
       <PhonePicker value={skin} onChange={setSkin} />
       <div className="flex justify-end items-center gap-2">
-        {/* sm..lg: no margin beside the phone, so the reasoning pill lives here */}
-        <span data-rz-pill className="lg:hidden">
+        <span data-rz-pill>
           {pill}
         </span>
         <HintsPill on={typingHints} onClick={toggleTypingHints} />
