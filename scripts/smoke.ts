@@ -2,7 +2,7 @@
 import { getSecret, loadSession, newSession, saveSession, setSecret, withSession } from "../src/lib/store";
 import { CLAIMS_LINK, GUARD_PIPELINE, dropAskedQuestions, fixCallTypos, makeGuardEnv, INTENTS, cleanModelText, cutRepeatQuestions, fence, fromEmailOnly, runTool, handleEvent, normQuestion, saysBye, softenGmailDemand, handleUserMessage, nowLine, parseTypedEmail, MAX_BUBBLES, emitAgentText } from "../src/lib/engine";
 import { computeDirective } from "../src/lib/policy";
-import { KNOW_ASK, mergeGrowingUtterance } from "../src/lib/engine/turn";
+import { KNOW_ASK, mergeGrowingUtterance, toTurns } from "../src/lib/engine/turn";
 import { crc32, pick } from "../src/lib/moves";
 import { readMood } from "../src/lib/mood";
 import { DEMO_INBOX, scoreItem } from "../src/lib/triage";
@@ -521,6 +521,35 @@ async function main() {
   await handleUserMessage(keepName, "text", "luna");
   await handleUserMessage(keepName, "text", "luna isn't a bad name right");
   check("'luna isn't a bad name' keeps it", keepName.slots.agentName.value === "Luna");
+  // replying to one message: the model sees which one, and a made-up id is ignored
+  const rp = newSession();
+  rp.transcript.push({ id: "a-rp1", role: "agent", channel: "text", text: "want me to check your inbox or draft that reply?", ts: Date.now() });
+  await handleUserMessage(rp, "text", "that one", undefined, false, "u-rp1", undefined, "a-rp1");
+  const rpTurn = toTurns(rp).flatMap((t) => t.parts).map((p) => ("text" in p ? p.text : "")).join(" ");
+  check("a reply carries its quote to the model", rp.transcript.find((m) => m.id === "u-rp1")?.replyTo === "a-rp1" && /\[replying to your message: "want me to check your inbox/.test(rpTurn), rpTurn.slice(0, 160));
+  await handleUserMessage(rp, "text", "ok", undefined, false, "u-rp2", undefined, "nope-not-real");
+  check("a reply to an unknown message is just a message", !rp.transcript.find((m) => m.id === "u-rp2")?.replyTo);
+
+  // naming for sure: the direct answer, an explicit sentence, or a Reply to the name question. anything else: ask.
+  const afterChat = async () => {
+    const x = newSession();
+    await handleEvent(x, { type: "open" });
+    x.transcript.push(
+      { id: "u-l1", role: "user", channel: "text", text: "hi", ts: Date.now() },
+      { id: "a-l1", role: "agent", channel: "text", text: "hey! what's up?", ts: Date.now() },
+    );
+    return x;
+  };
+  const lx = await afterChat();
+  const lxR = await handleUserMessage(lx, "text", "luna");
+  check("a lone name that isn't the direct answer gets a check", lx.slots.agentName.status === "missing" && /is luna what you want to call me\?/.test(said(lxR)), said(lxR));
+  const ly = await afterChat();
+  await handleUserMessage(ly, "text", "you can be luna");
+  check("an explicit 'you can be luna' names it anytime", ly.slots.agentName.value === "Luna");
+  const lz = await afterChat();
+  const askId = lz.transcript.find((m) => m.role === "agent" && /what do you want to call me/i.test(m.text))?.id;
+  await handleUserMessage(lz, "text", "luna", undefined, false, "u-lz", undefined, askId);
+  check("a Reply to the name question names it", lz.slots.agentName.value === "Luna", String(lz.slots.agentName.value));
 
   const dn = newSession();
   dn.transcript.push({ id: "u-k", role: "user", channel: "text", text: "what do you know about me?", ts: Date.now() });
@@ -594,8 +623,8 @@ async function main() {
   check("name, own name, 'call me': card came before the call", p2.cardAt >= 0 && p2.cardAt < p2.callAt && p2.rang, p2.all.join(" | "));
   const p3 = await flow(false, "call you luna, i'm krish, call me");
   check("name + call in one message: ack + card, then call", p3.all.includes("[card:Luna]") && p3.cardAt < p3.callAt && p3.rang, p3.all.join(" | "));
-  const p4 = await flow(false, "call me", "luna");
-  check("call before naming: a late name still names it, with the card", p4.f.slots.agentName.value === "Luna" && p4.all.includes("[card:Luna]"), p4.all.join(" | "));
+  const p4 = await flow(false, "call me", "luna", "yes");
+  check("call before naming: a late name gets a check, then 'yes' names it, with the card", /want me to go by luna instead of persona\?/.test(p4.all.join(" | ")) && p4.f.slots.agentName.value === "Luna" && p4.all.includes("[card:Luna]"), p4.all.join(" | "));
   const p5 = await flow(true, "call me");
   check("default name then a call: the card still comes first", p5.all.includes("[card:Persona]") && p5.cardAt < p5.callAt && p5.rang, p5.all.join(" | "));
   const p6 = await flow(false, "luna", "send me the contact card");

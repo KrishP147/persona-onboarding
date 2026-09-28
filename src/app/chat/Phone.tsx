@@ -3,7 +3,7 @@
 import { useRef, useSyncExternalStore, type CSSProperties, type ReactNode, type RefObject } from "react";
 import type { Skin, SkinId } from "./skins/types";
 import { PhoneIcon } from "./skins/shared";
-import { Thread, type WhyHooks } from "./Thread";
+import { Thread, type WhyHooks, snippet } from "./Thread";
 import type { Chat } from "./useChat";
 import { MicTrouble } from "./MicTrouble";
 import { useDark } from "@/components/ThemeToggle";
@@ -122,6 +122,17 @@ export function PhoneScreen({
         </button>
       )}
       {chat.pending.length > 0 && <div className="px-4 pb-1 text-xs opacity-70">{chat.pending.map((p) => p.name).join(", ")} attached</div>}
+      {chat.replyTo && (
+        <div className="mx-3 mb-1 flex items-center gap-2 rounded-xl px-3 py-1.5 text-[13px] leading-5" style={{ background: "color-mix(in srgb, currentColor 8%, transparent)" }}>
+          <span className="shrink-0 font-medium">Replying to {chat.replyTo.role === "user" ? "yourself" : (chat.agentName ?? "Persona")}</span>
+          <span className="min-w-0 flex-1 truncate opacity-70">{snippet(chat.replyTo)}</span>
+          <button type="button" aria-label="Cancel reply" onClick={() => chat.setReplyTo(null)} className="-mr-1 flex h-7 w-7 shrink-0 items-center justify-center rounded-full opacity-70 hover:opacity-100">
+            <svg width="10" height="10" viewBox="0 0 12 12" stroke="currentColor" strokeWidth="2" strokeLinecap="round" aria-hidden>
+              <path d="M1.5 1.5l9 9M10.5 1.5l-9 9" />
+            </svg>
+          </button>
+        </div>
+      )}
       <S.Composer
         draft={chat.draft}
         setDraft={chat.setDraft}
