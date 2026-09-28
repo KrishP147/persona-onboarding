@@ -205,8 +205,6 @@ export async function captureAgentName(s: Session, channel: Channel, text: strin
   return { card: ctx.newCard ?? ctx.newMessages.find((x) => x.kind === "contact_card"), pending: ctx.pending ?? [] };
 }
 
-// words that make a reply small talk, not a name ("not much", "chillin", "good wbu")
-const PHRASEY = /\b(not|much|nothing|nm|nmu|good|fine|great|ok|okay|chill|chilling|chillin|same|busy|tired|just|doing|lol|lmao|haha|wbu|hbu|sup|bored|working|school|work|idk|nun|nothin)\b/i;
 const ISNT_NAME = /\b(isn'?t|is not|ain'?t|not)\s+(my|your|ur|a|the)?\s*name\b/i;
 const NOT_NAME_FIX = /\b(don'?t|do not|dont)\b[^.?!]{0,12}\b(save|pick|give|set|use|take)\b[^.?!]{0,25}\bname\b|\bthat'?s not (your|ur) name\b/i;
 
@@ -295,8 +293,9 @@ export async function nameAmbiguity(s: Session, channel: Channel, text: string, 
   if (OWN_NAME.test(text.trim()) || NAME_HINT.test(text)) return null;
   const bare = text.trim().match(/^([\p{L}][\p{L}'-]{0,19}(?: [\p{L}][\p{L}'-]{0,19})?)[.!]?$/u)?.[1];
   if (!bare || NOT_A_NAME.test(bare)) return null;
-  // The name question is the newest one, but the answer reads like small talk ("not much", "chillin"): ask first.
-  if (s.slots.agentName.status === "missing" && nameAskIsNewest(s, userMsg) && PHRASEY.test(bare)) {
+  // A one-word answer to the name question is a name. Anything longer ("not much", "mary jane") could be a name
+  // or an answer to something else: ask, don't assume.
+  if (s.slots.agentName.status === "missing" && nameAskIsNewest(s, userMsg) && /\s/.test(bare)) {
     s.nameCheck = { value: titled(bare), as: "confirm" };
     emitAgentText(ctx, `haha wait, is "${bare.toLowerCase()}" what you want to call me?`);
     guard(ctx, "asked before taking an odd answer as its name");
