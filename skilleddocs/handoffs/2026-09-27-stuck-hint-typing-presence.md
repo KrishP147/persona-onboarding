@@ -36,10 +36,16 @@ Gotcha hit and worked around: seeding a session with an old timestamp (originall
 
 Test-only artifacts: `.data/sessions/h*.json` created during screenshotting were deleted before finishing (`.data/` is gitignored anyway, confirmed via `git status`). The port-3500 dev server was stopped (`Stop-Process`) before ending the session; confirmed via `netstat` that nothing is still listening.
 
+## manager follow-ups
+
+- 08deb3a typing hints pill shown at every desktop width (was lg-only; sm-lg had no toggle since the menu sheet is phone-only); journal 17 wording fixed + real check recorded.
+- a428cdc coordinator ask: intro disclaimer "a trial demo by Krish, not the real product" under headline.
+- the "concurrent edits" the implementer flagged were the manager's.
+
 ## not done / gaps
 
 - Nothing outstanding from the brief. Two possible follow-ups if anyone wants to extend this later (not requested, not started):
-  - No automated test covers the stuck-hint or the keystroke fix (both are browser-timing behavior; `pnpm smoke` doesn't drive a real browser). Verified by hand only (screenshots for the hint, manual timing check in a running tab for the keystroke fix, per the journal entry).
+  - No automated test covers the stuck-hint or the keystroke fix (both are browser-timing behavior; `pnpm smoke` doesn't drive a real browser). hint verified by screenshots; keystroke fix verified by manager with headless script `scratchpad/hint/nudge2.cjs` (`TYPE=1` to type) against dev with `NEXT_PUBLIC_IDLE_FIRST_MS=10000`: text_idle posted 10.0s after clearing a 15s draft.
   - `useStuckHint`'s move→slot table only covers the six moves that clearly ask for one of the four slots; everything else falls back to `ORDER.text`'s first open slot, which won't always match what the agent's text literally asked about (e.g. `steerBack`, `bridge`) — this is the behavior the brief specified, not a bug.
 
 ## suggested skills
