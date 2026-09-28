@@ -200,7 +200,8 @@ function sentences(text: string) {
 // span: when the heard audio happened (wall clock ms), from deepgram's timestamps.
 type Heard = (finals: string, interim: string, speechFinal?: boolean, span?: [number, number]) => void;
 
-type Deepgram = { stop: () => void };
+// pause: mic off (mute, hold). the recorder stops and nothing is sent; the socket stays open.
+type Deepgram = { stop: () => void; pause: (on: boolean) => void };
 
 // Deepgram live transcription straight from the browser. Resolves to stop, or null if it can't
 // start (no token, blocked socket): the caller falls back to Web Speech. A new mic mid-call gets
@@ -228,8 +229,11 @@ async function startDeepgram(sessionId: string, stream: MediaStream, onHeard: He
     }
     const mime = ["audio/webm;codecs=opus", "audio/webm", "audio/mp4"].find((m) => MediaRecorder.isTypeSupported(m));
     const rec = new MediaRecorder(stream, mime ? { mimeType: mime } : undefined);
+    let paused = false;
+    let pausedAt = 0;
+    let pausedMs = 0; // deepgram's clock doesn't run while nothing is sent
     rec.ondataavailable = (e) => {
-      if (e.data.size && ws.readyState === WebSocket.OPEN) ws.send(e.data);
+      if (!paused && e.data.size && ws.readyState === WebSocket.OPEN) ws.send(e.data);
     };
     rec.start(250);
     const streamStart = Date.now(); // deepgram's timestamps count from here
@@ -243,7 +247,8 @@ async function startDeepgram(sessionId: string, stream: MediaStream, onHeard: He
         const t = String(m.channel?.alternatives?.[0]?.transcript ?? "");
         if (!t.trim()) return;
         const st = Number(m.start ?? 0);
-        const span: [number, number] = [streamStart + st * 1000, streamStart + (st + Number(m.duration ?? 0)) * 1000];
+        const t0 = streamStart + pausedMs;
+        const span: [number, number] = [t0 + st * 1000, t0 + (st + Number(m.duration ?? 0)) * 1000];
         if (m.is_final) onHeard(t, "", !!m.speech_final, span);
         else onHeard("", t, false, span);
       } catch {}
@@ -267,7 +272,20 @@ async function startDeepgram(sessionId: string, stream: MediaStream, onHeard: He
         ws.close();
       } catch {}
     };
-    return { stop };
+    const pause = (on: boolean) => {
+      if (on === paused || stopped) return;
+      paused = on;
+      try {
+        if (on) {
+          pausedAt = Date.now();
+          if (rec.state === "recording") rec.pause();
+        } else {
+          pausedMs += Date.now() - pausedAt;
+          if (rec.state === "paused") rec.resume();
+        }
+      } catch {}
+    };
+    return { stop, pause };
   } catch {
     return null;
   }
@@ -314,6 +332,7 @@ export function useVoiceCall(opts: {
   const patienceRef = useRef<number | null>(null); // one-shot longer silence window
   const streamRef = useRef<MediaStream | null>(null);
   const stopDeepgramRef = useRef<(() => void) | null>(null);
+  const pauseDeepgramRef = useRef<((on: boolean) => void) | null>(null); // the live session's pause
   const openDeepgramRef = useRef<((s: MediaStream) => Promise<(Deepgram & { dropped: boolean }) | null>) | null>(null); // a fresh session on a new mic
   const webSpeechRef = useRef<(() => boolean) | null>(null); // fallback when that fails
   const styleRef = useRef<VoiceStyle>("neutral"); // locked when the call connects
@@ -376,6 +395,7 @@ export function useVoiceCall(opts: {
 
   const armSilence = useCallback(() => {
     clear(silenceTimer);
+    if (mutedRef.current) return; // unmute arms it again
     const wait = patienceRef.current ?? SILENCE_MS;
     silenceTimer.current = setTimeout(() => {
       patienceRef.current = null;
@@ -394,7 +414,7 @@ export function useVoiceCall(opts: {
   );
 
   const startRec = useCallback(() => {
-    if (!activeRef.current) return;
+    if (!activeRef.current || mutedRef.current) return; // mic off: the fallback recognizer stays stopped
     try {
       recRef.current?.start();
     } catch {
@@ -485,6 +505,8 @@ export function useVoiceCall(opts: {
           oldStop(); // stopped on purpose: no drop fallback
           const live = dg && !dg.dropped ? dg : null;
           stopDeepgramRef.current = live?.stop ?? null;
+          pauseDeepgramRef.current = live?.pause ?? null;
+          live?.pause(mutedRef.current);
           if (!live) webSpeechRef.current?.();
         }
       }
@@ -630,6 +652,7 @@ export function useVoiceCall(opts: {
     recRef.current = null;
     stopDeepgramRef.current?.();
     stopDeepgramRef.current = null;
+    pauseDeepgramRef.current = null;
     openDeepgramRef.current = null;
     webSpeechRef.current = null;
     stopMicWatch();
@@ -766,19 +789,32 @@ export function useVoiceCall(opts: {
     });
   }, [armSilence, speak]);
 
-  // Mute: the mic goes silent at the source (deepgram gets nothing), anything the fallback recognizer
-  // still picks up is dropped, and silence doesn't count. The agent is never told.
+  // Mic off or on: the track goes silent, the deepgram recorder pauses (nothing is sent), and the
+  // fallback recognizer stops; back on, all of it resumes.
+  const applyMic = useCallback(() => {
+    const off = mutedRef.current;
+    streamRef.current?.getAudioTracks().forEach((t) => (t.enabled = !off));
+    pauseDeepgramRef.current?.(off);
+    if (!off) return startRec();
+    try {
+      recRef.current?.abort();
+    } catch {}
+    setListening(false);
+  }, [startRec]);
+
+  // Mute: mic off, call live. The agent keeps talking if it was, nothing reaches stt, silence doesn't
+  // count (no check-ins), the mic watchdog rests. Unmute starts the silence window over. The agent is never told.
   const toggleMute = useCallback(() => {
     const m = !mutedRef.current;
     mutedRef.current = m;
     setMuted(m);
-    streamRef.current?.getAudioTracks().forEach((t) => (t.enabled = !m));
+    applyMic();
     if (m) {
       clear(turnTimer);
       clear(silenceTimer);
       if (bufferRef.current.trim()) flushTurn(); // what they said before muting still counts
     } else if (activeRef.current && queueRef.current === 0 && !waitingRef.current) armSilence();
-  }, [armSilence, flushTurn]);
+  }, [applyMic, armSilence, flushTurn]);
 
   const accept = useCallback(async () => {
     const W = window as unknown as { SpeechRecognition?: new () => Rec; webkitSpeechRecognition?: new () => Rec };
@@ -913,15 +949,17 @@ export function useVoiceCall(opts: {
     // a session that drops before it goes live is marked so the caller skips it.
     const openDeepgram = async (s: MediaStream) => {
       if (!sid) return null;
-      const box = { stop: () => {}, dropped: false };
+      const box: Deepgram & { dropped: boolean } = { stop: () => {}, pause: () => {}, dropped: false };
       const dg = await startDeepgram(sid, s, onHeard, () => {
         box.dropped = true;
         if (stopDeepgramRef.current !== box.stop) return;
         stopDeepgramRef.current = null; // socket gone; a later mic swap leaves Web Speech on its own mic
+        pauseDeepgramRef.current = null;
         if (activeRef.current) startWebSpeech();
       }, onSpeechStart);
       if (!dg) return null;
       box.stop = dg.stop;
+      box.pause = dg.pause;
       return box.dropped ? null : box;
     };
     const dg = stream ? await openDeepgram(stream) : null;
@@ -935,6 +973,8 @@ export function useVoiceCall(opts: {
     usingDeepgramRef.current = !!dg;
     if (dg) {
       stopDeepgramRef.current = dg.stop;
+      pauseDeepgramRef.current = dg.pause;
+      dg.pause(mutedRef.current);
       openDeepgramRef.current = openDeepgram;
       webSpeechRef.current = startWebSpeech;
     }
