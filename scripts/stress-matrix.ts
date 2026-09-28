@@ -148,7 +148,7 @@ const ROWS: Row[] = [
     case: "hang up mid-call",
     expected: "call ends, exactly one recap text follows unprompted, no re-asking what's already known",
     code: [
-      { file: "src/lib/engine/events.ts", symbol: 'case "call_ended"', pattern: /case "call_ended":/ },
+      { file: "src/lib/engine/events.ts", symbol: "EVENT_HANDLERS.call_ended", pattern: /^  call_ended: async /m },
       { file: "src/lib/engine/context.ts", symbol: "recapFallback", pattern: /export function recapFallback/ },
     ],
     smoke: { kind: "checks", labels: ["recap after user hangup", "exactly one recap text per call end"] },
@@ -157,7 +157,7 @@ const ROWS: Row[] = [
   {
     case: "decline the call",
     expected: "no push-back, drops to text, keeps going without re-offering right away",
-    code: [{ file: "src/lib/engine/events.ts", symbol: 'case "call_declined"', pattern: /case "call_declined":/ }],
+    code: [{ file: "src/lib/engine/events.ts", symbol: "EVENT_HANDLERS.call_declined", pattern: /^  call_declined: async /m }],
     smoke: { kind: "manual", note: "no smoke test drives the call_declined SessionEvent directly" },
     persona: "call-refuser",
   },
@@ -172,7 +172,7 @@ const ROWS: Row[] = [
     case: "silence (on a call)",
     expected: "one check-in on first silence, a spoken goodbye then hangup on the second",
     code: [
-      { file: "src/lib/engine/events.ts", symbol: 'case "silence"', pattern: /case "silence":/ },
+      { file: "src/lib/engine/events.ts", symbol: "EVENT_HANDLERS.silence", pattern: /^  silence: async /m },
       { file: "src/lib/engine/events.ts", symbol: "MAX_SILENCE_STRIKES", pattern: /MAX_SILENCE_STRIKES/ },
     ],
     smoke: { kind: "checks", labels: ["1st silence only checks in", "2nd silence warns and hangs up", "says goodbye before hanging up"] },
