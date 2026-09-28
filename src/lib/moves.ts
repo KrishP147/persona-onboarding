@@ -6,7 +6,7 @@
 // so you can see the research working. Sources: docs/journal/03-principles.md, 05-research.md.
 import type { Channel, Move, Session } from "./types";
 import { INBOUND_OWN_TURNS, userTurnsThisCall } from "./policy";
-import { replyFocus } from "./engine/intents";
+import { replyFocus, taskNow } from "./engine/intents";
 
 export interface MoveDef extends Move {
   instruction: string;
@@ -190,6 +190,8 @@ export function chooseMove(s: Session, channel: Channel, opts: { callFirst: bool
   if (s.phase === "graduated") return MOVES.help;
   // Reply on one message: that message is the topic, not setup.
   if (replyFocus(s)) return MOVES.replied;
+  // A real task: do it (a run offered a call over "create a weather report..." and ignored it).
+  if (taskNow(s)) return MOVES.follow;
   if (opts.callFirst && channel === "text") return MOVES.askCall;
   // Two turns of pure help with setup still open: help again, then one light step back toward what's
   // missing (a run went a whole meal plan without ever returning to the name or the call).

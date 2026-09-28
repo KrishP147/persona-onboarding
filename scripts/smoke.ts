@@ -489,6 +489,25 @@ async function main() {
   await handleUserMessage(cmName, "text", "persona");
   const cmN = await handleUserMessage(cmName, "text", "you can call me sam");
   check("...but 'you can call me sam' alone is a name, no ring", !cmN.actions.some((a) => a.type === "start_call"), said(cmN));
+  // replay of a real run: a task up front, "no just do what i asked", then a sign-off. each step moves toward graduating.
+  const gr = newSession();
+  await handleEvent(gr, { type: "open" });
+  await handleUserMessage(gr, "text", "skip for now");
+  gr.transcript.push({ id: "u-gr1", role: "user", channel: "text", text: "hey, you need to create a report on the weather right now across ottawa, waterloo, oakville and montreal", ts: Date.now() });
+  check("a real task: do it, no call offer over it", chooseMove(gr, "text", { callFirst: false, mayAsk: true }).id === "follow" && !computeDirective(gr, "text").callFirst);
+  const grJust = await handleUserMessage(gr, "text", "no just do what i asked");
+  check("'no just do what i asked' graduates", gr.phase === "graduated" && grJust.actions.some((a) => a.type === "graduate") && gr.graduatedReason === "they asked to just get their task done", gr.phase);
+  const so = newSession();
+  await handleEvent(so, { type: "open" });
+  await handleUserMessage(so, "text", "luna");
+  so.slots.helpNeed = { ...so.slots.helpNeed, value: "weather report", status: "filled", updatedAt: Date.now() };
+  const soR = await handleUserMessage(so, "text", "great thanks. will reach out next time i need something");
+  check("signing off after help graduates, code-written goodbye", so.phase === "graduated" && !!so.graduatedAt && soR.actions.some((a) => a.type === "graduate") && /^anytime/.test(said(soR)), said(soR));
+  const soNo = newSession();
+  await handleEvent(soNo, { type: "open" });
+  await handleUserMessage(soNo, "text", "luna");
+  await handleUserMessage(soNo, "text", "ok talk later");
+  check("...but not before anything was asked for", soNo.phase !== "graduated", soNo.phase);
   const yo = newSession();
   await handleEvent(yo, { type: "open" });
   await handleUserMessage(yo, "text", "yo");

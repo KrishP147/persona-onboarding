@@ -66,6 +66,12 @@ export function gmailConsent(s: Session) {
 
 // A clear "skip setup" (not every "skip"): skip this / all of this / the setup / the rest / ahead.
 export const SKIP_SETUP = /\b(skip (all (of )?)?(this|that|it|setup|the setup|the rest|ahead|the questions)|(forget|no more|enough) (the )?(setup|questions)|stop asking (me )?questions)\b/i;
+// "no just do what i asked": they already said what they want; setup is in the way. That's a graduation.
+export const JUST_DO = /\b(just (do|answer|get to) (it|that|this|what i (asked|said|wanted))|(do|answer) what i (asked|said)|(no|nah)[,.]? just (do|help|answer)( (it|me|that))?)\b/i;
+// A real task in their message ("create a report on the weather in ottawa..."): do it, don't pitch a call over it.
+export const TASK = /\b(you need to|i need you to|can you|could you|would you|please|pls|go ahead and)\b[^?.!]{0,40}\b(find|search|look up|look into|create|make|write|draft|book|order|check|compare|report|research|plan|summari[sz]e|get|send|tell me|remind me|schedule)\b|^\s*(hey,?\s*)?(find|search|look up|create|make|write|draft|book|order|compare|research|plan|summari[sz]e|remind me|schedule)\b/i;
+// Signing off after being helped ("great thanks. will reach out next time i need something").
+export const SIGN_OFF = /\b((will|i'?ll) (reach out|hit you up|text you|message you|let you know)( again)? (next time|later|when|if)|that'?s all (i needed|for now)|all good for now|good for now|talk (to you )?later)\b/i;
 export const SKIP_OFFER = /\b(skip|jump (right )?in|get (right )?started|start (on|with))\b/i;
 // Agreement that doesn't start with "yes" ("that'd be great", "please do").
 export const AGREE = /\b(that'?d be (great|good|nice|awesome|perfect|amazing)|that would be (great|good|nice|awesome|perfect)|sounds (good|great|perfect)|please do|go for it|absolutely|definitely|of course|for sure|yes please)\b/i;
@@ -131,6 +137,11 @@ export function repliedElsewhere(s: Session, u?: Msg): Msg | undefined {
   const q = s.transcript.find((m) => m.id === u.replyTo);
   return q && !(q.role === "agent" && NAME_ASK.test(q.text)) ? q : undefined;
 }
+// This turn answers a message that asks for a real task (their newest message; events don't count).
+export const taskNow = (s: Session) => {
+  const m = s.turnBy === "event" ? undefined : s.transcript.findLast((x) => x.role !== "event" && x.kind !== "contact_card");
+  return m?.role === "user" && TASK.test(m.text);
+};
 // The message this turn answers, if it's such a Reply: the newest one in the chat (events don't count).
 export const replyFocus = (s: Session) => (s.turnBy === "event" ? undefined : repliedElsewhere(s, s.transcript.findLast((m) => m.role !== "event" && m.kind !== "contact_card")));
 // Commands and reactions are never names ("send" once became "Send it is").
@@ -229,6 +240,9 @@ export const INTENTS: Record<string, IntentDef> = {
   CALLBACK: { re: CALLBACK, means: "asks for a callback, not a goodbye", says: ["call me back later", "ring me tomorrow"], notSays: ["call me krish", "you can call me anytime"] },
   WANTS_LINK: { re: WANTS_LINK, means: "asks for the gmail connect link", says: ["send me the link", "connect my gmail", "conectar mi correo"], notSays: ["what's a link?", "my email is full"] },
   ASKED_LINK: { re: ASKED_LINK, means: "our message brought up the link", says: ["want me to text you a link?", "connect your google account"], notSays: ["what should i call you?"] },
+  JUST_DO: { re: JUST_DO, means: "they want the task done, not setup", says: ["no just do what i asked", "just do it", "nah, just help"], notSays: ["just checking", "what did i ask?", "do you know what i asked"] },
+  TASK: { re: TASK, means: "a real task to do", says: ["hey, you need to create a report on the weather in ottawa", "can you find me sushi nearby", "please draft a reply to sam", "compare these two laptops"], notSays: ["can you hear me?", "i'm tired", "what can you do?"] },
+  SIGN_OFF: { re: SIGN_OFF, means: "signing off after being helped", says: ["great thanks. will reach out next time i need something", "that's all i needed", "ok talk later"], notSays: ["thanks", "will you reach out?"] },
   SKIP_SETUP: { re: SKIP_SETUP, means: "a clear skip of setup", says: ["skip this", "no more questions", "stop asking me questions"], notSays: ["skip the gym today", "i skipped lunch"] },
   SKIP_OFFER: { re: SKIP_OFFER, means: "our offer to skip ahead", says: ["want to skip the rest?", "want to jump right in?"], notSays: ["what should i call you?"] },
   YES: { re: YES, means: "a yes at the start", says: ["yes", "oh, yeah sure", "sounds good", "ye"], notSays: ["no", "maybe yes", "haha", "yeti"] },

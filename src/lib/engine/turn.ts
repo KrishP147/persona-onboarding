@@ -11,7 +11,7 @@ import { webEnabled } from "../web";
 
 import { currentMeter, metered, percentile, recordTurn, type Meter } from "../usage";
 import { type Ctx, emitAgentText, ensureCard, goodbyeLine, guard, msg, outageLine } from "./context";
-import { CALL_NO, CARD_ASK, LAUGH_LEAD, CARD_WANT, CLEAR_BYE, DELEGATE, firstSentenceName, fixCallTypos, hintedAgentName, ownNameIn, DEMO_YES, GMAIL_TROUBLE, HOLD, INSULT_NAME, LAUGH, NAME_ASK, NAME_HINT, NEGATED_CALL, NOT_A_NAME, NO_CALLS, OFFERED_CALL, OWN_NAME, SEND_CMD, SEND_REQUEST, SENT_Q, SKIP_SETUP, STOP_TALKING, repliedElsewhere, THANKS, USER_BYE, WAITING_ON_THEM, WANTS_OUT, YES, asTurnBy, asksForLink, gmailConsent, lastUserText, saidNow, saysBye } from "./intents";
+import { CALL_NO, CARD_ASK, LAUGH_LEAD, CARD_WANT, CLEAR_BYE, DELEGATE, firstSentenceName, fixCallTypos, hintedAgentName, ownNameIn, DEMO_YES, GMAIL_TROUBLE, HOLD, INSULT_NAME, LAUGH, NAME_ASK, NAME_HINT, NEGATED_CALL, NOT_A_NAME, NO_CALLS, OFFERED_CALL, OWN_NAME, SEND_CMD, SEND_REQUEST, SENT_Q, SKIP_SETUP, JUST_DO, SIGN_OFF, STOP_TALKING, repliedElsewhere, THANKS, USER_BYE, WAITING_ON_THEM, WANTS_OUT, YES, asTurnBy, asksForLink, gmailConsent, lastUserText, saidNow, saysBye } from "./intents";
 import { cleanModelText, dropDraftEcho, dropSelfAck, fence, nowLine, parseTypedEmail } from "./text";
 import { GMAIL_ASK_MARK, GUARD_PIPELINE, type TurnOpts, makeGuardEnv, sealGoodbye } from "./guards";
 import { LOOKUP_TOOLS, MAX_TOOL_ROUNDS, TERMS_LINK, TOOLS, WEB_TOOLS, gifAllowed, makeGif, runTool, saveDraftTool, sendEmailTool } from "./tools";
@@ -684,22 +684,39 @@ export async function handleUserMessageInner(
     s.slots.gmail.status = "declined";
   }
   // "skip all this, just find me sushi": setup ends now, in code, and the request gets answered.
-  if (!s.call.active && s.phase !== "graduated" && SKIP_SETUP.test(clean)) {
+  // "no just do what i asked" is the same call: they know what they want, setup is in the way (spec: graduate early).
+  const justDo = JUST_DO.test(clean);
+  if (!s.call.active && s.phase !== "graduated" && (SKIP_SETUP.test(clean) || justDo)) {
     s.phase = "graduated";
     s.graduatedAt ??= new Date().toISOString();
-    s.graduatedReason = "they skipped setup";
+    s.graduatedReason = justDo ? "they asked to just get their task done" : "they skipped setup";
     for (const k of Object.keys(s.slots) as SlotKey[]) if (s.slots[k].status === "missing") s.slots[k].status = "deferred";
     const bare = /^\s*(ok(ay)?,?\s*)?(can we |let'?s |i want to |just )?skip( all( of)?)?( this| that| it| setup| the setup| the rest)*\W*$/i.test(clean);
     const r = await turn(
       s,
       "text",
-      bare
+      justDo
+        ? "They told you to just do what they asked, and setup is over: you're their full assistant now. Do their most recent request (from an earlier message if this one only says to do it) right now, in full, in text. Don't offer a call, and don't ask for their name or Gmail."
+        : bare
         ? "They skipped setup, and setup is over: you're their full assistant now. Say that's fine in a few words and ask what they want to get done first. Don't ask for their name, Gmail, or a call."
         : "They skipped setup, and setup is over: you're their full assistant now. Help with what they asked for in this same message, right now, in text. Don't offer a call, and don't ask for their name or Gmail.",
     );
     r.actions.push({ type: "graduate" });
     r.newMessages.unshift(userMsg, ...(early?.msgs ?? []));
     return r;
+  }
+  // Signing off after being helped ("great thanks. will reach out next time"): they got what they came for,
+  // so that's a graduation too, with a code-written goodbye (and the what-i-know card at this point).
+  if (channel === "text" && !s.call.active && s.phase !== "graduated" && s.slots.helpNeed.status === "filled" && (SIGN_OFF.test(clean) || saysBye(clean)) && clean.split(/\s+/).length <= 20) {
+    s.phase = "graduated";
+    s.graduatedAt ??= new Date().toISOString();
+    s.graduatedReason = "they signed off after getting help";
+    for (const k of Object.keys(s.slots) as SlotKey[]) if (s.slots[k].status === "missing") s.slots[k].status = "deferred";
+    const ctx: Ctx = { s, channel, actions: [{ type: "graduate" }], newMessages: [], move: EVENT_MOVES.recap };
+    const name = s.slots.userName.value;
+    emitAgentText(ctx, `anytime${name ? ` ${name.toLowerCase()}` : ""}! text or call me whenever you need something`);
+    recordAsk(s, null);
+    return { session: s, newMessages: [userMsg, ...(early?.msgs ?? []), ...ctx.newMessages], chips: computeDirective(s, channel).chips, actions: ctx.actions };
   }
   if (/^\s*skip setup\s*$/i.test(clean) && s.phase !== "graduated") {
     const skip = s.call.active
