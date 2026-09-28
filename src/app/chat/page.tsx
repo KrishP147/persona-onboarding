@@ -7,6 +7,7 @@ import { CallPhone, DeviceFrame, FRAMES, PhoneScreen, useFrameZoom } from "./Pho
 import { SKINS, useSkin } from "./skins";
 import type { WhyHooks } from "./Thread";
 import { useChat } from "./useChat";
+import { usePref } from "./usePref";
 import { turnsOf } from "./why/frameworks";
 import { WhySheet } from "./why/WhySheet";
 import { WhySidebar } from "./why/WhySidebar";
@@ -18,7 +19,8 @@ export default function Home() {
   const [picked, setSkin] = useSkin();
   const skin = picked ?? SKINS.pixel;
   const zoom = useFrameZoom(skin.id);
-  const [showWhy, setShowWhy] = useState(true);
+  // desktop reasoning lane: collapsed until asked for, remembered
+  const [showWhy, setShowWhy] = usePref("persona-show-reasoning", false);
   const [menuOpen, setMenuOpen] = useState(false); // phone: picker, annotate, how it works, restart
   const [annotate, setAnnotate] = useState(false);
   const [hoverId, setHover] = useState<string | null>(null);
@@ -79,7 +81,7 @@ export default function Home() {
 
   return (
     <main className="min-h-dvh bg-canvas text-ink flex flex-col overflow-x-clip">
-      <TopBar skin={picked?.id ?? null} setSkin={setSkin} showWhy={showWhy} toggleWhy={() => setShowWhy((v) => !v)} onRestart={restart} mock={chat.mock} />
+      <TopBar skin={picked?.id ?? null} setSkin={setSkin} showWhy={showWhy} toggleWhy={() => setShowWhy(!showWhy)} onRestart={restart} mock={chat.mock} />
       <div className={`flex-1 flex flex-wrap justify-center items-start gap-x-10 gap-y-6 sm:px-6 sm:pb-6 transition-opacity duration-300 ${picked ? "opacity-100" : "opacity-0"}`}>
         <DeviceFrame skin={skin} bp="sm" zoom={zoom}>
           <PhoneScreen
