@@ -124,7 +124,14 @@ function speakBrowser(text: string, voice: SpeechSynthesisVoice | undefined, onS
   });
 }
 
-const STOP_WORDS = /^(wait|stop|hold|hang|sorry|no|nope|hey|actually|um|excuse)$/i;
+// first word of a short "stop" said over the agent ("stop talking", "hold on", "shh", "enough")
+const STOP_WORDS = /^(wait|stop|hold|hang|sorry|no|nope|hey|actually|um|excuse|sh+|shush|enough|quiet|pause)$/i;
+// a reply that's only a backchannel ("mm", "ok"): after they cut the agent off, saying it adds nothing
+const TINY_REPLY = /^(m+|mhm+|hm+|uh[- ]?huh|ok(ay)?|sure|yeah|yep|got it)$/i;
+const tinyReply = (t: string) => {
+  const w = t.toLowerCase().replace(/[^a-z' -]/g, "").trim();
+  return w.length <= 3 || TINY_REPLY.test(w);
+};
 
 const words = (t: string) => t.toLowerCase().replace(/[^a-z0-9' ]/g, " ").split(/\s+/).filter(Boolean);
 
@@ -329,6 +336,8 @@ export function useVoiceCall(opts: {
   const queueRef = useRef(0); // utterances queued or playing
   const bufferRef = useRef(""); // finalized user speech not yet sent
   const interruptedRef = useRef(false);
+  const quietReplyRef = useRef(0); // turn whose reply answers a cut-off (0: none): don't speak a bare "mm"
+  const turnSeqRef = useRef(0);
   const cutHeardRef = useRef(""); // what they actually heard of the line they cut off
   const pendingEndRef = useRef(false);
   const usingDeepgramRef = useRef(false);
@@ -676,6 +685,7 @@ export function useVoiceCall(opts: {
     waitingRef.current = false;
     patienceRef.current = null;
     interruptedRef.current = false;
+    quietReplyRef.current = 0;
     setListening(false);
     setSpeaking(false);
     setHeard("");
@@ -706,6 +716,7 @@ export function useVoiceCall(opts: {
     (text: string, isFiller = false): Promise<void> => {
       if (!activeRef.current || !text.trim()) return Promise.resolve();
       if (heldRef.current) return Promise.resolve(); // on hold: a late reply stays in the thread, unspoken
+      if (!isFiller && quietReplyRef.current !== 0 && tinyReply(text)) return Promise.resolve();
       if (!isFiller) clear(fillerTimer);
       clear(silenceTimer);
       queueRef.current += 1;
@@ -785,13 +796,17 @@ export function useVoiceCall(opts: {
     const heardBefore = interrupted ? cutHeardRef.current : undefined;
     cutHeardRef.current = "";
     interruptedRef.current = false;
+    const turn = ++turnSeqRef.current;
+    quietReplyRef.current = interrupted ? turn : 0;
+    // "stop" / "shh" over the agent: no thinking-out-loud filler either
+    const hushed = interrupted && words(text).length <= 2 && STOP_WORDS.test(words(text)[0] ?? "");
     waitingRef.current = true;
     clear(silenceTimer);
     // Thinking out loud, like a person: a short "hmm" if the reply takes over ~1s, and "let me think
     // that through" if it's still coming at ~3s (clark & fox tree 2002: uh/um mark short vs long
     // delays; shiwa et al. 2008: fillers soften slow replies). Never on fast replies, never stacked twice.
     clear(fillerTimer);
-    const stillWaiting = () => waitingRef.current && queueRef.current === 0 && !micOff() && activeRef.current;
+    const stillWaiting = () => waitingRef.current && queueRef.current === 0 && !micOff() && activeRef.current && !hushed;
     fillerTimer.current = setTimeout(() => {
       if (!stillWaiting()) return;
       if (Math.random() < 0.5) void speak(pickFiller(SHORT_FILLERS, lastFillerRef), true);
@@ -801,6 +816,7 @@ export function useVoiceCall(opts: {
     }, 1100);
     optsRef.current.onUtterance(text, interrupted, heardBefore).finally(() => {
       waitingRef.current = false;
+      if (quietReplyRef.current === turn) quietReplyRef.current = 0;
       clear(fillerTimer);
       if (queueRef.current === 0) armSilence();
     });
