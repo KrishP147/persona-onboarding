@@ -176,7 +176,7 @@ function Typing() {
   );
 }
 
-function Composer({ draft, setDraft, onSubmit, onAttach, canSend, recording, transcribing, onMic }: ComposerProps) {
+function Composer({ draft, setDraft, onSubmit, onAttach, canSend, recording, transcribing, onMic, hint }: ComposerProps) {
   return (
     <form
       className="relative z-10 flex items-end gap-2 px-3 pt-2 pb-[calc(var(--sb-bottom)+8px)]"
@@ -200,7 +200,7 @@ function Composer({ draft, setDraft, onSubmit, onAttach, canSend, recording, tra
           <input
             value={draft}
             onChange={(e) => setDraft(e.target.value)}
-            placeholder="iMessage"
+            placeholder={hint ?? "iMessage"}
             aria-label="Message"
             className="flex-1 min-w-0 bg-transparent outline-none text-[17px] leading-[22px] tracking-[-0.4px] py-[6px] text-black placeholder:text-[#8A8A8E]"
           />

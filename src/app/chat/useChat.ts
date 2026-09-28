@@ -7,6 +7,8 @@ import { AGENT_NUMBER } from "./skins/shared";
 import type { Receipt } from "./skins/types";
 import { useVoiceCall } from "./useVoiceCall";
 import { useIdleNudge } from "./useIdleNudge";
+import { useStuckHint } from "./useStuckHint";
+import { usePref } from "./usePref";
 
 const LS_KEY = "persona-onboarding-session";
 // event-handler clock (kept out of render so the purity lint rule stays quiet)
@@ -454,6 +456,14 @@ export function useChat() {
   const nudge = useCallback(() => void sendEvent({ type: "text_idle" }), [sendEvent]);
   useIdleNudge(messages, typing || revealing || !!draft.trim() || pending.length > 0 || call.status !== "idle" || !!recording || transcribing, nudge);
   const thread = messages.filter((m) => m.channel !== "voice");
+  const [typingHints] = usePref("persona-typing-hints", true);
+  const hint = useStuckHint({
+    enabled: typingHints,
+    messages: thread,
+    session,
+    draft,
+    busy: typing || revealing || onCall || !!recording || transcribing || pending.length > 0,
+  });
   // texts that arrived while the call screen covered them (a link, a draft): shown as a badge on the call.
   const textsVisible = callHidden || !onCall;
   const unread = textsVisible ? 0 : thread.filter((m) => m.role === "agent" && m.kind !== "event" && m.ts > seenAt).length;
@@ -476,6 +486,7 @@ export function useChat() {
     thread,
     draft,
     setDraft,
+    hint,
     pending,
     typing,
     revealing,

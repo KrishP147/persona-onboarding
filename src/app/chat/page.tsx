@@ -22,6 +22,7 @@ export default function Home() {
   const zoom = useFrameZoom(skin.id);
   // desktop reasoning lane: collapsed until asked for, remembered
   const [showWhy, setShowWhy] = usePref("persona-show-reasoning", false);
+  const [typingHints, setTypingHints] = usePref("persona-typing-hints", true);
   const [menuOpen, setMenuOpen] = useState(false); // phone: picker, reasoning, how it works, restart
   const [hoverId, setHover] = useState<string | null>(null);
   const [activeId, setActive] = useState<string | null>(null);
@@ -80,7 +81,16 @@ export default function Home() {
 
   return (
     <main className="min-h-dvh bg-canvas text-ink flex flex-col overflow-x-clip">
-      <TopBar skin={picked?.id ?? null} setSkin={setSkin} showWhy={showWhy} toggleWhy={() => setShowWhy(!showWhy)} onRestart={restart} mock={chat.mock} />
+      <TopBar
+        skin={picked?.id ?? null}
+        setSkin={setSkin}
+        showWhy={showWhy}
+        toggleWhy={() => setShowWhy(!showWhy)}
+        typingHints={typingHints}
+        toggleTypingHints={() => setTypingHints(!typingHints)}
+        onRestart={restart}
+        mock={chat.mock}
+      />
       <div className={`flex-1 flex flex-wrap justify-center items-start gap-x-10 gap-y-6 sm:px-6 sm:pb-6 transition-opacity duration-300 ${picked ? "opacity-100" : "opacity-0"}`}>
         <DeviceFrame skin={skin} bp="sm" zoom={zoom}>
           <PhoneScreen
@@ -120,6 +130,8 @@ export default function Home() {
             const last = turns[turns.length - 1];
             if (last) openSheet(last.m.id);
           }}
+          typingHints={typingHints}
+          setTypingHints={setTypingHints}
           mock={chat.mock}
           onClose={() => setMenuOpen(false)}
           onRestart={() => {
