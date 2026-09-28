@@ -7,7 +7,7 @@ branch `krish/phone-skins-why` (worktree C:\Users\User\_worktrees\persona-onboar
 - logic moved verbatim to `src/app/chat/useChat.ts`; layout in `page.tsx`, `Phone.tsx` (device frames, zoom-to-fit, call second phone), `Thread.tsx`, `chrome.tsx` (persona top bar, picker, mobile menu sheet).
 - why: `src/app/chat/why/{frameworks.ts,WhySidebar.tsx,WhySheet.tsx}`; desktop anchored cards (lg+), phone "why" badge + half sheet, annotate toggle in menu.
 - css tokens/keyframes in `src/app/globals.css`; Roboto Flex added in `src/app/layout.tsx`.
-- journal: `docs/journal/09-phone-skins-and-why.md`. spec: `docs/design/phone-ui-spec.md`.
+- journal: `docs/journal/14-phone-skins-and-why.md`. spec: `docs/design/phone-ui-spec.md`.
 - tests: typecheck, lint, smoke pass; `pnpm build --webpack` passes.
 
 ## not done / known gaps
