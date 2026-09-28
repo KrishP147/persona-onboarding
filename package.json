@@ -10,7 +10,8 @@
     "harness": "tsx harness/run.ts",
     "typecheck": "tsc --noEmit",
     "smoke": "tsx scripts/smoke.ts",
-    "e2e": "tsx scripts/e2e.ts"
+    "e2e": "tsx scripts/e2e.ts",
+    "metrics": "tsx scripts/metrics.ts"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.128.0",

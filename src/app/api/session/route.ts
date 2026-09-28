@@ -12,7 +12,8 @@ export async function GET(req: Request) {
     await saveSession(s);
   }
   const channel = s.call.active ? "voice" : "text";
-  return Response.json({ session: s, chips: computeDirective(s, channel).chips, mock: usingMock() });
+  // metrics: per-session turns, $ and model latency (also at session.metrics), for the side panel.
+  return Response.json({ session: s, chips: computeDirective(s, channel).chips, mock: usingMock(), metrics: s.metrics ?? null });
 }
 
 const Event = z.discriminatedUnion("type", [

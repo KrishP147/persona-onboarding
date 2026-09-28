@@ -28,6 +28,7 @@ cp .env.example .env.local   # add GEMINI_API_KEY (or ANTHROPIC_API_KEY). with n
 pnpm dev                      # http://localhost:3000 (chrome or edge for the voice call)
 pnpm smoke                    # checks the safety nets, no key needed
 pnpm harness                  # 15 simulated difficult users vs the live bot, graded (dev server running, ALLOW_TEST_EVENTS=1). prints its cost
+pnpm metrics                  # latest harness run as one table: p50/p95 latency, $ per onboarding
 pnpm e2e                      # real chrome walkthrough with a fake mic: 25 checks + screenshots in harness/e2e/
 # with a real mic: docs/manual-tests.md (19 voice + text scripts)
 ```
@@ -65,6 +66,19 @@ the short version of the philosophy: the model talks, code decides. anything tha
 - `src/app/api/voice/`: speech token and text to speech routes
 - `harness/`: the difficult users and the grader
 - `scripts/smoke.ts`: keyless checks
+
+## numbers
+
+from the last full harness run (`pnpm metrics`, claude haiku 4.5 as the agent):
+
+| metric | value |
+|---|---|
+| p50 latency | 2.0s |
+| p95 latency | 4.8s |
+| $ / onboarding | $0.0152 |
+| $ / reply | $0.0030 |
+
+that run predates the turn meter, so latency there is turn time read from transcripts (their text to our next one, extractor included), a little high. new sessions record real model latency and $ per turn in `session.metrics`.
 
 ## status
 

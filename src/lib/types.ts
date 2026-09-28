@@ -90,6 +90,7 @@ export interface Session {
   graduatedReason?: string;
   demoOffered?: boolean; // the sample inbox was offered (once) after google sign-in failed or stalled
   agentNameDefaulted?: boolean; // they skipped naming it: goes by "Persona" until they pick one
+  metrics?: SessionMetrics; // per-session cost and model latency (src/lib/usage.ts meter)
   transcript: Msg[];
 }
 
@@ -130,3 +131,14 @@ export type ClientAction =
   | { type: "speak"; text: string }
   | { type: "graduate" }
   | { type: "patience"; ms: number }; // user is doing a task (e.g. gmail sign-in): stretch the next silence window
+
+// Server-side per-session numbers, cheap to keep: no extra model calls, bounded latency sample.
+export interface SessionMetrics {
+  turns: number; // turns that called a model
+  cost: number; // estimated $ across every model call (reply, extractor, triage)
+  p50: number; // model reply latency, ms (request to full reply, tools included)
+  p95: number;
+  latencies: number[]; // last 100 reply latencies, ms
+  models: Record<string, number>; // replies per model
+  last?: { model: string; latencyMs: number; cost: number };
+}

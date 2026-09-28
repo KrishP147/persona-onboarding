@@ -12,6 +12,7 @@ import { GIF_MIN_GAP, GIF_MOODS, GIFS, gifUrl, type GifMood } from "./gifs";
 import { applyExtracted, extract } from "./extract";
 import { readPage, webEnabled, webSearch } from "./web";
 import type { Move } from "./types";
+import { currentMeter, metered, percentile, recordTurn, type Meter } from "./usage";
 
 const MAX_TOOL_ROUNDS = 4; // search, read a page, then reply (plus room for a set_slot)
 const HISTORY_LIMIT = 16; // recent context is what matters; slots and STATE carry the rest (and it keeps each call small)
@@ -706,7 +707,12 @@ async function turn(
   let text = "";
   let failed = false;
   try {
-    text = cleanModelText(await generate(ctx, extraInstruction), s.slots.userName.value);
+    // Model latency: request to full reply, tool rounds included (a failed call isn't timed).
+    const t0 = Date.now();
+    const raw = await generate(ctx, extraInstruction);
+    const meter = currentMeter();
+    if (meter) meter.latencyMs = (meter.latencyMs ?? 0) + Date.now() - t0;
+    text = cleanModelText(raw, s.slots.userName.value);
   } catch (err) {
     // Provider down or overloaded: fall through to the scripted line rather than go quiet.
     console.error("llm turn failed", err);
@@ -854,7 +860,26 @@ async function captureAgentName(s: Session, channel: Channel, text: string): Pro
 }
 
 export async function handleUserMessage(...args: Parameters<typeof handleUserMessageInner>): Promise<TurnResult> {
-  return sealGoodbye(args[0], await handleUserMessageInner(...args));
+  const [r, meter] = await metered(async () => sealGoodbye(args[0], await handleUserMessageInner(...args)));
+  noteMetrics(args[0], meter);
+  return r;
+}
+
+// Fold one turn's meter into the session's running numbers (and the dev ledger for `pnpm metrics`).
+function noteMetrics(s: Session, m: Meter) {
+  if (!m.calls && m.latencyMs === undefined) return;
+  const x = (s.metrics ??= { turns: 0, cost: 0, p50: 0, p95: 0, latencies: [], models: {} });
+  x.cost = Math.round((x.cost + m.cost) * 1e6) / 1e6;
+  if (m.latencyMs !== undefined) {
+    x.turns += 1;
+    x.latencies = [...x.latencies, m.latencyMs].slice(-100);
+    x.p50 = percentile(x.latencies, 50);
+    x.p95 = percentile(x.latencies, 95);
+    const model = m.model ?? (provider ? `${provider} (unmetered)` : "mock");
+    x.models[model] = (x.models[model] ?? 0) + 1;
+    x.last = { model, latencyMs: m.latencyMs, cost: m.cost };
+    void recordTurn({ ts: Date.now(), session: s.id, model, latencyMs: m.latencyMs, cost: m.cost, calls: m.calls });
+  }
 }
 
 async function handleUserMessageInner(
@@ -1167,7 +1192,9 @@ function sealGoodbye(s: Session, r: TurnResult): TurnResult {
 
 export async function handleEvent(s: Session, e: SessionEvent): Promise<TurnResult> {
   const start = s.transcript.length;
-  const r = sealGoodbye(s, await handleEventInner(s, e));
+  const [inner, meter] = await metered(() => handleEventInner(s, e));
+  noteMetrics(s, meter);
+  const r = sealGoodbye(s, inner);
   // Anything the event added to the transcript (e.g. "Call ended (12s)") goes out with the reply, in order.
   const added = s.transcript.slice(start);
   const updated = r.newMessages.filter((m) => !added.includes(m));

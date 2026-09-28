@@ -7,6 +7,8 @@ import type { TurnResult } from "../src/lib/types";
 import { POST as DemoPOST } from "../src/app/api/auth/google/demo/route";
 import { GET as StartGET } from "../src/app/api/auth/google/start/route";
 import { popupPage } from "../src/app/api/auth/google/popup";
+import { costOf, metered, percentile, recordUsage } from "../src/lib/usage";
+import { GET as SessionGET } from "../src/app/api/session/route";
 
 delete process.env.ANTHROPIC_API_KEY;
 let fails = 0;
@@ -271,6 +273,26 @@ async function main() {
   process.env.GOOGLE_CLIENT_SECRET ||= "y";
   const start = await (await StartGET(new Request("http://x/api/auth/google/start?s=abc123"))).text();
   check("start: google sign-in first, demo inbox second", start.indexOf("Sign in with Google") >= 0 && start.indexOf("Sign in with Google") < start.indexOf("demo inbox"), start.slice(0, 80));
+
+  // per-session metrics: the turn meter sees every model call (even unawaited ones), latency is timed per reply
+  const [, meter] = await metered(async () => {
+    void recordUsage("claude-haiku-4-5", "agent", { input: 1000, output: 100 });
+    await recordUsage("claude-haiku-4-5", "extract", { input: 500, output: 20 });
+  });
+  const expect = costOf("claude-haiku-4-5", { input: 1000, output: 100 }) + costOf("claude-haiku-4-5", { input: 500, output: 20 });
+  check("meter sums every call's $ and keeps the reply's model", Math.abs(meter.cost - expect) < 1e-9 && meter.calls === 2 && meter.model === "claude-haiku-4-5", JSON.stringify(meter));
+  check("percentiles", percentile([100, 200, 300, 400, 1000], 50) === 300 && percentile([100, 200, 300, 400, 1000], 95) === 1000 && percentile([], 50) === 0);
+  const mt = newSession();
+  await handleEvent(mt, { type: "open" });
+  check("scripted lines don't count as model turns", !mt.metrics);
+  for (const t of ["i need help with my inbox honestly", "like 200 unread", "mostly recruiters"]) await handleUserMessage(mt, "text", t);
+  check("session metrics: turns, latency percentiles, model", !!mt.metrics && mt.metrics.turns >= 3 && mt.metrics.latencies.length === mt.metrics.turns && mt.metrics.p95 >= mt.metrics.p50 && mt.metrics.models.mock >= 3, JSON.stringify(mt.metrics));
+  mt.metrics!.latencies = Array.from({ length: 100 }, () => 5);
+  await handleUserMessage(mt, "text", "ok what now");
+  check("latency sample stays bounded", mt.metrics!.latencies.length === 100);
+  await saveSession(mt);
+  const sj = (await (await SessionGET(new Request(`http://x/api/session?id=${mt.id}`))).json()) as { metrics: unknown; session: { metrics?: unknown } };
+  check("session JSON exposes metrics", !!sj.metrics && !!sj.session.metrics, JSON.stringify(sj.metrics).slice(0, 80));
 
   console.log(fails ? `\n${fails} failed` : "\nall passed");
   process.exit(fails ? 1 : 0);

@@ -150,13 +150,15 @@ async function geminiUsage(model: string, tag: string, u?: { promptTokenCount?: 
 
 async function anthropicUsage(model: string, tag: string, u: Anthropic.Usage) {
   const cost = costOf(model, { input: u.input_tokens, cacheRead: u.cache_read_input_tokens ?? 0, cacheWrite: u.cache_creation_input_tokens ?? 0, output: u.output_tokens });
-  await addFloat("claude-spend", cost).catch(() => {});
-  await recordUsage(model, tag, {
+  // Recorded first: its turn-meter update is synchronous, and the agent loop doesn't await this.
+  const rec = recordUsage(model, tag, {
     input: u.input_tokens,
     cacheRead: u.cache_read_input_tokens ?? 0,
     cacheWrite: u.cache_creation_input_tokens ?? 0,
     output: u.output_tokens,
   });
+  await addFloat("claude-spend", cost).catch(() => {});
+  await rec;
 }
 
 export interface LoopOpts {
