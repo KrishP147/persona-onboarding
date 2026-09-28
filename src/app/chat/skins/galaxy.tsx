@@ -2,7 +2,7 @@
 // samsung messages on one ui 8, light + dark. see docs/design/phone-ui-spec.md "fidelity pass / galaxy"
 import type { CSSProperties, ReactNode } from "react";
 import type { BubbleProps, CallProps, ComposerProps, HeaderProps, Pos, RichCardProps, Skin, UnknownProps } from "./types";
-import { AGENT_NUMBER, BubbleBody, BubbleIcon, GoogleG, MicIcon, onComposerKeyDown, PauseIcon, PersonaLogo, PersonSilhouette, PhoneIcon, RecTimer, callLog, eventKind, time, useAutoGrow, useClock, useElapsed } from "./shared";
+import { AGENT_NUMBER, BubbleBody, BubbleIcon, GoogleG, CcIcon, MicIcon, onComposerKeyDown, PauseIcon, PersonaLogo, PersonSilhouette, PhoneIcon, RecTimer, callLog, eventKind, time, useAutoGrow, useClock, useElapsed } from "./shared";
 
 // colors are --sam-* vars on .sk-sam (globals.css), light + dark
 const C = {
@@ -422,7 +422,7 @@ function CallScreen(p: CallProps) {
           </div>
         )}
       </div>
-      {p.status === "active" && !p.held && (
+      {p.status === "active" && !p.held && p.captions !== false && (
         <div className="mt-6 px-8 space-y-3 text-[15px] leading-[21px] text-center">
           {p.said && (
             <div data-caption="agent" className="text-white/90">
@@ -467,6 +467,14 @@ function CallScreen(p: CallProps) {
                   <MicIcon off={p.muted} size={25} stroke={1.7} />
                 </button>
                 <span className="text-[13px] text-white/90" aria-hidden>{p.muted ? "Unmute" : "Mute"}</span>
+              </div>
+            )}
+            {p.onCaptions && p.status === "active" && (
+              <div className="flex flex-col items-center gap-1">
+                <button onClick={p.onCaptions} aria-pressed={p.captions !== false} aria-label={p.captions !== false ? "Turn captions off" : "Turn captions on"} className={`${tile} ${p.captions !== false ? "bg-white text-black" : ""}`}>
+                  <CcIcon size={24} />
+                </button>
+                <span className="text-[13px] text-white/90" aria-hidden>Captions</span>
               </div>
             )}
             {p.onHold && p.status === "active" && (

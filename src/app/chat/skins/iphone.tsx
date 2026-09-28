@@ -3,7 +3,7 @@
 // values + sources in docs/design/phone-ui-spec.md A1 and its fidelity pass
 import type { CSSProperties, ReactNode } from "react";
 import type { BubbleProps, CallProps, ComposerProps, HeaderProps, Pos, RichCardProps, Skin, UnknownProps } from "./types";
-import { AGENT_NUMBER, BubbleBody, BubbleIcon, GoogleG, MicIcon, onComposerKeyDown, PauseIcon, PersonaLogo, PersonSilhouette, PhoneIcon, RecTimer, callLog, eventKind, isToday, time, useAutoGrow, useClock, useElapsed } from "./shared";
+import { AGENT_NUMBER, BubbleBody, BubbleIcon, GoogleG, CcIcon, MicIcon, onComposerKeyDown, PauseIcon, PersonaLogo, PersonSilhouette, PhoneIcon, RecTimer, callLog, eventKind, isToday, time, useAutoGrow, useClock, useElapsed } from "./shared";
 
 const BLUE = "var(--ios-blue)";
 const RECV = "var(--ios-recv)";
@@ -440,7 +440,7 @@ function CallScreen(p: CallProps) {
         <div className="text-[34px] leading-[41px] font-semibold tracking-[0.4px]">{p.name}</div>
         {!above && status}
       </div>
-      {p.status === "active" && !p.held && (
+      {p.status === "active" && !p.held && p.captions !== false && (
         <div className="mt-8 px-8 space-y-3 text-[16px] leading-[21px] text-center max-w-full">
           {p.said && (
             <div data-caption="agent" className="text-white/90">
@@ -483,6 +483,14 @@ function CallScreen(p: CallProps) {
                   <MicIcon off={p.muted} size={26} />
                 </button>
                 <span className="text-[15px] leading-[20px]" aria-hidden>{p.muted ? "Unmute" : "Mute"}</span>
+              </div>
+            )}
+            {p.onCaptions && p.status === "active" && (
+              <div className="flex flex-col items-center gap-2">
+                <button onClick={p.onCaptions} aria-pressed={p.captions !== false} aria-label={p.captions !== false ? "Turn captions off" : "Turn captions on"} className={`${circle} ${p.captions !== false ? "bg-white text-black" : ""}`} style={p.captions !== false ? undefined : glassDark}>
+                  <CcIcon size={26} />
+                </button>
+                <span className="text-[15px] leading-[20px]" aria-hidden>Captions</span>
               </div>
             )}
             {p.onHold && p.status === "active" && (

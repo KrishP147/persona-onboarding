@@ -33,6 +33,16 @@ export function PauseIcon({ size = 20 }: { size?: number }) {
   );
 }
 
+// captions: a speech box with two lines of text
+export function CcIcon({ size = 20 }: { size?: number }) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" aria-hidden>
+      <rect x="3" y="5" width="18" height="14" rx="3" />
+      <path d="M7 10.5h6M15.5 10.5H17M7 14h3M12.5 14H17" />
+    </svg>
+  );
+}
+
 export function BubbleIcon({ size = 20 }: { size?: number }) {
   return (
     <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinejoin="round" aria-hidden>
