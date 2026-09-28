@@ -35,7 +35,7 @@ most onboarding bots hide their logic in a prompt, so you find out what they do 
 | prompt injection, live | **238 / 238** checks hold against the real model (claude haiku 4.5), 26 payload runs | `pnpm injection --live` |
 | cost | **$0.0226 per onboarding**, $0.0013 per reply (claude haiku 4.5, every model call the product makes, over the final eval round) | `pnpm metrics` |
 | latency | **p95 3.6s** per model reply (many replies are written by code and go out instantly) | `pnpm metrics` |
-| checks | 315 keyless smoke checks, 238 prompt injection checks and 2000 fuzzed sessions in CI, 25 browser checks with a fake mic, 28 manual scripts | `pnpm smoke`, `pnpm injection`, `pnpm fuzz`, `pnpm e2e`, [docs/manual-tests.md](docs/manual-tests.md) |
+| checks | 316 keyless smoke checks, 238 prompt injection checks and 2000 fuzzed sessions in CI, 25 browser checks with a fake mic, 28 manual scripts | `pnpm smoke`, `pnpm injection`, `pnpm fuzz`, `pnpm e2e`, [docs/manual-tests.md](docs/manual-tests.md) |
 
 honest caveats: the funnel is a development-period baseline (our own testing plus a few friends), measured before most of the fixes; there haven't been enough real sessions since to publish a post-fix funnel (`pnpm funnel --since <iso date>` makes one). the eval is one run per persona, and a persona moves 2 to 3 points between runs of the same build, so read the average, not a single row. [harness/ROUNDS.md](harness/ROUNDS.md) lists what the grader found each round and what changed.
 
@@ -91,7 +91,7 @@ i built this with ai agents, the way i'd want a small team to work. one orchestr
 pnpm install
 cp .env.example .env.local   # GEMINI_API_KEY for the default path, or ANTHROPIC_API_KEY + LLM_PROVIDER=anthropic. with neither, a mock mode
 pnpm dev                      # http://localhost:3000 (chrome or edge for the voice call)
-pnpm smoke                    # 315 keyless checks of the safety nets
+pnpm smoke                    # 316 keyless checks of the safety nets
 pnpm injection                # 238 prompt injection checks (--live: against the real model, costs a little)
 pnpm stress-matrix            # regenerates STRESS_TESTS.md from the source
 pnpm harness                  # 20 simulated difficult users vs a local dev server, graded (ALLOW_TEST_EVENTS=1). prints its cost
@@ -102,6 +102,6 @@ pnpm e2e                      # real chrome walkthrough with a fake mic: 25 chec
 
 ## tests and CI
 
-every push and PR to `master` runs `.github/workflows/ci.yml`, keyless (no api keys, mock mode): `next typegen`, `tsc` typecheck, lint, the 315 smoke checks, the 238 prompt injection checks, 2000 seeded fuzzed event sequences with invariants checked after each step, a regenerate-and-diff of `STRESS_TESTS.md` (fails if the table has drifted from the source), and a production build. the harness (`pnpm harness`, 20 simulated difficult users, graded by claude sonnet 5) and the real-browser `pnpm e2e` walkthrough need a model key and aren't run in CI; they're run by hand and recorded in [harness/ROUNDS.md](harness/ROUNDS.md).
+every push and PR to `master` runs `.github/workflows/ci.yml`, keyless (no api keys, mock mode): `next typegen`, `tsc` typecheck, lint, the 316 smoke checks, the 238 prompt injection checks, 2000 seeded fuzzed event sequences with invariants checked after each step, a regenerate-and-diff of `STRESS_TESTS.md` (fails if the table has drifted from the source), and a production build. the harness (`pnpm harness`, 20 simulated difficult users, graded by claude sonnet 5) and the real-browser `pnpm e2e` walkthrough need a model key and aren't run in CI; they're run by hand and recorded in [harness/ROUNDS.md](harness/ROUNDS.md).
 
 prod runs on vercel + upstash from `master` (merges wait for CI), on claude haiku 4.5 (`LLM_PROVIDER=anthropic`) under a hard spend cap (`CLAUDE_BUDGET_USD`, checked before every call). the harness numbers above were measured on the same model.

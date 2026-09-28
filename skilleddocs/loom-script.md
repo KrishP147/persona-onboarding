@@ -30,7 +30,7 @@ say: "onboarding is the first conversation with your assistant, so i spent most 
 
 - open "examine reasoning": the move code picked for each turn, and the book behind it (*the mom test* for one question about a real recent moment, *to sell is human* for an easy yes and an easy no, *influence* for giving before asking). show a "checks that ran" chip on a reply. "the model writes the words. code decides what has to happen, and every time code corrected the model, the reply says so."
 - flash harness/ROUNDS.md: "20 simulated difficult users (hang-ups, refusals, rambling, spanish, prompt injection, a call-me-back), graded by claude sonnet 5 against the brief. the final round averaged 7.45 out of 10. i switched to a stricter grader at the end on purpose: it found a dozen real bugs the easier one missed, like the agent claiming gmail was connected before it was, and i fixed them before this recording."
-- flash the README numbers: "238 prompt injection checks pass against the real model, 315 keyless checks and 2000 fuzzed sessions run in CI on every change, and STRESS_TESTS.md maps 19 ways people break onboardings to the code that handles each."
+- flash the README numbers: "238 prompt injection checks pass against the real model, 316 keyless checks and 2000 fuzzed sessions run in CI on every change, and STRESS_TESTS.md maps 19 ways people break onboardings to the code that handles each."
 
 ## 4:00 to 5:00: my first 30 days at persona
 
