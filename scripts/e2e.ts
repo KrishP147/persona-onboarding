@@ -5,7 +5,7 @@ import { promises as fs } from "fs";
 import path from "path";
 
 const BASE = process.argv[2] ?? "http://localhost:3000";
-const CHROME = process.env.CHROME_PATH ?? "C:/Program Files/Google/Chrome/Application/chrome.exe";
+const CHROME = process.env.CHROME_PATH || "C:/Program Files/Google/Chrome/Application/chrome.exe";
 const OUT = path.join("harness", "e2e", new Date().toISOString().replace(/[:.]/g, "-"));
 
 const results: { step: string; ok: boolean; note?: string }[] = [];
@@ -30,8 +30,8 @@ async function agentBubbleCount(page: Page) {
 }
 
 async function sendText(page: Page, text: string) {
-  await page.click("input[aria-label='Message']");
-  await page.type("input[aria-label='Message']", text);
+  await page.click("[aria-label='Message']");
+  await page.type("[aria-label='Message']", text);
   await page.keyboard.press("Enter");
 }
 
@@ -47,8 +47,17 @@ async function main() {
   const errors: string[] = [];
   page.on("console", (m) => m.type() === "error" && errors.push(m.text()));
   page.on("pageerror", (e) => errors.push(String(e)));
+  // without voice keys locally, the tts/stt endpoints answer 5xx and the browser voice takes over: that's the
+  // designed fallback, not an error. any other 5xx is.
+  const serverErrors: string[] = [];
+  page.on("response", (r) => r.status() >= 500 && !r.url().includes("/api/voice/") && serverErrors.push(`${r.status()} ${r.url()}`));
 
   await page.goto(`${BASE}/chat`, { waitUntil: "networkidle2" });
+  // first visit: a welcome card sits over the phone until "Start texting"
+  await page
+    .waitForFunction(() => [...document.querySelectorAll("button")].some((b) => b.textContent?.trim() === "Start texting"), { timeout: 8000 })
+    .then(() => page.evaluate(() => [...document.querySelectorAll("button")].find((b) => b.textContent?.trim() === "Start texting")?.click()))
+    .catch(() => {});
   check("intro asks for a name", await bodyHas(page, "what do you want to call me?", 20000));
   check("intro has the legal link", await bodyHas(page, "yourpersona.com/legal", 1000));
   await snap(page, "intro");
@@ -67,7 +76,7 @@ async function main() {
   const firstReplyMs = Date.now() - t0;
   check("agent replies", (await agentBubbleCount(page)) > before, `${firstReplyMs}ms to first bubble`);
   check("reply delay feels human (0.6s to 8s)", firstReplyMs > 600 && firstReplyMs < 8000, `${firstReplyMs}ms`);
-  check("receipt is seen", await page.$("[aria-label='seen']").then(Boolean));
+  check("receipt is seen", await page.waitForSelector("[aria-label='seen'],[aria-label='read']", { timeout: 8000 }).then(Boolean).catch(() => false));
   check("no eyes on a short message", !(await page.$("[aria-label='reaction']")));
 
   const saveBtn = await page.waitForSelector("xpath/.//button[normalize-space()='Save']", { timeout: 15000 }).catch(() => null);
@@ -132,8 +141,9 @@ async function main() {
     await callBtn.click();
     const connected = await page.waitForSelector("button[aria-label='Hang up']", { timeout: 15000 }).then(() => true).catch(() => false);
     check("you can call it back from the header", connected);
-    // silence ladder: ~6s per check-in, three strikes, then goodbye
-    const ended = await page.waitForFunction(() => !document.querySelector("button[aria-label='Hang up']"), { timeout: 90000 }).then(() => true).catch(() => false);
+    // needs a quiet room: headless chrome's speech recognition can hear the real mic despite the fake device flag.
+    // silence ladder: a check-in at 25s, a softer one 30s later, a heads-up at about two minutes, then goodbye
+    const ended = await page.waitForFunction(() => !document.querySelector("button[aria-label='Hang up']"), { timeout: 200000 }).then(() => true).catch(() => false);
     const captions = await page.evaluate(() => (window as unknown as { __captions: string[] }).__captions);
     check("silent call ends on its own", ended, `${captions.length} captions`);
     check("goodbye is spoken before hanging up", captions.some((c) => /\b(bye|text you|talk soon|let you go)\b/i.test(c)), captions.slice(-2).join(" | "));
@@ -145,11 +155,14 @@ async function main() {
   // reload keeps everything, restart clears it
   await page.reload({ waitUntil: "networkidle2" });
   check("reload keeps the thread", await bodyHas(page, "calling you now", 10000));
+  // restart asks in place: the first tap arms it, the second (within 8s) clears the chat
   await page.click("xpath/.//button[normalize-space()='Restart']");
+  await page.click("xpath/.//button[starts-with(normalize-space(), 'Tap again')]");
   await page.waitForNavigation({ waitUntil: "networkidle2" }).catch(() => {});
   check("restart starts fresh", !(await bodyHas(page, "calling you now", 3000)) && (await bodyHas(page, "what do you want to call me?", 20000)));
 
-  check("no console errors", errors.length === 0, errors.slice(0, 3).join(" | "));
+  const realErrors = errors.filter((e) => !/Failed to load resource: the server responded with a status of 50\d/.test(e));
+  check("no console errors, no server errors", realErrors.length === 0 && serverErrors.length === 0, [...realErrors, ...serverErrors].slice(0, 3).join(" | "));
   await browser.close();
   const failed = results.filter((r) => !r.ok);
   await fs.writeFile(path.join(OUT, "RESULTS.md"), results.map((r) => `- ${r.ok ? "PASS" : "FAIL"} ${r.step}${r.note ? ` (${r.note})` : ""}`).join("\n") + "\n");

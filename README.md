@@ -31,14 +31,13 @@ most onboarding bots hide their logic in a prompt, so you find out what they do 
 | what | number | source |
 |---|---|---|
 | time to first value | **median 50s** from opening the chat to inbox triage or a draft (23 sessions) | [FUNNEL.md](FUNNEL.md) |
-| harness score | **8.9 / 10** avg over 16 simulated difficult users (round 3; 7.9 in round 1) | [harness/ROUNDS.md](harness/ROUNDS.md) |
-| cost | **$0.0152 per onboarding**, $0.0030 per reply (claude haiku 4.5, the model used for the harness runs above) | `pnpm metrics` |
-| latency | **p50 2.0s, p95 4.8s** per reply | `pnpm metrics` |
-| checks | 287 keyless smoke checks and 238 prompt injection checks in CI, 25 browser checks with a fake mic, 23 manual scripts | `pnpm smoke`, `pnpm injection`, `pnpm e2e`, [docs/manual-tests.md](docs/manual-tests.md) |
-| post-fix funnel | _placeholder: `pnpm funnel --since <deploy time>` after friends try it_ | [FUNNEL.md](FUNNEL.md) |
-| eval | _placeholder: final harness round_ | [harness/ROUNDS.md](harness/ROUNDS.md) |
+| final eval | **7.45 / 10** avg over 20 simulated difficult users, graded by claude sonnet 5 (6.30 in the first sonnet round; the earlier, easier cohere grader gave 8.9) | [harness/ROUNDS.md](harness/ROUNDS.md) |
+| prompt injection, live | **238 / 238** checks hold against the real model (claude haiku 4.5), 26 payload runs | `pnpm injection --live` |
+| cost | **$0.0226 per onboarding**, $0.0013 per reply (claude haiku 4.5, every model call the product makes, over the final eval round) | `pnpm metrics` |
+| latency | **p95 3.6s** per model reply (many replies are written by code and go out instantly) | `pnpm metrics` |
+| checks | 315 keyless smoke checks, 238 prompt injection checks and 2000 fuzzed sessions in CI, 25 browser checks with a fake mic, 28 manual scripts | `pnpm smoke`, `pnpm injection`, `pnpm fuzz`, `pnpm e2e`, [docs/manual-tests.md](docs/manual-tests.md) |
 
-honest caveats: the funnel is a development-period baseline (our own testing plus a few friends), and the latency number is turn time read from transcripts, so it runs a little high. new sessions record real model latency and cost per turn in `session.metrics`.
+honest caveats: the funnel is a development-period baseline (our own testing plus a few friends), measured before most of the fixes; there haven't been enough real sessions since to publish a post-fix funnel (`pnpm funnel --since <iso date>` makes one). the eval is one run per persona, and a persona moves 2 to 3 points between runs of the same build, so read the average, not a single row. [harness/ROUNDS.md](harness/ROUNDS.md) lists what the grader found each round and what changed.
 
 ## how it's built
 
@@ -47,7 +46,7 @@ every message, typed or spoken, goes through the same five steps:
 1. **parse** (code): what did they actually say? names, yes or no, bye, "no calls", "skip this". a small model pass pulls out names and needs in parallel.
 2. **decide** (code): what's still missing, whether to offer a call, and which one conversation move to make this turn (e.g. "ask about a specific recent moment", from *the mom test*).
 3. **generate** (model): claude haiku 4.5 on prod (`LLM_PROVIDER=anthropic`), or gemini with a chain of free-tier fallbacks when that's unset, writes the words and can use tools (look something up, read the inbox, draft an email). what the user typed, what tools returned, and email text all reach it fenced as data, never instructions.
-4. **guard** (code): 17 named safety nets, run as one ordered pipeline in `guards.ts`, check the reply. a leaked internal note gets dropped, a "sent!" that wasn't sent gets corrected, a third question in a row gets cut, a hangup without a goodbye gets one. the email tools add their own checks on top: no address that wasn't given by the user or a real inbox, and a plain warning before anything that would be a duplicate send.
+4. **guard** (code): 18 named safety nets, run as one ordered pipeline in `guards.ts`, check the reply. a leaked internal note gets dropped, a "sent!" or "connected!" that isn't true gets corrected, a third question in a row gets cut, a hangup without a goodbye gets one. the email tools add their own checks on top: no address that wasn't given by the user or a real inbox, and a plain warning before anything that would be a duplicate send.
 5. **commit** (code): the session is saved, with the move, the guards, and the turn's cost and latency.
 
 the engine lives in `src/lib/engine/` (turn, events, tools, intents, guards, text). text and voice share one redis session, so anything said on the call is known in the texts and the other way round. links you get in text stay usable if you move to a call, and a link the agent says is in your texts is only claimed once it's actually there. the call is a browser simulation: deepgram listens, elevenlabs (then cartesia, then deepgram aura) speaks, and both fall back to the browser's own speech apis.
@@ -79,6 +78,7 @@ the journal is how my understanding changed, and why the bot behaves the way it 
 - [16. dead mic](docs/journal/16-dead-mic.md)
 - [17. checking who's actually there](docs/journal/17-typing-presence.md)
 - [18. reasoning map and dark mode](docs/journal/18-reasoning-map-and-dark-mode.md)
+- [19. a harder grader](docs/journal/19-a-harder-grader.md)
 - [reading list](docs/reading-list.md)
 
 ## how i built it with agents
@@ -91,10 +91,10 @@ i built this with ai agents, the way i'd want a small team to work. one orchestr
 pnpm install
 cp .env.example .env.local   # GEMINI_API_KEY for the default path, or ANTHROPIC_API_KEY + LLM_PROVIDER=anthropic. with neither, a mock mode
 pnpm dev                      # http://localhost:3000 (chrome or edge for the voice call)
-pnpm smoke                    # 287 keyless checks of the safety nets
+pnpm smoke                    # 315 keyless checks of the safety nets
 pnpm injection                # 238 prompt injection checks (--live: against the real model, costs a little)
 pnpm stress-matrix            # regenerates STRESS_TESTS.md from the source
-pnpm harness                  # 16 simulated difficult users vs a local dev server, graded (ALLOW_TEST_EVENTS=1). prints its cost
+pnpm harness                  # 20 simulated difficult users vs a local dev server, graded (ALLOW_TEST_EVENTS=1). prints its cost
 pnpm metrics                  # latest harness run as one table: p50/p95 latency, $ per onboarding
 pnpm funnel                   # real-user funnel from prod sessions (read-only, aggregate only)
 pnpm e2e                      # real chrome walkthrough with a fake mic: 25 checks + screenshots
@@ -102,6 +102,6 @@ pnpm e2e                      # real chrome walkthrough with a fake mic: 25 chec
 
 ## tests and CI
 
-every push and PR to `master` runs `.github/workflows/ci.yml`, keyless (no api keys, mock mode): `next typegen`, `tsc` typecheck, lint, the 287 smoke checks, the 238 prompt injection checks, 2000 seeded fuzzed event sequences with invariants checked after each step, a regenerate-and-diff of `STRESS_TESTS.md` (fails if the table has drifted from the source), and a production build. the harness (`pnpm harness`, 16 simulated difficult users, LLM-graded) and the real-browser `pnpm e2e` walkthrough need a model key and aren't run in CI; they're run by hand and recorded in [harness/ROUNDS.md](harness/ROUNDS.md).
+every push and PR to `master` runs `.github/workflows/ci.yml`, keyless (no api keys, mock mode): `next typegen`, `tsc` typecheck, lint, the 315 smoke checks, the 238 prompt injection checks, 2000 seeded fuzzed event sequences with invariants checked after each step, a regenerate-and-diff of `STRESS_TESTS.md` (fails if the table has drifted from the source), and a production build. the harness (`pnpm harness`, 20 simulated difficult users, graded by claude sonnet 5) and the real-browser `pnpm e2e` walkthrough need a model key and aren't run in CI; they're run by hand and recorded in [harness/ROUNDS.md](harness/ROUNDS.md).
 
 prod runs on vercel + upstash from `master` (merges wait for CI), on claude haiku 4.5 (`LLM_PROVIDER=anthropic`) under a hard spend cap (`CLAUDE_BUDGET_USD`, checked before every call). the harness numbers above were measured on the same model.

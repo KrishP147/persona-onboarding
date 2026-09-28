@@ -91,14 +91,14 @@ the guards run as one ordered pipeline (`src/lib/engine/guards.ts`). every guard
 
 ## costs
 
-measured by `pnpm metrics` over the last full harness run (claude haiku 4.5 as the agent, since that's what the harness graded against):
+measured by `pnpm metrics` over the final eval round (claude haiku 4.5 as the agent, the model prod runs; every model call the product makes, not the simulated user or the grader):
 
 | | |
 |---|---|
-| per reply | $0.0030 |
-| per onboarding | $0.0152 |
+| per reply | $0.0013 (code writes many replies with no model call) |
+| per onboarding | $0.0226 |
 | post-hangup catch-up pass | about $0.001 per call, only when something is still missing |
-| latency | p50 2.0s, p95 4.8s (turn time, a little high; new sessions record model latency) |
+| latency | p95 3.6s per model reply (code-written replies go out instantly) |
 
 prod runs on claude haiku 4.5, about a third of a cent a reply, and checks a hard spend cap before every call. speech (deepgram) and voice (elevenlabs / cartesia) aren't metered here yet.
 
@@ -107,4 +107,4 @@ prod runs on claude haiku 4.5, about a third of a cent a reply, and checks a har
 - **a decide() reducer.** today the decision is spread across `policy.ts`, `moves.ts` and a few early returns in `turn.ts`. i'd make it one pure function, (session, parsed turn) to (next move, actions), so every decision is one unit test and the whole policy reads in one place.
 - **real telephony.** the call is a browser simulation. persona calls real phones, so i'd move the voice loop to twilio media streams (or similar) with the same engine behind it. the engine already treats the call as events (started, silence, hung up), which is most of the work.
 - **speculative replies for latency.** start generating while the person is still finishing their sentence, and throw it away if they keep going. p95 is where a call feels robotic, and this is where it would come down.
-- **evals in CI.** the harness runs by hand and costs a little. i'd run a small fixed set of personas on every merge, with a claude grader and a pinned rubric, and fail the build when the score drops.
+- **evals in CI.** the harness runs by hand and costs about a dollar a round with the sonnet grader. i'd run a small fixed set of personas on every merge, three samples each (one run is noisy), with a pinned rubric, and fail the build when the average drops.

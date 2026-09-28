@@ -173,3 +173,32 @@ needs gmail connected with the new draft permission: if you connected before tod
 1. on a call, tap **mute**. the status shows "muted".
 2. talk for 20+ seconds. **expect:** no "you:" captions, no reply, no "you there?" check-ins.
 3. tap **unmute** and say something. **expect:** it answers only that, with no sign it knew you were muted.
+
+## 24. call me back
+
+1. name it, accept the call, then **say:** `i'm busy right now, can you call me back in a minute?`
+   - **expect:** a short "of course, i'll call you back in a minute. talk soon!", the call ends, and a text says when it'll ring.
+2. keep the tab open and wait a minute. **expect:** it rings again and opens with "calling you back like i said". (the ring back only happens while the tab is open.)
+3. on another call, **say:** `sorry i'm busy`. **expect:** it lets you go without arguing or pitching anything.
+
+## 25. what can you do?
+
+1. restart. before naming it, **type:** `what can you do?`. **expect:** a short, plain answer that marks calling places as something this demo can't do yet, not a default name slipped in.
+2. **type:** `can you call my dentist and book me in?`. **expect:** a clear no first, then what it can do instead (the number and hours, a script, an email draft).
+3. **type:** `what are you, chatgpt?`. **expect:** "an ai assistant from persona", never a model or company name.
+
+## 26. restart
+
+1. tap **restart** in the top bar (⋮ menu on phones). **expect:** the pill turns into "tap again: clears the chat".
+2. wait 8 seconds without tapping. **expect:** it goes back to "restart" on its own.
+3. tap twice within 8 seconds. **expect:** a fresh chat with the intro, nothing from before (no old names, no "that's already my name").
+
+## 27. another language
+
+1. restart, **type:** `asdkj qwe`, then carry on only in spanish, and say yes to gmail with `sí, mándame el link`.
+   - **expect:** replies in spanish, and the link card lands on that first yes (no stalling, no "ya está" without a card).
+
+## 28. the persona team
+
+1. restart, name it, then give your name as `zach` (or `tanay`, `julia`). **expect:** one light "is this THE zach?", once.
+2. **type:** `no, just a great name`. **expect:** it drops it and carries on; it never treats you as that person.
