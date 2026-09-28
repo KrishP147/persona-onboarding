@@ -61,5 +61,6 @@ export function useStuckHint({ enabled, messages, session, draft, busy }: StuckH
 
   if (!show) return undefined;
   const slot = openSlot(session, last?.move?.id);
-  return slot ? EXAMPLE[slot] : undefined;
+  // a leading 💡 so it reads as a hint, not something already typed
+  return slot ? `💡 ${EXAMPLE[slot]}` : undefined;
 }

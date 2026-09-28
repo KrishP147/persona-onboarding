@@ -77,6 +77,22 @@ export function Pill({ children, onClick, pressed }: { children: ReactNode; onCl
   );
 }
 
+// typing hints: state spelled out (filled + check when on, outline + slash when off)
+function HintsPill({ on, onClick }: { on: boolean; onClick: () => void }) {
+  return (
+    <button
+      onClick={onClick}
+      aria-pressed={on}
+      className={`h-9 pl-3 pr-4 rounded-full border text-[14px] font-medium inline-flex items-center gap-1.5 whitespace-nowrap active:scale-[.98] transition-[background-color,color,transform] duration-150 ease-[var(--ease-press)] ${on ? "bg-ink text-canvas border-ink" : "bg-canvas text-ink-mute border-step-300 hover:bg-alt"}`}
+    >
+      <svg width="14" height="14" viewBox="0 0 14 14" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+        {on ? <path d="M2.5 7.3l3 3 6-6.6" /> : <><circle cx="7" cy="7" r="5.2" /><path d="M3.3 10.7l7.4-7.4" /></>}
+      </svg>
+      Typing hints: {on ? "On" : "Off"}
+    </button>
+  );
+}
+
 export function TopBar({ skin, setSkin, pill, typingHints, toggleTypingHints, onRestart, mock }: { skin: SkinId | null; setSkin: (id: SkinId) => void; pill: ReactNode; typingHints: boolean; toggleTypingHints: () => void; onRestart: () => void; mock: boolean }) {
   return (
     <nav aria-label="Page" className="hidden sm:grid grid-cols-[1fr_auto_1fr] items-center h-16 px-6">
@@ -90,9 +106,7 @@ export function TopBar({ skin, setSkin, pill, typingHints, toggleTypingHints, on
         <span data-rz-pill className="lg:hidden">
           {pill}
         </span>
-        <Pill onClick={toggleTypingHints} pressed={typingHints}>
-          Typing hints
-        </Pill>
+        <HintsPill on={typingHints} onClick={toggleTypingHints} />
         <Pill onClick={onRestart}>Restart</Pill>
         <ThemeToggle />
       </div>
@@ -141,7 +155,7 @@ export function MenuSheet({ skin, setSkin, canReason, onReasoning, typingHints, 
         </button>
         <label className="mt-3 flex items-center justify-between gap-4 min-h-11">
           <span>
-            <span className="block text-[15px] font-medium">Typing hints</span>
+            <span className="block text-[15px] font-medium">Typing hints <span className={typingHints ? "text-pgreen" : "text-ink-mute"}>· {typingHints ? "On" : "Off"}</span></span>
             <span className="block text-[13px] text-ink-mute">an example while you wait to reply</span>
           </span>
           <button
