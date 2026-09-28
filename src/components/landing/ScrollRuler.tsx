@@ -48,8 +48,8 @@ export default function ScrollRuler() {
             className="group flex h-[10px] w-[44px] items-center justify-end"
           >
             <span
-              className="block h-[1.5px] rounded-full transition-colors duration-500 group-hover:!bg-[#6e6e73]"
-              style={{ width: 11 + 25 * k, backgroundColor: k > 0.5 ? "#6e6e73" : "#c7c7cc" }}
+              className="block h-[1.5px] rounded-full transition-colors duration-500 group-hover:!bg-ink-mute"
+              style={{ width: 11 + 25 * k, backgroundColor: k > 0.5 ? "var(--p-ink-mute)" : "var(--p-scrollbar)" }}
             />
           </button>
         );

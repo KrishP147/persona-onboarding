@@ -101,7 +101,7 @@ export default function HeroPhone() {
       >
         <div className="relative h-[687px] w-[596.443px] shrink-0">
           {/* vignetted landscape */}
-          <div className="pointer-events-none absolute left-0 top-0 h-[640.29px] w-[596.443px] rounded-[199px] opacity-40">
+          <div className="pointer-events-none absolute left-0 top-0 h-[640.29px] w-[596.443px] rounded-[199px] opacity-40 dark:opacity-30">
             <div className="absolute inset-0 overflow-hidden rounded-[199px]">
               <img
                 src="/brand/hero-landscape.jpg"
@@ -112,13 +112,13 @@ export default function HeroPhone() {
                 className="absolute left-[-9.9%] top-[-24.4%] h-[148.8%] w-[119.8%] max-w-none"
               />
             </div>
-            <div className="absolute inset-0 rounded-[inherit] shadow-[inset_0px_0px_38.3px_36px_#ffffff]" />
+            <div className="absolute inset-0 rounded-[inherit] shadow-[inset_0px_0px_38.3px_36px_var(--p-canvas)]" />
           </div>
 
           <div className="absolute left-[152px] top-[78px] z-20 w-[292px]">
             <div className="landing-reveal relative w-[292px] select-none" style={{ aspectRatio: "435 / 906" }} aria-label="Persona in iMessage">
               <div
-                className="@container isolate absolute overflow-hidden bg-white font-sans text-ink antialiased"
+                className="landing-light @container isolate absolute overflow-hidden bg-white font-sans text-ink antialiased"
                 style={{ left: "4.318%", top: "2.291%", width: "91.361%", height: "95.366%", borderRadius: "14.18% / 6.521%" }}
               >
                 {/* thread, bottom aligned above the composer + keyboard */}
@@ -277,7 +277,7 @@ export default function HeroPhone() {
             className="pointer-events-none absolute inset-x-[-40px] top-[440px] z-10 h-[247px]"
             style={{
               background:
-                "linear-gradient(180deg, rgba(255,255,255,0) 0%, rgba(255,255,255,0.55) 30%, rgba(255,255,255,0.92) 58%, #ffffff 72%, #ffffff 100%)",
+                "linear-gradient(180deg, transparent 0%, color-mix(in srgb, var(--p-canvas) 55%, transparent) 30%, color-mix(in srgb, var(--p-canvas) 92%, transparent) 58%, var(--p-canvas) 72%, var(--p-canvas) 100%)",
             }}
           />
         </div>

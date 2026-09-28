@@ -2,6 +2,17 @@
 /* layered so tailwind utilities on the same element still win */
 @layer components {
 
+/* the hero phone is a device picture: its screen stays light imessage in either theme,
+   so pin the site tokens it borrows back to their light values */
+.landing-light {
+  --p-canvas: #ffffff;
+  --p-alt: #f5f5f7;
+  --p-ink: #1d1d1f;
+  --p-ink-mute: #6e6e73;
+  --p-ink-faint: #8e8e93;
+  color-scheme: light;
+}
+
 /* imessage bits for the hero phone */
 .imsg-caret {
   display: inline-block;
@@ -86,6 +97,22 @@
   background: linear-gradient(145deg, #fff 0%, #f1f2f4 100%);
   box-shadow: 2.5px 2.5px 6px #1315151a, -2.5px -2.5px 6px #fffffff2, inset 0 1px #ffffffe6;
 }
+/* dark: the same glass and pills turned over, no white glow from the top left */
+[data-theme="dark"] .landing-glass {
+  background: rgba(28, 28, 30, 0.55);
+  border-color: rgba(255, 255, 255, 0.07);
+  box-shadow: inset 0 1px rgba(255, 255, 255, 0.04), 0 24px 70px -40px rgba(0, 0, 0, 0.8);
+}
+[data-theme="dark"] .neu-dark {
+  background: linear-gradient(145deg, #f5f5f7 0%, #dcdce0 100%);
+  color: #1d1d1f;
+  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.5), inset 0 1px #ffffff;
+}
+[data-theme="dark"] .neu-pill {
+  background: linear-gradient(145deg, #2c2c2e 0%, #1f1f21 100%);
+  box-shadow: 2.5px 2.5px 6px rgba(0, 0, 0, 0.55), inset 0 1px rgba(255, 255, 255, 0.07);
+}
+
 .glare-hover { position: relative; overflow: hidden; }
 .glare-hover::after {
   content: "";
