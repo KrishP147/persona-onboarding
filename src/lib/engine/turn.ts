@@ -8,7 +8,7 @@ import { connectDemo } from "../google";
 import { EVENT_MOVES, chooseMove, markUsed, pick, withAngle } from "../moves";
 import { applyExtracted, extract } from "../extract";
 import { webEnabled } from "../web";
-import { teamLine, teamMatch, teamNote, teamYes } from "../team";
+import { teamLine, teamLineVoice, teamMatch, teamNote, teamYes, teamYesVoice } from "../team";
 
 import { currentMeter, metered, percentile, recordTurn, type Meter } from "../usage";
 import { type Ctx, emitAgentText, ensureCard, goodbyeLine, guard, msg, outageLine } from "./context";
@@ -424,7 +424,7 @@ export async function handleUserMessage(...args: Parameters<typeof handleUserMes
   // a yes to "is this THE zach?": a code-written "no way" first (a run's model skipped straight to the call offer)
   if (justMet && s.teamMember) {
     const ctx: Ctx = { s, channel: s.call.active ? "voice" : channel, actions: [], newMessages: [], move: { id: "team", label: "a familiar name", source: "easter egg" } };
-    emitAgentText(ctx, teamYes(s.teamMember));
+    emitAgentText(ctx, ctx.channel === "voice" ? teamYesVoice(s.teamMember) : teamYes(s.teamMember));
     const [m] = ctx.newMessages;
     const first = r.newMessages.findIndex((x) => x.role === "agent");
     s.transcript.splice(s.transcript.indexOf(m), 1);
@@ -444,7 +444,7 @@ export async function handleUserMessage(...args: Parameters<typeof handleUserMes
     r.newMessages = r.newMessages.filter((m) => !words.includes(m));
     if (words.length) r.actions = r.actions.filter((a) => a.type !== "speak");
     const ctx: Ctx = { s, channel: s.call.active ? "voice" : channel, actions: [], newMessages: [], move: { id: "team", label: "a familiar name", source: "easter egg" } };
-    emitAgentText(ctx, teamLine(key));
+    emitAgentText(ctx, ctx.channel === "voice" ? teamLineVoice(key) : teamLine(key));
     r.newMessages.push(...ctx.newMessages);
     r.actions.push(...ctx.actions);
   }

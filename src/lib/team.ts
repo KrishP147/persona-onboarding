@@ -26,6 +26,10 @@ export function teamMatch(s: Session): string | null {
 }
 
 // their yes, answered in code before the model's reply
+// on a call: fuller sentences, punctuation that carries the emphasis ("no way!" lands; "no way, an honor!" came out flat)
+export const teamYesVoice = (key: string) => (key === "jason" ? "no way! named after a file extension, right? honestly, it's an honor." : "no way! honestly, it's an honor.");
+export const teamLineVoice = (key: string) => `whoa. wait, is this THE ${key}? ${TEAM[key].asks}? it's a real pleasure to meet you.`;
+
 export const teamYes = (key: string) => (key === "jason" ? "no way, named after a file extension? an honor!" : "no way, an honor!");
 
 // one sentence with the role in it: "is this THE zach?" and "is this THE julia?" alone read as the same question

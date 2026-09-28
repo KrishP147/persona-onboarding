@@ -577,6 +577,18 @@ async function main() {
   await handleUserMessage(ph, "text", "nova");
   const phR = await handleUserMessage(ph, "text", "can you call a pharmacy for me");
   check("'can you call a pharmacy for me' doesn't ring them", !phR.actions.some((a) => a.type === "start_call"), said(phR));
+  // on a call, the egg is spoken with its own emphasis; "THE" is said "thee" while the caption keeps THE
+  const ev = newSession();
+  await handleEvent(ev, { type: "open" });
+  await handleUserMessage(ev, "text", "aarav");
+  await handleEvent(ev, { type: "call_started" });
+  const evR = await handleUserMessage(ev, "voice", "hey aarav, i'm zach");
+  ev.slots.userName = { ...ev.slots.userName, value: "Zach", status: "filled" };
+  const evR2 = evR.newMessages.some((m) => /THE zach/.test(m.text)) ? evR : await handleUserMessage(ev, "voice", "hey, i'm zach");
+  const spokenEgg = evR2.actions.filter((a) => a.type === "speak").map((a) => ("text" in a ? a.text : "")).join(" ");
+  check("egg on a call: spoken as 'thee zach', caption keeps THE", /thee zach/.test(spokenEgg) && evR2.newMessages.some((m) => m.channel === "voice" && /THE zach/.test(m.text)), spokenEgg);
+  const saidOut = await import("../src/lib/engine/context").then((c) => c.speakable("ok rn idk, lol. btw u can text me w/ questions"));
+  check("texting shorthand becomes words on a call", saidOut === "ok right now i don't know, by the way you can text me with questions", saidOut);
   const egg2 = newSession();
   egg2.slots.userName = { value: "Sam", status: "filled", asks: 1, source: "text", updatedAt: Date.now() };
   check("...other names: nothing", !/is this THE/.test(said(await handleUserMessage(egg2, "text", "hey"))) && !egg2.teamGuess);

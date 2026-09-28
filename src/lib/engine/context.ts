@@ -71,6 +71,25 @@ export function recapFallback(s: Session, reason: string) {
   return `thanks for the chat!${d || keep} text or call me anytime.`;
 }
 
+// Texting shorthand, said out loud as words.
+const SHORTHAND: [RegExp, string][] = [
+  [/\brn\b/gi, "right now"],
+  [/\bidk\b/gi, "i don't know"],
+  [/\btbh\b/gi, "to be honest"],
+  [/\bbtw\b/gi, "by the way"],
+  [/\bthx\b/gi, "thanks"],
+  [/\bpls\b|\bplz\b/gi, "please"],
+  [/\bu\b/g, "you"],
+  [/\bur\b/g, "your"],
+  [/\bw\/\s*/gi, "with "],
+  [/\s*\b(lol|lmao|haha+)\b[.!]?/gi, ""],
+];
+export function speakable(t: string) {
+  let out = t;
+  for (const [re, word] of SHORTHAND) out = out.replace(re, word);
+  return out.replace(/\s{2,}/g, " ").replace(/^\s*[,.]\s*/, "").trim();
+}
+
 export function emitAgentText(ctx: Ctx, raw: string) {
   // House style: no em dashes, no stage directions like "(waiting for reply)".
   let text = stopAtRepeat(raw.replace(TOOL_NAMES, " ").replace(STAGE_BRACKETS, keepFillIns)).replace(/\s*[—]\s*/g, ", ").replace(/\s+–\s+/g, ", ").replace(/\((?:[a-z]+ ){0,3}(?:on|in) (?:the |our )?(?:call|chat)\)\s*/gi, "").replace(/^\s*\*?\([^)]*\)\*?\s*$/gm, "").trim();
@@ -79,6 +98,8 @@ export function emitAgentText(ctx: Ctx, raw: string) {
   if (deduped !== text) guard(ctx, "blocked repeat question");
   text = deduped;
   rememberQuestions(ctx.s, text);
+  // A call is spoken: texting shorthand becomes words ("rn" out loud sounds broken). The caption shows the same words.
+  if (ctx.channel === "voice") text = speakable(text);
   // On a call, three sentences is already a lot to listen to; trim anything longer.
   const spoken = ctx.channel === "voice" ? capSentences(text.replace(/\n+/g, " ").trim(), 3) : text;
   // An email typed out in the reply stays one bubble (split per paragraph it read like several texts).
@@ -94,7 +115,8 @@ export function emitAgentText(ctx: Ctx, raw: string) {
     ctx.newMessages.push(m);
     ctx.s.transcript.push(m);
   }
-  if (ctx.channel === "voice" && spoken) ctx.actions.push({ type: "speak", text: spoken });
+  // emphasis only the voice needs: a capitalized "THE" ("is this THE zach?") is said "thee"
+  if (ctx.channel === "voice" && spoken) ctx.actions.push({ type: "speak", text: spoken.replace(/\bTHE\b/g, "thee") });
 }
 
 export function eventMsg(s: Session, text: string): Msg {
