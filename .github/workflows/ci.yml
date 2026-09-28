@@ -1,0 +1,37 @@
+name: CI
+
+on:
+  push:
+    branches: [master]
+  pull_request:
+    branches: [master]
+
+env:
+  # keyless: force mock mode, no network calls
+  ANTHROPIC_API_KEY: ""
+  GEMINI_API_KEY: ""
+  GOOGLE_API_KEY: ""
+  BROWSERBASE_API_KEY: ""
+
+jobs:
+  ci:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - run: pnpm install --frozen-lockfile
+
+      # generates .next/types + next-env.d.ts, which `tsc` needs (gitignored, not checked in)
+      - run: pnpm exec next typegen
+
+      - run: pnpm -s typecheck
+      - run: pnpm -s lint
+      - run: pnpm -s smoke
+      - run: pnpm build
