@@ -98,6 +98,7 @@ export interface Session {
   agentNameDefaulted?: boolean; // they skipped naming it: goes by "Persona" until they pick one
   teamGuess?: string; // easter egg: their name matched someone on the persona team and we asked (src/lib/team.ts)
   teamMember?: string; // ...and they said yes
+  teamGreeted?: boolean; // the code-written "no way, an honor!" went out
   inboxToScan?: InboxItem[]; // gmail just connected over text: the inbox look happens in its own event (inbox_scan) so "connected" shows at once
   emailSeen?: string[]; // email text the agent has seen (subjects, snippets): slot values found only here are quarantined
   metrics?: SessionMetrics; // per-session cost and model latency (src/lib/usage.ts meter)

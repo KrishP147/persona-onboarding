@@ -25,8 +25,11 @@ export function teamMatch(s: Session): string | null {
   return first && TEAM[first] && !s.teamGuess ? first : null;
 }
 
+// their yes, answered in code before the model's reply
+export const teamYes = (key: string) => (key === "jason" ? "no way, named after a file extension? an honor!" : "no way, an honor!");
+
 export const teamLine = (key: string) => `woah, is this THE ${key}? ${TEAM[key].asks}? pleasure to meet you!`;
 
 // After a yes: what the model may know about them (public info only), for a moment of recognition.
 export const teamNote = (key: string) =>
-  `They said they really are ${TEAM[key].full} from Persona (${TEAM[key].handle} on X). Public bio: ${TEAM[key].bio}. You can react warmly and mention a detail once if it fits, then carry on normally with whatever's next. Don't gush or keep bringing it up.`;
+  `They said they really are ${TEAM[key].full} from Persona (${TEAM[key].handle} on X). Public bio: ${TEAM[key].bio}. You already said \"no way, an honor!\" in a separate text just before yours, so don't react to it again: carry on normally with whatever's next. If they bring up their work, you can mention a detail from the bio. Don't gush.`;

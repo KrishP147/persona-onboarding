@@ -555,6 +555,19 @@ async function main() {
   check("team name: 'woah, is this THE zach? founder of persona?'", /is this THE zach\? founder of persona\?/.test(said(egg1)) && egg.teamGuess === "zach", said(egg1));
   await handleUserMessage(egg, "text", "haha yes");
   check("...a yes: they're recognized (bio goes to the model), asked only once", egg.teamMember === "zach" && !/is this THE/.test(said(await handleUserMessage(egg, "text", "anyway i need help with email"))));
+  check("...the yes gets a code-written 'no way, an honor!'", egg.transcript.some((m) => m.role === "agent" && m.text === "no way, an honor!"));
+  // "can you call my dentist?" is a call for someone else, never a ring to them; "can you call?" is
+  const dent = newSession();
+  await handleEvent(dent, { type: "open" });
+  await handleUserMessage(dent, "text", "nova");
+  await handleUserMessage(dent, "text", "no");
+  const dentR = await handleUserMessage(dent, "text", "wait, actually, can you call my dentist?");
+  check("'can you call my dentist?' doesn't ring them", !dentR.actions.some((a) => a.type === "start_call"), said(dentR));
+  const cq = newSession();
+  await handleEvent(cq, { type: "open" });
+  await handleUserMessage(cq, "text", "nova");
+  const cqR = await handleUserMessage(cq, "text", "can you call?");
+  check("...'can you call?' does", cqR.actions.some((a) => a.type === "start_call"), said(cqR));
   const egg2 = newSession();
   egg2.slots.userName = { value: "Sam", status: "filled", asks: 1, source: "text", updatedAt: Date.now() };
   check("...other names: nothing", !/is this THE/.test(said(await handleUserMessage(egg2, "text", "hey"))) && !egg2.teamGuess);

@@ -8,7 +8,7 @@ import { connectDemo } from "../google";
 import { EVENT_MOVES, chooseMove, markUsed, pick, withAngle } from "../moves";
 import { applyExtracted, extract } from "../extract";
 import { webEnabled } from "../web";
-import { teamLine, teamMatch, teamNote } from "../team";
+import { teamLine, teamMatch, teamNote, teamYes } from "../team";
 
 import { currentMeter, metered, percentile, recordTurn, type Meter } from "../usage";
 import { type Ctx, emitAgentText, ensureCard, goodbyeLine, guard, msg, outageLine } from "./context";
@@ -143,6 +143,18 @@ export async function turn(
     // Provider down or overloaded: fall through to the scripted line rather than go quiet.
     console.error("llm turn failed", err);
     failed = true;
+  }
+  // An empty reply (no words, nothing shown) gets one retry before the scripted "say that again?": a run asked
+  // "yeah send her an email" and got "sorry, i lost my train of thought" (the model had gone quiet, not down).
+  if (!failed && provider && !text.trim() && !ctx.newMessages.some((m) => m.kind !== "contact_card") && ctx.actions.length === 0) {
+    try {
+      const again = "Your last reply came out empty. Answer their last message now in one or two short sentences. If you need a detail to do what they asked (a time, an address, what to say), ask for just that.";
+      const raw = await generate(ctx, [extraInstruction, again].filter(Boolean).join(" "));
+      text = cleanModelText(raw, s.slots.userName.value);
+      guard(ctx, "empty reply: retried once");
+    } catch (err) {
+      console.error("llm retry failed", err);
+    }
   }
   s.llmFailures = failed ? (s.llmFailures ?? 0) + 1 : 0;
   // A turn that did something (sent the link, a gif, a card) doesn't need "say that again?" beside it.
@@ -403,10 +415,24 @@ export async function handleUserMessage(...args: Parameters<typeof handleUserMes
   if (s.teamGuess && !s.teamMember && s.transcript.findLast((m) => m.role === "agent" && (!m.kind || m.kind === "text"))?.move?.id === "team") {
     if (YES.test(text.replace(LAUGH_LEAD, "")) || /\b(it'?s me|that'?s me|the one|in the flesh|guilty)\b/i.test(text)) s.teamMember = s.teamGuess;
   }
+  const justMet = !!s.teamMember && !s.teamGreeted;
+  if (justMet) s.teamGreeted = true;
   const [r, meter] = await metered(async () => sealGoodbye(s, await asTurnBy(s, "user", () => handleUserMessageInner(...args))));
   noteMetrics(s, meter);
   // their name is on the persona team: "woah, is this THE zach?" in place of this turn's words (cards, links,
   // a ringing call or a send stay; then it's back to normal)
+  // a yes to "is this THE zach?": a code-written "no way" first (a run's model skipped straight to the call offer)
+  if (justMet && s.teamMember) {
+    const ctx: Ctx = { s, channel: s.call.active ? "voice" : channel, actions: [], newMessages: [], move: { id: "team", label: "a familiar name", source: "easter egg" } };
+    emitAgentText(ctx, teamYes(s.teamMember));
+    const [m] = ctx.newMessages;
+    const first = r.newMessages.findIndex((x) => x.role === "agent");
+    s.transcript.splice(s.transcript.indexOf(m), 1);
+    const at = first >= 0 ? s.transcript.indexOf(r.newMessages[first]) : -1;
+    s.transcript.splice(at >= 0 ? at : s.transcript.length, 0, m);
+    r.newMessages.splice(first >= 0 ? first : r.newMessages.length, 0, m);
+    r.actions.unshift(...ctx.actions);
+  }
   const key = teamMatch(s);
   if (key) {
     s.teamGuess = key;
@@ -603,7 +629,7 @@ export async function handleUserMessageInner(
   // Asking for a call is the answer; no need to confirm it back ("could we call?" -> ring).
   const callText = fixCallTypos(clean);
   const asksForCall =
-    /\b(call me(?=\s*($|[.!?,]|(now|back|please|pls|plz|asap|right now|real quick|quick|when|whenever|anytime|later|today|tomorrow|so|and|if|then)\b))|(can|could|should|shall) (we|you) (call|hop on a call|do a call)|let'?s (call|hop on a call|do a call)|give me a (call|ring)|ring me|phone me|hop on a (quick )?call|(you|u) (can|could|may) (call|ring|phone) (my (phone|cell|number)|me(?=\s*($|[.!?,]|(now|right now|back|anytime|whenever)\b)))|call my (phone|cell|number)|(feel free|go ahead) (to|and) (call|ring)( me| my (phone|cell))?)\b/i.test(callText) &&
+    /\b(call me(?=\s*($|[.!?,]|(now|back|please|pls|plz|asap|right now|real quick|quick|when|whenever|anytime|later|today|tomorrow|so|and|if|then)\b))|(can|could|should|shall) (we|you) (hop on a call|do a call)|(can|could|should|shall) (we|you) (call|ring)(?=\s*($|[.!?,]|(now|real quick|quick|please|pls|asap)\b))|let'?s (call|hop on a call|do a call)|give me a (call|ring)|ring me|phone me|hop on a (quick )?call|(you|u) (can|could|may) (call|ring|phone) (my (phone|cell|number)|me(?=\s*($|[.!?,]|(now|right now|back|anytime|whenever)\b)))|call my (phone|cell|number)|(feel free|go ahead) (to|and) (call|ring)( me| my (phone|cell))?)\b/i.test(callText) &&
     !NEGATED_CALL.test(callText);
   // A short yes ("sure", "yeah call me") is a yes; "yes but u aren't listening..." is not (it rang once).
   const saidYesToOffer = !!prevText && OFFERED_CALL.test(prevText.text) && YES.test(clean.replace(LAUGH_LEAD, "")) && !/\bbut\b/i.test(clean) && (clean.trim().split(/\s+/).length <= 4 || /\b(call|ring)\b/i.test(clean));
@@ -716,14 +742,14 @@ export async function handleUserMessageInner(
     s.graduatedAt ??= new Date().toISOString();
     s.graduatedReason = justDo ? "they asked to just get their task done" : "they skipped setup";
     for (const k of Object.keys(s.slots) as SlotKey[]) if (s.slots[k].status === "missing") s.slots[k].status = "deferred";
-    const bare = /^\s*(ok(ay)?,?\s*)?(can we |let'?s |i want to |just )?skip( all( of)?)?( this| that| it| setup| the setup| the rest)*\W*$/i.test(clean);
+    const bare = /^\s*(ok(ay)?,?\s*)?(can we |let'?s |i want to |just )?skip( all( of)?)?( this| that| it| setup| the setup| the rest)*\W*$/i.test(clean) || /^\s*(ok(ay)?,?\s*)?(just )?(let me in|get me in|let me (just )?(use|try) (it|you|this|the app))\W*$/i.test(clean);
     const r = await turn(
       s,
       "text",
       justDo
         ? "They told you to just do what they asked, and setup is over: you're their full assistant now. Do their most recent request (from an earlier message if this one only says to do it) right now, in full, in text. Don't offer a call, and don't ask for their name or Gmail."
         : bare
-        ? "They skipped setup, and setup is over: you're their full assistant now. Say that's fine in a few words and ask what they want to get done first. Don't ask for their name, Gmail, or a call."
+        ? "They skipped setup (\"just let me in\" means the same), and setup is over: you're their full assistant now. Tell them they're in, all set, in a few words, and ask what they want to get done first. Don't say you're \"already here\", and don't ask for their name, Gmail, or a call."
         : "They skipped setup, and setup is over: you're their full assistant now. Help with what they asked for in this same message, right now, in text. Don't offer a call, and don't ask for their name or Gmail.",
     );
     r.actions.push({ type: "graduate" });

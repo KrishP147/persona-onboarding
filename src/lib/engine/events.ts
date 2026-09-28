@@ -215,7 +215,7 @@ export const EVENT_HANDLERS: { [K in SessionEvent["type"]]: EventHandler<K> } = 
     // A call just ended and the recap went out: that text already covers it.
     if (since.some((m) => m.move?.id === "recap" || (m.kind === "event" && m.text.startsWith("Call ended")))) return idle();
     const ctx: Ctx = { s, channel: "text", actions: [], newMessages: [], move: EVENT_MOVES.nudge };
-    const name = s.slots.userName.value;
+    const name = s.slots.userName.value?.toLowerCase();
     if (firstTime) {
       // One gentle line, no question, no default name: they didn't skip anything, they just haven't started.
       emitAgentText(ctx, `btw no rush${name ? ` ${name}` : ""}, take your time. i'm here whenever you're ready`);

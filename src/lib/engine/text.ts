@@ -158,7 +158,7 @@ export const fence = (tag: "user_said" | "email_content", t: string) => `<${tag}
 export const ACCUSING =
   /\b(you (skipped|forgot|missed|ignored)\b|you never (gave|told|answered|named|replied|said|picked)|you (didn'?t|did not|haven'?t|have not) (answer|reply|respond|say|give|tell|name|pick|get back)|why (didn'?t|haven'?t|won'?t|wouldn'?t) you|did you forget|left me on read)/i;
 // A guess about them stated as fact. Say what they said, or ask.
-export const ASSUMING = /\b(sounds like you('re| are| have| must)|you must (be|have|feel)|you seem( to be)?|seems like you|you('re| are) (clearly|obviously|probably))\b/i;
+export const ASSUMING = /\b(sounds like you('re| are| have| must)|sounds like something('s| is) (bugging|bothering|frustrating|stressing|eating|getting to) you|you must (be|have|feel)|you seem( to be)?|seems like you|you('re| are) (clearly|obviously|probably))\b/i;
 
 // Reasoning written as if nobody's reading: the user in the third person, the agent narrating its own plan or
 // state, or a stage direction. Every word goes to them as a text, so these sentences never go out.
