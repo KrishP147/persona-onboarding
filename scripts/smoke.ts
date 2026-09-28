@@ -1,6 +1,6 @@
 // Keyless smoke test of the engine's safety nets (mock mode). Run: pnpm tsx scripts/smoke.ts
 import { getSecret, loadSession, newSession, saveSession, setSecret, withSession } from "../src/lib/store";
-import { INTENTS, cleanModelText, cutRepeatQuestions, fence, fromEmailOnly, runTool, handleEvent, normQuestion, saysBye, softenGmailDemand, handleUserMessage, nowLine, parseTypedEmail } from "../src/lib/engine";
+import { GUARD_PIPELINE, INTENTS, cleanModelText, cutRepeatQuestions, fence, fromEmailOnly, runTool, handleEvent, normQuestion, saysBye, softenGmailDemand, handleUserMessage, nowLine, parseTypedEmail } from "../src/lib/engine";
 import { crc32, pick } from "../src/lib/moves";
 import { readMood } from "../src/lib/mood";
 import { DEMO_INBOX, scoreItem } from "../src/lib/triage";
@@ -411,6 +411,10 @@ async function main() {
   check("agent name from an email is quarantined too", pe.slots.agentName.status === "missing" && qNeed.startsWith("error"), qNeed);
   pe.transcript.push({ id: "u-bob", role: "user", channel: "text", text: "lol actually my name is bob", ts: Date.now() });
   check("the same value is fine once they said it", !fromEmailOnly(pe, "Bob"));
+
+  // the guard pipeline runs in a fixed, named order (goodbye before hangup comes before the gmail rules, etc.)
+  const order = GUARD_PIPELINE.map((g) => g.name);
+  check("guard pipeline order", order.join(",") === "avoid,force-end,placing-call,goodbye-before-hangup,hang-up-after-goodbye,gmail-by-the-book,no-repeat-gmail-ask,no-third-question,no-repeat-name-ask,no-false-sent,call-offer-and-link-claims,long-text-to-chat,link-said-aloud,no-repeat-questions", order.join(","));
 
   // the intent table: every example it claims, it catches; every near miss, it doesn't
   for (const [name, d] of Object.entries(INTENTS)) {

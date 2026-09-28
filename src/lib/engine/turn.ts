@@ -8,12 +8,12 @@ import { connectDemo } from "../google";
 import { EVENT_MOVES, chooseMove, markUsed, withAngle } from "../moves";
 import { applyExtracted, extract } from "../extract";
 import { webEnabled } from "../web";
-import { type Move } from "../types";
+
 import { currentMeter, metered, percentile, recordTurn, type Meter } from "../usage";
 import { type Ctx, emitAgentText, goodbyeLine, guard, msg, outageLine } from "./context";
-import { CALL_NO, CLEAR_BYE, DELEGATE, DEMO_YES, GMAIL_TROUBLE, HOLD, INSULT_NAME, LAUGH, NAME_ASK, NAME_HINT, NEGATED_CALL, NOT_A_NAME, NO_CALLS, OFFERED_CALL, OWN_NAME, SEND_CMD, SEND_REQUEST, SENT_Q, SKIP_SETUP, THANKS, USER_BYE, WAITING_ON_THEM, WANTS_OUT, YES, asTurnBy, asksForLink, gmailConsent, lastUserText, saidNow, saysBye, userWrappingUp } from "./intents";
-import { CLAIMS_LINK, CLAIMS_SENT, GOODBYE, LAUGH_LEAD, SENTENCE_BREAK, capSentences, cleanModelText, dropDraftEcho, fence, nowLine, parseTypedEmail } from "./text";
-import { GMAIL_ASKISH, GMAIL_ASK_MARK, GMAIL_PITCH, gmailAsk, linkPending, noRepeatQuestions, rememberQuestions, sealGoodbye, softenGmailDemand } from "./guards";
+import { CALL_NO, CLEAR_BYE, DELEGATE, DEMO_YES, GMAIL_TROUBLE, HOLD, INSULT_NAME, LAUGH, NAME_ASK, NAME_HINT, NEGATED_CALL, NOT_A_NAME, NO_CALLS, OFFERED_CALL, OWN_NAME, SEND_CMD, SEND_REQUEST, SENT_Q, SKIP_SETUP, THANKS, USER_BYE, WAITING_ON_THEM, WANTS_OUT, YES, asTurnBy, asksForLink, gmailConsent, lastUserText, saidNow, saysBye } from "./intents";
+import { LAUGH_LEAD, cleanModelText, dropDraftEcho, fence, nowLine, parseTypedEmail } from "./text";
+import { GMAIL_ASK_MARK, GUARD_PIPELINE, type GuardEnv, type TurnOpts, rememberQuestions, sealGoodbye } from "./guards";
 import { LOOKUP_TOOLS, MAX_TOOL_ROUNDS, TERMS_LINK, TOOLS, WEB_TOOLS, gifAllowed, makeGif, runTool, saveDraftTool, sendEmailTool } from "./tools";
 import { handleEvent } from "./events";
 
@@ -110,20 +110,13 @@ export async function turn(
   channel: Channel,
   extraInstruction?: string,
   fallback?: string,
-  opts: { forceEnd?: boolean; move?: Move; avoid?: RegExp; soft?: boolean } = {},
+  opts: TurnOpts = {},
 ): Promise<TurnResult> {
   const resendOk = /\b(resend|send (it|the link) again|another link|new link|lost the link)\b/i.test(saidNow(s));
   const ctx: Ctx = { s, channel, actions: [], newMessages: [], resendOk, move: opts.move, allowEnd: !!opts.forceEnd, softInstruction: opts.soft };
   let text = "";
   let failed = false;
   if (s.turnBy === "event" && (USER_BYE.test(lastUserText(s)) || WANTS_OUT.test(lastUserText(s)) || SEND_REQUEST.test(lastUserText(s)))) guard(ctx, "ignored: not user-said");
-  // Swap in a guarded version of the reply, and name the guard only if it changed something.
-  const fix = (label: string, next: string) => {
-    if (next !== text) {
-      text = next;
-      guard(ctx, label);
-    }
-  };
   try {
     // Model latency: request to full reply, tool rounds included (a failed call isn't timed).
     const t0 = Date.now();
@@ -157,97 +150,18 @@ export async function turn(
       ctx.actions.push({ type: "end_call", final: true });
     }
   }
-  // Some things must never be said in this moment (e.g. "got cut off" after we hung up ourselves).
-  if (opts.avoid && fallback && opts.avoid.test(text)) fix("blocked a line not allowed here", fallback);
-  if (opts.forceEnd && !ctx.actions.some((a) => a.type === "end_call")) ctx.actions.push({ type: "end_call" });
-  // Placing a call: the text is just the heads up; the talking happens on the call.
-  if (channel === "text" && ctx.actions.some((a) => a.type === "start_call")) {
-    text = "calling you now.";
-    ctx.move = EVENT_MOVES.callNow;
-  }
-  if (channel === "voice" && ctx.actions.some((a) => a.type === "end_call") && !GOODBYE.test(text)) {
-    fix("goodbye added before hangup", `${text.trim()} ${goodbyeLine(s)}`.trim());
-  }
-  // Said goodbye on a call but didn't hang up: hang up (a silence prompt after "bye" is the worst).
-  if (channel === "voice" && s.call.active && !failed && GOODBYE.test(text) && userWrappingUp(s) && !ctx.actions.some((a) => a.type === "end_call")) {
-    ctx.actions.push({ type: "end_call" });
-    guard(ctx, "hung up after goodbye");
-  }
-  // Gmail, by the book: the gmail turn ends with the code-written question; other turns don't pitch it.
-  if ((!extraInstruction || ctx.softInstruction) && s.slots.gmail.status === "missing" && !ctx.newMessages.some((m) => m.kind === "gmail_link")) {
-    const raisedIt = /\b(gmail|email|inbox|link)\b/i.test(saidNow(s));
-    const help = text.split(SENTENCE_BREAK).filter((x) => !GMAIL_PITCH.test(x) && !(ctx.move?.id === "ask-gmail" && /\b(without your (ok|okay)|won.?t send)/i.test(x))).join(" ").trim();
-    if (ctx.move?.id === "ask-gmail") {
-      // On a call: one sentence of help, then the ask, so the question is never cut off.
-      const lead = channel === "voice" ? capSentences(help.replace(/\?[^?]*$/, "."), 1) : help;
-      fix("gmail ask written by code", `${lead}${lead ? (channel === "voice" ? " " : "\n\n") : ""}${gmailAsk(s, channel)}`.trim());
-    }
-    else if (!raisedIt && help) fix("gmail pitch held for its own turn", help);
-    // Even when they brought up their inbox, gmail is never a demand ("first though, i'll need your gmail
-    // connected"): that line becomes the one polite, skippable ask (once, never while a link is out).
-    else if (ctx.move?.id !== "ask-gmail") fix("gmail demand softened", softenGmailDemand(s, channel, text));
-  }
-  // Already connected, declined, or the link is already sitting in their texts: no more gmail asks
-  // (the most common grader note: "repeated the gmail request after it was connected / agreed").
-  const linkWaiting = linkPending(s) && !ctx.newMessages.some((m) => m.kind === "gmail_link");
-  if ((s.slots.gmail.status !== "missing" || linkWaiting) && !/\b(gmail|google|link|connect)\b/i.test(saidNow(s))) {
-    const kept = text.split(SENTENCE_BREAK).filter((x) => !GMAIL_ASKISH.test(x)).join(" ").trim();
-    if (kept) fix("repeat gmail ask dropped", kept);
-  }
-  // On a call, never three questions in a row: after two, it just responds and lets them talk
-  // (a call went question, question, question, question...). The gmail ask is the one exception.
-  if (channel === "voice" && text.trim().endsWith("?") && ctx.move?.id !== "ask-gmail") {
-    const lastTwo = s.transcript.filter((m) => m.role === "agent" && m.channel === "voice" && m.move?.id !== "silence").slice(-2);
-    if (lastTwo.length === 2 && lastTwo.every((m) => m.text.trim().endsWith("?"))) {
-      const kept = text.split(SENTENCE_BREAK).filter((x) => !x.trim().endsWith("?")).join(" ").trim();
-      if (kept) fix("blocked a third question in a row", kept);
-    }
-  }
-  // Already named: never ask "what should i go by?" again (it did, on a call, right after being named).
-  if (s.slots.agentName.status === "filled" && NAME_ASK.test(text)) {
-    const kept = text.split(SENTENCE_BREAK).filter((x) => !NAME_ASK.test(x)).join(" ").trim();
-    if (kept) fix("blocked repeat name question", kept);
-  }
-  // "sent!" only if send_email actually went out this turn.
-  if (!ctx.sentEmail && !s.draft?.sent && SEND_REQUEST.test(saidNow(s)) && CLAIMS_SENT.test(text)) {
-    fix("blocked a false 'sent' claim", s.draft && !s.draft.sent ? "i haven't sent it yet. want me to send the draft above as is?" : "i haven't sent anything. want me to write it up as a draft first?");
-  }
-  const sentences = text.split(/(?<=[.!?])\s+|\n+/);
-  // An offer to call made in words counts as an offer (so it isn't repeated next turn).
-  const offerSentence = sentences.some((x) => x.trim().endsWith("?") && /\b(quick call|give you a (quick )?(call|ring)|hop on a (quick )?call|mind if i call|want me to call)\b/i.test(x) && !/\b(skip|no worries)\b/i.test(x));
-  if (channel === "text" && !s.call.active && offerSentence && !ctx.offeredCall) {
-    s.callOffers += 1;
-    if (s.phase === "intro") s.phase = "call_offered";
-  }
-  // Keep words and actions in sync: if it SAYS the link is in their texts (not asks whether to send it), it is.
-  const claimsLink = sentences.some((x) => CLAIMS_LINK.test(x) && !x.trim().endsWith("?") && !/\b(want me to|should i|can i|shall i)\b/i.test(x));
-  if (claimsLink && s.slots.gmail.status === "missing" && !ctx.newMessages.some((m) => m.kind === "gmail_link")) {
-    if (gmailConsent(s)) {
-      await runTool(ctx, "send_gmail_link", {});
-      guard(ctx, "sent the link it said it sent");
-    }
-    // Never say it's sent when it isn't: drop the claim instead of sending a link they didn't ask for.
-    else fix("dropped a false 'link sent' claim", sentences.filter((x) => !(CLAIMS_LINK.test(x) && !x.trim().endsWith("?"))).join(" ").trim() || text);
-  }
-  // On a call, a draft (or anything long) is for reading, not listening: post it to the chat and say so.
-  const looksLikeDraft = /---|\bsubject:|\bdear\b|\bhi \[|\[(landlord|name|recipient)[^\]]*\]/i.test(text) || text.length > 320;
-  if (channel === "voice" && !extraInstruction && looksLikeDraft && !ctx.newMessages.some((m) => m.kind !== "gmail_link" && m.role === "agent" && m.channel === "text")) {
-    const draft = text.replace(/^[^\n]*?(here'?s (something|a draft|one)[^:\n]*:|---)\s*/i, "").replace(/---/g, "").trim();
-    const posted = msg("agent", "text", draft);
-    ctx.newMessages.push(posted);
-    s.transcript.push(posted);
-    const isDraft = /---|\bsubject:|\bdear\b|\bhi \[|\[(landlord|name|recipient)[^\]]*\]/i.test(draft);
-    fix("long text moved to the chat", isDraft ? "okay, i put the draft in our chat. take a look and tell me what to change." : "that's a lot to say out loud, so i put it in our chat.");
-  }
-  // On a call, if the link just went to their texts, say so (the written ask alone isn't enough).
-  if (channel === "voice" && ctx.newMessages.some((m) => m.kind === "gmail_link") && !/\b(text|link)\b/i.test(text)) {
-    fix("said out loud that the link is in texts", `${text.trim()} i'm texting you the link right now. it's the card that says connect your google account, tap it whenever you're ready.`.trim());
-  }
-  // One question per message, and never one it already asked: a targeted rewrite on a miss, else the cut.
-  if (!usedFallback && ctx.move?.id !== "ask-gmail") {
-    const fixed = await noRepeatQuestions(s, text);
-    if (fixed.label) fix(fixed.label, fixed.text);
-  }
+  // Every post-model safety net, in order (guards.ts). Each names itself in Msg.guards when it changes the reply.
+  const env: GuardEnv = {
+    ctx, s, channel, text, failed, usedFallback, extraInstruction, fallback, opts,
+    fix(label, next) {
+      if (next !== env.text) {
+        env.text = next;
+        guard(ctx, label);
+      }
+    },
+  };
+  for (const step of GUARD_PIPELINE) await step.run(env);
+  text = env.text;
   rememberQuestions(s, text);
   // Ask bookkeeping: credit a question to the slot this turn's move was about (never the fallback line).
   const isQuestion = !usedFallback && text.includes("?");
