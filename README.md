@@ -1,5 +1,7 @@
 # persona onboarding
 
+[![CI](https://github.com/KrishP147/persona-onboarding/actions/workflows/ci.yml/badge.svg)](https://github.com/KrishP147/persona-onboarding/actions/workflows/ci.yml)
+
 an onboarding for a persona style personal assistant, built as a phone simulator in the browser: a text thread plus a voice call. it tries to learn four things (a name for the agent, a name for the user, a connected gmail, and something they need help with), gets the agent's name over text, and tries the rest over a call. mostly though, it tries to feel like meeting a genuinely helpful person, and to hold up when people don't play along.
 
 live: https://persona-onboarding-omega.vercel.app (chrome or edge for the call)
