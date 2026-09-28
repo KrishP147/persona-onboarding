@@ -63,6 +63,8 @@ export interface CallProps {
   held?: boolean;
   heldAt?: number | null;
   onHold?: () => void;
+  captions?: boolean; // live captions on the call screen (on by default)
+  onCaptions?: () => void;
   onHide?: () => void;
   unread?: number;
 }

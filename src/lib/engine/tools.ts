@@ -327,7 +327,7 @@ export async function runTool(ctx: Ctx, name: string, input: Record<string, unkn
       return readPage(String(input.url ?? "").trim());
     case "text_them": {
       // Same house style as any other text (no em dashes, no *emphasis*, no leaked notes).
-      const body = cleanModelText(String(input.text ?? ""), s.slots.userName.value).replace(/\s*[—]\s*/g, ", ").replace(/\*([^*\n]+)\*/g, "$1").trim().slice(0, 2000);
+      const body = cleanModelText(String(input.text ?? ""), s.slots.userName.value).replace(/\s*[—]\s*/g, ", ").replace(/\s+–\s+/g, ", ").replace(/\*([^*\n]+)\*/g, "$1").trim().slice(0, 2000);
       if (!body) return "error: nothing to post";
       const posted = msg("agent", "text", body);
       ctx.newMessages.push(posted);

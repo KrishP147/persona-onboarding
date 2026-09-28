@@ -6,6 +6,7 @@ import { PhoneIcon } from "./skins/shared";
 import { Thread, type WhyHooks, snippet } from "./Thread";
 import type { Chat } from "./useChat";
 import { MicTrouble } from "./MicTrouble";
+import { usePref } from "./usePref";
 import { useDark } from "@/components/ThemeToggle";
 
 // screen size (css px) and frame geometry per device, from phone-ui-spec.md section 0
@@ -165,6 +166,8 @@ export function PhoneScreen({
 export function CallPhone({ skin, chat, zoom }: { skin: Skin; chat: Chat; zoom: number }) {
   const { call } = chat;
   const S = skin;
+  // on by default; turning them off is remembered
+  const [captions, setCaptions] = usePref("persona-captions", true);
   return (
     <div className={`fixed inset-0 z-20 lg:static lg:z-auto ${chat.callHidden ? "hidden lg:block" : ""}`}>
       <DeviceFrame skin={skin} bp="lg" zoom={zoom} dark={skin.id === "pixel" ? undefined : true}>
@@ -191,6 +194,8 @@ export function CallPhone({ skin, chat, zoom }: { skin: Skin; chat: Chat; zoom: 
             held={call.held}
             heldAt={call.heldAt}
             onHold={call.toggleHold}
+            captions={captions}
+            onCaptions={() => setCaptions(!captions)}
           />
           <MicTrouble call={call} />
         </div>

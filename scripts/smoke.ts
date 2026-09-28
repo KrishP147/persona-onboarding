@@ -508,6 +508,11 @@ async function main() {
   await handleUserMessage(soNo, "text", "luna");
   await handleUserMessage(soNo, "text", "ok talk later");
   check("...but not before anything was asked for", soNo.phase !== "graduated", soNo.phase);
+  // never an em dash, and a spaced en dash (which reads as one) gets the same treatment; ranges keep theirs
+  const dashCtx = { s: newSession(), channel: "text" as const, actions: [], newMessages: [] as TurnResult["newMessages"] };
+  emitAgentText(dashCtx, "anything else – just text or call me. weather — sunny. highs 9–11");
+  const dash = dashCtx.newMessages.map((m) => m.text).join(" ");
+  check("no em dashes or spaced en dashes in replies", !/—| – /.test(dash) && /9–11/.test(dash), dash);
   const yo = newSession();
   await handleEvent(yo, { type: "open" });
   await handleUserMessage(yo, "text", "yo");

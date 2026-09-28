@@ -3,7 +3,7 @@
 // (globals.css): dark measured off the user's own pixel, light = gm3 baseline. see phone-ui-spec.md fidelity pass
 import type { CSSProperties, ReactNode } from "react";
 import type { BubbleProps, CallProps, ComposerProps, HeaderProps, Pos, RichCardProps, Skin, UnknownProps } from "./types";
-import { AGENT_NUMBER, BubbleBody, BubbleIcon, GoogleG, MicIcon, onComposerKeyDown, PauseIcon, PersonaLogo, PersonSilhouette, PhoneIcon, RecTimer, callLog, eventKind, isToday, time, useAutoGrow, useClock, useElapsed } from "./shared";
+import { AGENT_NUMBER, BubbleBody, BubbleIcon, GoogleG, CcIcon, MicIcon, onComposerKeyDown, PauseIcon, PersonaLogo, PersonSilhouette, PhoneIcon, RecTimer, callLog, eventKind, isToday, time, useAutoGrow, useClock, useElapsed } from "./shared";
 
 const C = {
   app: "var(--gm-app)",
@@ -451,7 +451,7 @@ function CallScreen(p: CallProps) {
           <div className="relative">{p.saved ? <PersonaLogo size={108} /> : <UnknownAvatar size={108} />}</div>
         </div>
       </div>
-      {p.status === "active" && !p.held && (
+      {p.status === "active" && !p.held && p.captions !== false && (
         <div className="mt-5 px-8 space-y-3 text-[15px] leading-[21px] text-center">
           {p.said && (
             <div data-caption="agent" className="text-[var(--gm-ink)]">
@@ -495,6 +495,14 @@ function CallScreen(p: CallProps) {
                   <MicIcon off={p.muted} size={24} />
                 </button>
                 <span className="text-[14px]" style={{ color: C.mute }} aria-hidden>{p.muted ? "Unmute" : "Mute"}</span>
+              </div>
+            )}
+            {p.onCaptions && p.status === "active" && (
+              <div className="flex flex-col items-center gap-2">
+                <button onClick={p.onCaptions} aria-pressed={p.captions !== false} aria-label={p.captions !== false ? "Turn captions off" : "Turn captions on"} className={oval} style={p.captions !== false ? { background: "var(--gm-call-on)", color: "var(--gm-call-on-ink)", borderRadius: 20 } : { background: "var(--gm-call-btn)" }}>
+                  <CcIcon size={24} />
+                </button>
+                <span className="text-[14px]" style={{ color: C.mute }} aria-hidden>Captions</span>
               </div>
             )}
             {p.onHold && p.status === "active" && (
