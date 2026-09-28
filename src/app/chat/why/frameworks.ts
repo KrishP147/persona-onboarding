@@ -62,7 +62,7 @@ export interface Turn {
 export function turnsOf(messages: Msg[]): Turn[] {
   return messages
     .filter((m) => m.role === "agent" && m.move)
-    .map((m, i) => ({ m, move: m.move!, fw: frameworkOf(m.move!), n: i + 1, guards: [...new Set((m as Msg & { guards?: string[] }).guards ?? [])] }));
+    .map((m, i) => ({ m, move: m.move!, fw: frameworkOf(m.move!), n: i + 1, guards: [...new Set(m.guards ?? [])] }));
 }
 
 export const PIPELINE: [string, string][] = [
