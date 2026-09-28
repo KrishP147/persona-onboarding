@@ -10,6 +10,8 @@ export const MASCULINE = /^(max|jack|james|john|mike|michael|david|daniel|sam|le
 // A whole message that's just laughter or thanks gets a gif back, no words (and no model call).
 export const LAUGH_TOKEN = "(?:(?:ha)+h?|(?:he){2,}|lo+l|lmao+|rofl|😂|🤣)";
 export const LAUGH = new RegExp(`^\\s*${LAUGH_TOKEN}(?:[!. ]*${LAUGH_TOKEN})*[!. ]*\\s*$`, "iu");
+// "lol ok" / "haha sure": the laugh is a reaction, the rest is the answer.
+export const LAUGH_LEAD = new RegExp(`^\\s*${LAUGH_TOKEN}[!., ]+`, "iu");
 export const THANKS = /^\s*(thanks|thank you|thx|ty|tysm|appreciate it)[!. ]*\s*$/i;
 
 // The phrases that hang up a call with no model involved (stricter than USER_BYE: no bare "later" or "i'm good").
@@ -138,6 +140,42 @@ export function hintedAgentName(text: string): string | null {
 // They're asking for the contact card ("send me the contact card", "where's your card", "it's not there").
 export const CARD_ASK = /\b(contact( card)?|your card|the card|ur card)\b/i;
 export const CARD_WANT = /\b(send|resend|share|where|didn'?t (get|see|send)|can'?t (find|see)|not there|missing|again)\b/i;
+// One typo away from "call" ("clal", "cal", "caal", "cll"): swaps, drops, extras, one wrong letter.
+function nearCall(w: string) {
+  const a = w.toLowerCase();
+  const b = "call";
+  // Starts with "c" like every real typo of it ("all", "tell", "calm" are other words).
+  if (a === b || a.length < 3 || a.length > 5 || a[0] !== "c") return a === b;
+  const d: number[][] = Array.from({ length: a.length + 1 }, (_, i) => Array.from({ length: b.length + 1 }, (_, j) => (i === 0 ? j : j === 0 ? i : 0)));
+  for (let i = 1; i <= a.length; i++)
+    for (let j = 1; j <= b.length; j++) {
+      d[i][j] = Math.min(d[i - 1][j] + 1, d[i][j - 1] + 1, d[i - 1][j - 1] + (a[i - 1] === b[j - 1] ? 0 : 1));
+      if (i > 1 && j > 1 && a[i - 1] === b[j - 2] && a[i - 2] === b[j - 1]) d[i][j] = Math.min(d[i][j], d[i - 2][j - 2] + 1);
+    }
+  return d[a.length][b.length] <= 1;
+}
+// "clal me" reads as "call me" for intent checks (only right before "me", so "cell" or "all" elsewhere stay put).
+export function fixCallTypos(text: string) {
+  return text.replace(/\b(\p{L}{3,5})(?=\s+me\b)/giu, (w) => (nearCall(w) ? "call" : w));
+}
+// "julia. my name is krish. call me": a bare first sentence answering "what do you want to call me?" is the name.
+export function firstSentenceName(text: string): string | null {
+  const parts = text.trim().split(SENTENCE_BREAK);
+  if (parts.length < 2) return null;
+  const m = parts[0].match(/^([\p{L}][\p{L}'-]{0,19})[.!,]?$/u);
+  if (!m || NOT_A_NAME.test(m[1])) return null;
+  return m[1].replace(/^\p{L}/u, (c) => c.toUpperCase());
+}
+// Their own name inside a longer message: "my name is krish", or a sentence that's just "i'm krish".
+export function ownNameIn(text: string): string | null {
+  const m =
+    text.match(/\bmy name(?:'s| is)\s+([\p{L}][\p{L}'-]{1,19})\b/iu) ??
+    // "you can call me krish" (never "call me now / back / please": that's a ring)
+    text.match(/\b(?:you can|u can|just|pls|please)?\s*call me\s+(?!(?:now|back|please|pls|plz|asap|right|real|quick|when|whenever|anytime|later|today|tomorrow|tonight|so|and|if|then|again|sometime|in|at|on|maybe|soon)\b)([\p{L}][\p{L}'-]{1,19})\b/iu) ??
+    text.split(SENTENCE_BREAK).map((x) => x.trim().match(OWN_NAME)).find(Boolean);
+  if (!m || NOT_A_NAME.test(m[1])) return null;
+  return m[1].replace(/^\p{L}/u, (c) => c.toUpperCase());
+}
 // A bare "send it" (not "send me the link"), and "did you send it?".
 export const SEND_CMD = /^\s*(ok(ay)?,? |yes,? |yeah,? |yep,? )?(please )?(send|send it|send that|send the (email|draft|message)|send it now|go ahead and send( it)?|ship it)( now| please)?[.! ]*$/i;
 export const SENT_Q = /\b(did (u|you) (send|sent)|was it sent|is it sent|has it (been )?sent|did it (go|send))\b/i;

@@ -5,14 +5,14 @@ import { mockReply } from "../mock";
 import { provider, runToolLoop, type Part, type Turn } from "../llm";
 import { recordOutcome } from "../triage";
 import { connectDemo } from "../google";
-import { EVENT_MOVES, chooseMove, markUsed, withAngle } from "../moves";
+import { EVENT_MOVES, chooseMove, markUsed, pick, withAngle } from "../moves";
 import { applyExtracted, extract } from "../extract";
 import { webEnabled } from "../web";
 
 import { currentMeter, metered, percentile, recordTurn, type Meter } from "../usage";
 import { type Ctx, emitAgentText, ensureCard, goodbyeLine, guard, msg, outageLine } from "./context";
-import { CALL_NO, CARD_ASK, CARD_WANT, CLEAR_BYE, DELEGATE, hintedAgentName, DEMO_YES, GMAIL_TROUBLE, HOLD, INSULT_NAME, LAUGH, NAME_ASK, NAME_HINT, NEGATED_CALL, NOT_A_NAME, NO_CALLS, OFFERED_CALL, OWN_NAME, SEND_CMD, SEND_REQUEST, SENT_Q, SKIP_SETUP, STOP_TALKING, THANKS, USER_BYE, WAITING_ON_THEM, WANTS_OUT, YES, asTurnBy, asksForLink, gmailConsent, lastUserText, saidNow, saysBye } from "./intents";
-import { LAUGH_LEAD, cleanModelText, dropDraftEcho, fence, nowLine, parseTypedEmail } from "./text";
+import { CALL_NO, CARD_ASK, LAUGH_LEAD, CARD_WANT, CLEAR_BYE, DELEGATE, firstSentenceName, fixCallTypos, hintedAgentName, ownNameIn, DEMO_YES, GMAIL_TROUBLE, HOLD, INSULT_NAME, LAUGH, NAME_ASK, NAME_HINT, NEGATED_CALL, NOT_A_NAME, NO_CALLS, OFFERED_CALL, OWN_NAME, SEND_CMD, SEND_REQUEST, SENT_Q, SKIP_SETUP, STOP_TALKING, THANKS, USER_BYE, WAITING_ON_THEM, WANTS_OUT, YES, asTurnBy, asksForLink, gmailConsent, lastUserText, saidNow, saysBye } from "./intents";
+import { cleanModelText, dropDraftEcho, fence, nowLine, parseTypedEmail } from "./text";
 import { GMAIL_ASK_MARK, GUARD_PIPELINE, type GuardEnv, type TurnOpts, rememberQuestions, sealGoodbye } from "./guards";
 import { LOOKUP_TOOLS, MAX_TOOL_ROUNDS, TERMS_LINK, TOOLS, WEB_TOOLS, gifAllowed, makeGif, runTool, saveDraftTool, sendEmailTool } from "./tools";
 import { handleEvent } from "./events";
@@ -341,9 +341,10 @@ export async function handleUserMessageInner(
   // They said yes to our call offer: ring now, the way persona does ("calling you now."), no model needed.
   const prevText = [...s.transcript].slice(0, -1).reverse().find((m) => m.role === "agent" && (!m.kind || m.kind === "text"));
   // Asking for a call is the answer; no need to confirm it back ("could we call?" -> ring).
+  const callText = fixCallTypos(clean);
   const asksForCall =
-    /\b(call me(?=\s*($|[.!?,]|(now|back|please|pls|plz|asap|right now|real quick|quick|when|whenever|anytime|later|today|tomorrow|so|and|if|then)\b))|(can|could|should|shall) (we|you) (call|hop on a call|do a call)|let'?s (call|hop on a call|do a call)|give me a (call|ring)|ring me|phone me|hop on a (quick )?call)\b/i.test(clean) &&
-    !NEGATED_CALL.test(clean);
+    /\b(call me(?=\s*($|[.!?,]|(now|back|please|pls|plz|asap|right now|real quick|quick|when|whenever|anytime|later|today|tomorrow|so|and|if|then)\b))|(can|could|should|shall) (we|you) (call|hop on a call|do a call)|let'?s (call|hop on a call|do a call)|give me a (call|ring)|ring me|phone me|hop on a (quick )?call)\b/i.test(callText) &&
+    !NEGATED_CALL.test(callText);
   // A short yes ("sure", "yeah call me") is a yes; "yes but u aren't listening..." is not (it rang once).
   const saidYesToOffer = !!prevText && OFFERED_CALL.test(prevText.text) && YES.test(clean.replace(LAUGH_LEAD, "")) && !/\bbut\b/i.test(clean) && (clean.trim().split(/\s+/).length <= 4 || /\b(call|ring)\b/i.test(clean));
   // "call me" instead of a name: they moved on without naming it, so it goes by the default (with its card).
@@ -361,7 +362,8 @@ export async function handleUserMessageInner(
       if (e) await applyExtracted(s, { ...e, agentName: null }, async () => {});
       const name = !hadName && s.slots.userName.status === "filled" ? s.slots.userName.value : null;
       ensureCard(ctx);
-      emitAgentText(ctx, name ? `nice to meet you ${name}! calling you now.` : "calling you now.");
+      const ring = pick(s, "call-now", ["sure, calling you now. it'll be quick and help get you set up.", "calling you now. quick one, just to get you set up.", "on it, calling you now. it won't take long."]);
+      emitAgentText(ctx, name ? `nice to meet you ${name}! ${ring}` : ring);
       return { session: s, newMessages: [userMsg, ...(early?.msgs ?? []), ...ctx.newMessages], chips: computeDirective(s, channel).chips, actions: ctx.actions };
     }
   }
@@ -544,12 +546,16 @@ export async function nameFirst(s: Session, channel: Channel, text: string, hear
   if (channel !== "text" || s.call.active || (s.slots.agentName.status !== "missing" && !s.agentNameDefaulted)) return null;
   if (s.lastAskedSlot !== "agentName" && !NAME_HINT.test(text)) return null;
   const e = await heard.catch(() => null);
-  const value = (e?.agentName ?? hintedAgentName(text))?.trim().replace(/\b\p{L}/gu, (c) => c.toUpperCase());
+  const value = (e?.agentName ?? hintedAgentName(text) ?? (s.lastAskedSlot === "agentName" ? firstSentenceName(text) : null))?.trim().replace(/\b\p{L}/gu, (c) => c.toUpperCase());
   if (!value || value.length > 30) return null;
   const ctx: Ctx = { s, channel, actions: [], newMessages: [] };
   if ((await runTool(ctx, "set_slot", { slot: "agentName", value })).startsWith("error")) return null;
   await Promise.all(ctx.pending ?? []);
-  const ack = msg("agent", "text", `${nameAck(value)} here's my contact card so you know it's me.`);
+  // "julia. my name is krish": their name gets said back in the same beat.
+  const theirs = s.slots.userName.status !== "filled" ? (e?.userName?.trim() || ownNameIn(text)) : null;
+  const meet = theirs && theirs.toLowerCase() !== value.toLowerCase() ? theirs.replace(/^\p{L}/u, (c) => c.toUpperCase()) : null;
+  if (meet) s.slots.userName = { ...s.slots.userName, value: meet, status: "filled", source: channel, updatedAt: Date.now() };
+  const ack = msg("agent", "text", `${nameAck(value)}${meet ? ` nice to meet you, ${meet.toLowerCase()}.` : ""} here's my contact card so you know it's me.`);
   s.transcript.push(ack);
   const msgs = [ack];
   if (ctx.newCard) {

@@ -1,6 +1,6 @@
 // Keyless smoke test of the engine's safety nets (mock mode). Run: pnpm tsx scripts/smoke.ts
 import { getSecret, loadSession, newSession, saveSession, setSecret, withSession } from "../src/lib/store";
-import { CLAIMS_LINK, GUARD_PIPELINE, INTENTS, cleanModelText, cutRepeatQuestions, fence, fromEmailOnly, runTool, handleEvent, normQuestion, saysBye, softenGmailDemand, handleUserMessage, nowLine, parseTypedEmail, MAX_BUBBLES, emitAgentText } from "../src/lib/engine";
+import { CLAIMS_LINK, GUARD_PIPELINE, fixCallTypos, INTENTS, cleanModelText, cutRepeatQuestions, fence, fromEmailOnly, runTool, handleEvent, normQuestion, saysBye, softenGmailDemand, handleUserMessage, nowLine, parseTypedEmail, MAX_BUBBLES, emitAgentText } from "../src/lib/engine";
 import { crc32, pick } from "../src/lib/moves";
 import { readMood } from "../src/lib/mood";
 import { DEMO_INBOX, scoreItem } from "../src/lib/triage";
@@ -583,6 +583,26 @@ async function main() {
   check("'you should see it pop up in your texts' counts as a link claim", /pop up in your texts/.test(claim) && CLAIMS_LINK.test(claim), claim);
   const metaWait = cleanModelText("The call's already ended. I'll wait for them to text back.");
   check("'i'll wait for them to text back' never goes out", !/wait for them/i.test(metaWait), metaWait);
+
+  // first message with everything in it: "julia. my name is krish. clal me" (a live retest)
+  const first = async (t: string) => {
+    const f = newSession();
+    await handleEvent(f, { type: "open" });
+    const r = await handleUserMessage(f, "text", t);
+    const lines = r.newMessages.filter((m) => m.role === "agent").map((m) => (m.kind === "contact_card" ? `[card:${m.text}]` : m.text));
+    return { f, r, lines, rang: r.actions.some((a) => a.type === "start_call") };
+  };
+  const fm = await first("julia. my name is krish. clal me");
+  const ackAt = fm.lines.findIndex((x) => /julia it is\. nice to meet you, krish/i.test(x));
+  const ringAt = fm.lines.findIndex((x) => /calling you now/.test(x));
+  check("'julia. my name is krish. clal me': both names in one beat, card, then it rings (no offer)", fm.f.slots.agentName.value === "Julia" && fm.f.slots.userName.value === "Krish" && ackAt >= 0 && fm.lines.includes("[card:Julia]") && ringAt > fm.lines.indexOf("[card:Julia]") && fm.rang && !fm.lines.some((x) => /want me to give you a (quick )?call/.test(x)), fm.lines.join(" | "));
+  for (const t of ["julia. i'm krish. cal me", "julia. my name is krish. caal me", "julia. my name is krish. call me pls", "julia. my name is krish. u can call me now"]) {
+    const v = await first(t);
+    check(`first-message call variant rings: "${t}"`, v.rang && v.f.slots.userName.value === "Krish" && v.lines.includes("[card:Julia]"), v.lines.join(" | "));
+  }
+  const nameOnly = await first("julia. you can call me krish");
+  check("'you can call me krish' is their name, not a ring", !nameOnly.rang && nameOnly.f.slots.userName.value === "Krish", nameOnly.lines.join(" | "));
+  check("typo'd call words", ["clal me", "cal me", "caal me", "cll me"].every((x) => fixCallTypos(x) === "call me") && fixCallTypos("tell me") === "tell me" && fixCallTypos("all me") === "all me", "");
 
   // the guard pipeline runs in a fixed, named order (goodbye before hangup comes before the gmail rules, etc.)
   const order = GUARD_PIPELINE.map((g) => g.name);

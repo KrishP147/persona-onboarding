@@ -1,4 +1,3 @@
-import { LAUGH_TOKEN } from "./intents";
 
 export function parseTypedEmail(text: string): { to: string; subject: string; body: string } | null {
   const lines = text.replace(/\*\*/g, "").split("\n");
@@ -138,8 +137,6 @@ export function nowLine(tz?: string, now = new Date()) {
   return `NOW: ${fmt("UTC")} UTC${tz ? `; their local time: ${fmt(tz)} (${tz})` : ""}. Use this for any question about today's date, the day, or the time anywhere (convert time zones from it); never guess the date.`;
 }
 
-// "lol ok" / "haha sure": the laugh is a reaction, the rest is the answer.
-export const LAUGH_LEAD = new RegExp(`^\\s*${LAUGH_TOKEN}[!., ]+`, "iu");
 
 // Fences: what the user typed, what tools returned, and what emails say reach the model inside tags, and the
 // prompt treats anything fenced as data, never instructions. Tag look-alikes inside the content are dropped,
