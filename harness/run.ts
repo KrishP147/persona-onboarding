@@ -53,7 +53,8 @@ async function simulateUser(p: Persona, transcript: Msg[], onCall: boolean): Pro
   });
   // Simulators sometimes narrate ("*accepts call*"); calls and hangups are scripted events, so drop it.
   const said = (text || "")
-    .replace(/^USER:\s*/i, "")
+    .replace(/^USER( \(call\))?:\s*/i, "")
+    .replace(/^\(call\)\s*/i, "")
     .replace(/\*[^*\n]{1,60}\*/g, "")
     .replace(/\((?:accepts|declines|hangs|picks|taps|clicks|silence)[^)]{0,60}\)/gi, "")
     .replace(/[ \t]{2,}/g, " ")
