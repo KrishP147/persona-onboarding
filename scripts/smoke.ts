@@ -513,6 +513,30 @@ async function main() {
   emitAgentText(dashCtx, "anything else – just text or call me. weather — sunny. highs 9–11");
   const dash = dashCtx.newMessages.map((m) => m.text).join(" ");
   check("no em dashes or spaced en dashes in replies", !/—| – /.test(dash) && /9–11/.test(dash), dash);
+  // the grader's "try to break it" list: mic blocked, reload mid-call, ring out, refuse gmail
+  const mb = newSession();
+  await handleEvent(mb, { type: "open" });
+  await handleUserMessage(mb, "text", "luna");
+  await handleEvent(mb, { type: "call_started" });
+  const mbR = await handleEvent(mb, { type: "mic_denied" });
+  check("mic blocked on the call: drops to text, no blame", !mb.call.active && /over text/.test(said(mbR)), said(mbR));
+  const rl = newSession();
+  await handleEvent(rl, { type: "open" });
+  await handleUserMessage(rl, "text", "luna");
+  await handleEvent(rl, { type: "call_started" });
+  const rlR = await handleEvent(rl, { type: "call_ended", reason: "error" });
+  check("reload mid-call: call closed, one text picks it back up", !rl.call.active && rlR.newMessages.filter((m) => m.role === "agent" && m.channel === "text" && !m.kind).length === 1, said(rlR));
+  const ro = newSession();
+  await handleEvent(ro, { type: "open" });
+  await handleUserMessage(ro, "text", "luna");
+  const roR = await handleEvent(ro, { type: "call_declined" });
+  check("declined or rang out: drops to text, no push-back", !ro.call.active && !/call/i.test(said(roR).replace(/keep it to text/, "")), said(roR));
+  const rg = newSession();
+  await handleEvent(rg, { type: "open" });
+  await handleUserMessage(rg, "text", "luna");
+  rg.transcript.push({ id: "a-rg", role: "agent", channel: "text", text: "want me to text you a link to connect your gmail? takes a few seconds", ts: Date.now() });
+  const rgR = await handleUserMessage(rg, "text", "no, i don't want to connect gmail");
+  check("refuse gmail: no link, marked declined", !rgR.newMessages.some((m) => m.kind === "gmail_link") && rg.slots.gmail.status === "declined", `${rg.slots.gmail.status} | ${said(rgR)}`);
   // "just let me in" is a skip; everything in one message (name, link, call) gets everything
   const lmi = newSession();
   await handleEvent(lmi, { type: "open" });

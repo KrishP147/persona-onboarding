@@ -32,7 +32,7 @@ function smokeLabels(src: string): Set<string> {
 }
 
 const SMOKE_LABELS = smokeLabels(smokeSrc);
-if (SMOKE_LABELS.size < 10) throw new Error(`only found ${SMOKE_LABELS.size} check() labels in ${SMOKE_PATH} — parser probably broke`);
+if (SMOKE_LABELS.size < 10) throw new Error(`only found ${SMOKE_LABELS.size} check() labels in ${SMOKE_PATH}: parser probably broke`);
 
 // ---------------------------------------------------------------------------------------
 // 2. Harness scores: parsed out of harness/ROUNDS.md's round table, not retyped by hand.
@@ -67,7 +67,7 @@ function parseRoundsTable(src: string): { headers: string[]; rows: PersonaRow[] 
     if (!persona) continue;
     rows.push({ persona, cells: cells.slice(1) });
   }
-  if (rows.length < 10) throw new Error(`${ROUNDS_PATH}: only parsed ${rows.length} persona rows — parser probably broke`);
+  if (rows.length < 10) throw new Error(`${ROUNDS_PATH}: only parsed ${rows.length} persona rows: parser probably broke`);
   return { headers, rows };
 }
 
@@ -83,7 +83,7 @@ function latestScoreFor(personaId: string): string {
     const isLastCol = i === row.cells.length - 1;
     if (isLastCol) return `${m[1]} (${round})`;
     const lastRaw = row.cells[row.cells.length - 1];
-    return `${m[1]} (${round}; ${ROUNDS.headers[row.cells.length - 1]} = ${lastRaw || "\u2014"})`;
+    return `${m[1]} (${round}; ${ROUNDS.headers[row.cells.length - 1]} = ${lastRaw || "-"})`;
   }
   return `no numeric score for "${personaId}" in ROUNDS.md`;
 }
@@ -128,8 +128,8 @@ function smokeCell(claim: SmokeClaim): string {
     }
     return claim.labels.map((l) => `\`${l}\``).join("<br>");
   }
-  if (claim.kind === "manual") return `manual — ${claim.note}`;
-  return `harness only — ${claim.note}`;
+  if (claim.kind === "manual") return `manual: ${claim.note}`;
+  return `harness only: ${claim.note}`;
 }
 
 // ---------------------------------------------------------------------------------------
@@ -155,17 +155,17 @@ const ROWS: Row[] = [
     persona: "hangup-early",
   },
   {
-    case: "decline the call",
-    expected: "no push-back, drops to text, keeps going without re-offering right away",
+    case: "decline the call, or let it ring out",
+    expected: "no push-back, drops to text, keeps going without re-offering right away (an unanswered ring times out after 30s and counts as a decline)",
     code: [{ file: "src/lib/engine/events.ts", symbol: "EVENT_HANDLERS.call_declined", pattern: /^  call_declined: async /m }],
-    smoke: { kind: "manual", note: "no smoke test drives the call_declined SessionEvent directly" },
+    smoke: { kind: "checks", labels: ["declined or rang out: drops to text, no push-back", "second decline doesn't re-ask 'what's on your mind?'"] },
     persona: "call-refuser",
   },
   {
     case: '"skip, just let me in"',
     expected: "setup ends immediately, the request is answered in the same turn, no more slot questions",
     code: [{ file: "src/lib/engine/intents.ts", symbol: "SKIP_SETUP", pattern: /const SKIP_SETUP = / }],
-    smoke: { kind: "manual", note: "smoke only exercises graduation persistence after phase is set by hand, not the SKIP_SETUP text match itself" },
+    smoke: { kind: "checks", labels: ["'just let me in' graduates", "'no just do what i asked' graduates"] },
     persona: "skipper",
   },
   {
@@ -228,6 +228,37 @@ const ROWS: Row[] = [
     code: [{ file: "src/lib/prompt.ts", symbol: "\"Reply in the user's language.\"", pattern: /Reply in the user's language\./ }],
     smoke: { kind: "manual", note: "language switching is prompt-only; smoke.ts runs in mock mode with no model to exercise it" },
     persona: "gibberish-spanish",
+  },
+  {
+    case: "block the microphone",
+    expected: "no blame, the call closes and the conversation carries on over text",
+    code: [{ file: "src/lib/engine/events.ts", symbol: "EVENT_HANDLERS.mic_denied", pattern: /^  mic_denied: async /m }],
+    smoke: { kind: "checks", labels: ["mic blocked on the call: drops to text, no blame"] },
+    persona: null,
+  },
+  {
+    case: "reload the page mid-call",
+    expected: "the client tells the server the call dropped; the call closes and one text picks the thread back up",
+    code: [
+      { file: "src/app/chat/useChat.ts", symbol: "boot: a call can't survive a reload", pattern: /a call can't survive a reload/ },
+      { file: "src/lib/engine/events.ts", symbol: "EVENT_HANDLERS.call_ended", pattern: /^  call_ended: async /m },
+    ],
+    smoke: { kind: "checks", labels: ["reload mid-call: call closed, one text picks it back up"] },
+    persona: null,
+  },
+  {
+    case: "give everything in one message",
+    expected: "every part is acted on: the name and its card, the gmail link, and the call",
+    code: [{ file: "src/lib/engine/turn.ts", symbol: "linkToo (link sent with the ring)", pattern: /const linkToo = / }],
+    smoke: { kind: "checks", labels: ["all in one message: card, gmail link and the call"] },
+    persona: "info-dump",
+  },
+  {
+    case: "refuse to connect gmail",
+    expected: "no link, marked declined, never pushed again; everything else keeps working",
+    code: [{ file: "src/lib/engine/turn.ts", symbol: "gmail declined on a no", pattern: /s\.slots\.gmail\.status = "declined"/ }],
+    smoke: { kind: "checks", labels: ["refuse gmail: no link, marked declined"] },
+    persona: null,
   },
   {
     case: "rename the agent mid-conversation",
@@ -309,12 +340,12 @@ const lines = ROWS.map((r) => {
 
 const body = `# Stress matrix
 
-Generated by \`scripts/stress-matrix.ts\` from the actual source — never hand-edited. Every
+Generated by \`scripts/stress-matrix.ts\` from the actual source, never hand-edited. Every
 code reference is grepped against its file and every smoke label is parsed out of
 \`scripts/smoke.ts\` at generation time, so a claim here can't outlive the code it describes;
 regenerating this file after those files drift throws instead of writing something false.
 Harness scores come straight from \`harness/ROUNDS.md\`'s round table (see that
-file for methodology and caveats \u2014 it's LLM-graded, keyed, and never run against prod).
+file for methodology and caveats: it's LLM-graded, keyed, and never run against prod).
 
 Run \`pnpm stress-matrix\` to regenerate. CI fails if this file is out of date.
 
