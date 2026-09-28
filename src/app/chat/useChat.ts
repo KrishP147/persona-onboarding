@@ -123,10 +123,17 @@ export function useChat() {
   // read receipts for your own texts: sent, delivered, seen.
   const [receipts, setReceipts] = useState<Record<string, Receipt>>({});
   const setReceipt = (id: string, r: Receipt) => setReceipts((prev) => ({ ...prev, [id]: r }));
+  // "what do you know about me": the id of the user text that asked, so the what-i-know card can
+  // anchor right after that turn (see cards/KnowCard.tsx useGradSlot). in-memory only, not persisted.
+  const [knowAskId, setKnowAskId] = useState<string | null>(null);
   const apply = useCallback(
     (r: TurnResult, sentAt?: number) => {
       if (idRef.current && r.session.id !== idRef.current) return; // stale reply from another session
       setSession(r.session);
+      if (r.actions.some((a) => a.type === "show_know")) {
+        const last = r.session.transcript.findLast((m) => m.role === "user");
+        if (last) setKnowAskId(last.id);
+      }
       chanRef.current?.postMessage("sync");
       revealRef.current = revealRef.current
         .then(async () => {
@@ -446,6 +453,18 @@ export function useChat() {
     void sendEvent({ type: "forget_slot", slot });
   };
 
+  // draft card: edit in place (instant here, the server confirms and re-saves to gmail) or discard
+  const saveDraftEdit = (to: string, subject: string, body: string) => {
+    if (!session?.draft) return;
+    setSession({ ...session, draft: { ...session.draft, to: to.trim(), subject: subject.trim(), body: body.trim() } });
+    void sendEvent({ type: "draft_edit", to, subject, body });
+  };
+  const discardDraft = () => {
+    if (!session?.draft) return;
+    setSession({ ...session, draft: undefined });
+    void sendEvent({ type: "draft_discard" });
+  };
+
   // start over with a fresh session (keeps the old one server side, just forgets it here).
   const restart = () => {
     if (call.status === "active" || call.status === "connecting") call.hangUp("user_hangup");
@@ -522,6 +541,9 @@ export function useChat() {
     forgetSlot,
     restart,
     attachFiles,
+    knowAskId,
+    saveDraftEdit,
+    discardDraft,
   };
 }
 
