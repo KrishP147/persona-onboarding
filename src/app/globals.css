@@ -48,3 +48,53 @@ body {
   scrollbar-width: thin;
   scrollbar-color: #c7c7cc transparent;
 }
+
+/* phone skins: os type stacks (each skin sets its own; never the page's) */
+:root {
+  --font-ios: -apple-system, "SF Pro Text", "SF Pro", system-ui, var(--font-inter), "Helvetica Neue", Arial, sans-serif;
+  --font-android: "Google Sans Text", "Google Sans", var(--font-roboto-flex), Roboto, system-ui, sans-serif;
+  --font-samsung: "SamsungOne", "Samsung Sans", var(--font-inter), Roboto, system-ui, sans-serif;
+}
+
+/* status bar + home area: the real safe areas on a phone, the mock ones in a frame */
+.phone-screen {
+  --sb: env(safe-area-inset-top, 0px);
+  --sb-bottom: env(safe-area-inset-bottom, 0px);
+}
+@media (min-width: 640px) {
+  .phone-screen {
+    --sb: var(--sb-frame, 0px);
+    --sb-bottom: var(--sb-bottom-frame, 0px);
+  }
+}
+
+@keyframes sk-pulse {
+  0%, 100% { opacity: .35; }
+  40% { opacity: 1; }
+}
+@keyframes sk-bounce {
+  0%, 60%, 100% { transform: translateY(0); }
+  30% { transform: translateY(-3px); }
+}
+@keyframes sk-wave {
+  0%, 60%, 100% { transform: translateY(0); opacity: .5; }
+  30% { transform: translateY(-3px); opacity: 1; }
+}
+@keyframes sk-spin { to { transform: rotate(360deg); } }
+@keyframes sk-up { from { transform: translateY(100%); } to { transform: translateY(0); } }
+@keyframes sk-fade { from { opacity: 0; } to { opacity: 1; } }
+@keyframes sk-pop { from { transform: scale(.6); opacity: 0; } to { transform: scale(1); opacity: 1; } }
+
+.sk-pulse { animation: sk-pulse 1.2s ease-in-out infinite; }
+.sk-bounce { animation: sk-bounce 1.4s ease-in-out infinite; }
+.sk-wave { animation: sk-wave 1.3s ease-in-out infinite; }
+.sk-spin { animation: sk-spin 20s linear infinite; }
+.sk-pop { animation: sk-pop 150ms ease-out; }
+.sk-fade { animation: sk-fade 250ms ease-out; }
+.sk-sheet-ios { animation: sk-up 350ms cubic-bezier(.32, .72, 0, 1); }
+.sk-sheet-m3 { animation: sk-up 400ms cubic-bezier(.05, .7, .1, 1); }
+
+@media (prefers-reduced-motion: reduce) {
+  .sk-pulse, .sk-bounce, .sk-wave, .sk-spin, .sk-pop { animation: none; }
+  .sk-sheet-ios, .sk-sheet-m3 { animation: sk-fade 80ms linear; }
+}
