@@ -6,6 +6,7 @@ import { PhoneIcon } from "./skins/shared";
 import { Thread, type WhyHooks } from "./Thread";
 import type { Chat } from "./useChat";
 import { MicTrouble } from "./MicTrouble";
+import { useDark } from "@/components/ThemeToggle";
 
 // screen size (css px) and frame geometry per device, from phone-ui-spec.md section 0
 export const FRAMES: Record<SkinId, { w: number; h: number; screenW: number; screenH: number; x: number; y: number; r: number }> = {
@@ -27,7 +28,10 @@ export function useFrameZoom(skin: SkinId) {
 }
 
 // bp: where the frame appears (sm for the chat, lg for the call's second phone)
-export function DeviceFrame({ skin, bp, zoom, dark, children }: { skin: Skin; bp: "sm" | "lg"; zoom: number; dark?: boolean; children: ReactNode }) {
+// dark: the home indicator's ground; the call phone forces it, the chat phone follows the page theme
+export function DeviceFrame({ skin, bp, zoom, dark: forceDark, children }: { skin: Skin; bp: "sm" | "lg"; zoom: number; dark?: boolean; children: ReactNode }) {
+  const themeDark = useDark();
+  const dark = forceDark ?? themeDark;
   const f = FRAMES[skin.id];
   const vars = { "--fw": `${f.w}px`, "--fh": `${f.h}px`, "--sx": `${f.x}px`, "--sy": `${f.y}px`, "--sw": `${f.screenW}px`, "--sh": `${f.screenH}px`, "--sr": `${f.r}px`, "--zoom": zoom } as CSSProperties;
   const sm = bp === "sm";

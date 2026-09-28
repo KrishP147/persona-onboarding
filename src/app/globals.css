@@ -78,6 +78,86 @@ body {
   --font-samsung: "SamsungOne", "Samsung Sans", var(--font-inter), Roboto, system-ui, sans-serif;
 }
 
+/* ---------------------------------------------------------------------------------------------
+   per-skin palettes. each skin puts one class on its screen root (and its call screen root) and
+   reads only its own --<skin>-* vars; light on the class, dark under html[data-theme="dark"].
+   vars only here: ground/ink go on the root as tailwind classes (bg-[var(..)]) so they stay in the
+   utilities layer and can still be overridden.
+   sources + measurements: docs/design/phone-ui-spec.md "fidelity pass".
+   --------------------------------------------------------------------------------------------- */
+
+/* iphone: imessage on ios 26. hig 2025 system colors; light bubbles measured off apple press +
+   real screenshots; dark received bubble derived (no real ios 26 dark thread found) */
+.sk-ios {
+  --ios-bg: #ffffff;
+  --ios-ink: #000000; /* label */
+  --ios-gray: #8a8a8e; /* secondaryLabel on white */
+  --ios-gray3: #c7c7cc; /* systemGray3: chevrons */
+  --ios-placeholder: rgba(60, 60, 67, 0.3); /* tertiaryLabel */
+  --ios-blue: #0088ff; /* systemBlue */
+  --ios-red: #ff383c;
+  --ios-green: #34c759;
+  --ios-recv: #e9e9eb; /* measured, 3 refs agree */
+  --ios-recv-ink: #000000;
+  --ios-sent-ink: #ffffff;
+  /* real sent bubbles shade by screen height (measured #00b4fe top / #017efe bottom in press,
+     #2599fb / #0e8ffd real); we paint flat systemBlue, see .sk-ios-sent */
+  --ios-sent: #0088ff;
+  --ios-sep: rgba(60, 60, 67, 0.18); /* hairlines inside cards */
+  --ios-fill: rgba(0, 0, 0, 0.08); /* voice-note knob, progress track */
+  --ios-fill-ink: rgba(0, 0, 0, 0.45);
+  --ios-glass: rgba(255, 255, 255, 0.62);
+  --ios-glass-rim: rgba(255, 255, 255, 0.7);
+  --ios-glass-shadow: 0 1px 4px rgba(0, 0, 0, 0.1), 0 4px 16px -4px rgba(0, 0, 0, 0.08), inset 0 1px 0 rgba(255, 255, 255, 0.8);
+  --ios-field: rgba(255, 255, 255, 0.92);
+  --ios-field-rim: rgba(60, 60, 67, 0.08);
+  --ios-edge: 255, 255, 255; /* scroll-edge fade under the header (rgb triplet) */
+  --ios-info-bg: #f2f2f7;
+  --ios-info-ink: #3c3c43;
+  --ios-err-bg: #fff1f0;
+  --ios-err-ink: #c4271f;
+  --ios-avatar: linear-gradient(#a5abb8, #858994); /* monogram / unknown */
+  /* call screen: dark in both themes, like the phone app over a poster (not flipped below) */
+  --ios-call-bg: linear-gradient(#2c2c2e, #1c1c1e);
+  --ios-call-poster: radial-gradient(120% 70% at 50% 20%, #5b6270 0%, #2c2f36 55%, #17181c 100%);
+  --ios-call-glass: rgba(255, 255, 255, 0.14);
+  --ios-call-rim: rgba(255, 255, 255, 0.22);
+}
+html[data-theme="dark"] .sk-ios {
+  --ios-bg: #000000;
+  --ios-ink: #ffffff;
+  --ios-gray: #8d8d93; /* secondaryLabel (ebebf5 @ 60%) on black */
+  --ios-gray3: #48484a;
+  --ios-placeholder: rgba(235, 235, 245, 0.3);
+  --ios-blue: #0091ff;
+  --ios-red: #ff4245;
+  --ios-green: #30d158;
+  --ios-recv: #262628; /* between systemGray5 #2c2c2e and systemGray6 #1c1c1e; ios 13-18 measured #262629 */
+  --ios-recv-ink: #ffffff;
+  --ios-sent: #0091ff;
+  --ios-sep: rgba(84, 84, 88, 0.6); /* separator dark */
+  --ios-fill: rgba(255, 255, 255, 0.14);
+  --ios-fill-ink: rgba(255, 255, 255, 0.6);
+  --ios-glass: rgba(44, 44, 46, 0.62);
+  --ios-glass-rim: rgba(255, 255, 255, 0.12);
+  --ios-glass-shadow: 0 1px 4px rgba(0, 0, 0, 0.5), inset 0 1px 0 rgba(255, 255, 255, 0.1);
+  --ios-field: rgba(36, 36, 38, 0.86);
+  --ios-field-rim: rgba(255, 255, 255, 0.1);
+  --ios-edge: 0, 0, 0;
+  --ios-info-bg: #1c1c1e;
+  --ios-info-ink: rgba(235, 235, 245, 0.75);
+  --ios-err-bg: #3a1715;
+  --ios-err-ink: #ff6961;
+  --ios-avatar: linear-gradient(#6c6f78, #4b4d54);
+}
+/* sent bubble + its tail share this one fill. ios shades sent bubbles by screen height; a
+   background-attachment: fixed gradient would do it, but the phone screen is transformed
+   (translateZ) so chrome paints fixed as scroll and each bubble got its own banded gradient.
+   flat until a scroll-driven version is worth it */
+.sk-ios-sent {
+  background: var(--ios-sent);
+}
+
 /* status bar + home area: the real safe areas on a phone, the mock ones in a frame */
 .phone-screen {
   --sb: env(safe-area-inset-top, 0px);

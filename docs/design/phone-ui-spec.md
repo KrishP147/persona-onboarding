@@ -24,17 +24,17 @@ frame CSS: outer bezel `border-radius: calc(screen-radius + bezel)`, bezel 12 px
 
 ---
 
-## A1. iMessage skin (iOS 26 Liquid Glass) - light default, dark supported
+## A1. iMessage skin (iOS 26 Liquid Glass) - light + dark, follows the page theme
 
 ### colors
 
 | token | light | dark | note |
 |---|---|---|---|
 | screen bg | #FFFFFF | #000000 | [src HIG systemBackground convention] |
-| sent iMessage bubble | **#0088FF** | **#0091FF** | = iOS 26 systemBlue (HIG: 0,136,255 / 0,145,255) [src HIG]. real bubble has a very subtle vertical gradient (top ~4% lighter) [est]; optional `linear-gradient(#1A93FF,#0088FF)` |
+| sent iMessage bubble | **#0088FF** | **#0091FF** | = iOS 26 systemBlue (HIG: 0,136,255 / 0,145,255) [src HIG]. real bubbles shade by screen height (measured top #00B4FE -> bottom #017EFE press, #2599FB -> #0E8FFD device); we paint flat systemBlue, see fidelity pass |
 | sent SMS/RCS bubble | **#34C759** | **#30D158** | systemGreen [src HIG] |
 | sent text | #FFFFFF | #FFFFFF | |
-| received bubble | **#E9E9EB** | **#262628** | [est, community-measured] |
+| received bubble | **#E9E9EB** | **#262628** | light measured (3 refs agree); dark derived, no real iOS 26 dark thread found (see fidelity pass) |
 | received text | #000000 | #FFFFFF | |
 | secondary label (timestamps, Delivered) | #8A8A8E | #8D8D93 | [est ~ secondaryLabel] |
 | link in bubble | underline, same color as text in sent; #0088FF in received | | [est] |
@@ -56,7 +56,7 @@ font stack: `-apple-system, "SF Pro Text", "SF Pro", system-ui, "Helvetica Neue"
 |---|---|
 | back | glass circle **44x44** at left 16, top = statusbar+4; SF chevron.left 17 pt semibold, color label. unread count badge may sit right of the chevron inside a capsule [est] |
 | avatar | centered, **50** circle, top = statusbar+2 [est] |
-| name | directly below avatar in a glass capsule (h 22, px 10, radius 11), 12/600, followed by small `>` chevron 9 pt [est] |
+| name | directly below avatar in a glass capsule (h 28, px 12), **15/600**, followed by a small gray `>` chevron (measured: "2 People" pill 98x29 pt in apple press) |
 | right | FaceTime video glass circle 44x44, right 16 [est] |
 | total header height | ~ statusbar + **96** = 150 at 390 [est] |
 | glass material CSS | `background: rgba(255,255,255,.55); backdrop-filter: blur(20px) saturate(180%); border: .5px solid rgba(255,255,255,.6); box-shadow: 0 1px 3px rgba(0,0,0,.08), inset 0 1px 0 rgba(255,255,255,.7)`; dark: `rgba(40,40,42,.55)`, border rgba(255,255,255,.12) [est] |
@@ -102,8 +102,8 @@ font stack: `-apple-system, "SF Pro Text", "SF Pro", system-ui, "Helvetica Neue"
 ### composer (iOS 26)
 | element | value |
 |---|---|
-| plus | glass circle **36**, left 12, SF "plus" 17 pt, label color (was blue pre-iOS 26) [est] |
-| field | glass capsule, height **36** (grows to 5 lines), radius 18, left gap 8, right inset 12; placeholder **"iMessage"** (blue threads) / **"Text Message • SMS"** / **"Text Message • RCS"** (green), color #8A8A8E [est; iMessage placeholder long-standing] |
+| plus | glass circle **38** (measured 37.6), left 12, SF "plus" 17 pt, label color (was blue pre-iOS 26) |
+| field | glass capsule, height **38** (measured), full pill radius, no visible border, left gap 8, right inset 12; placeholder **"iMessage"** (blue threads) / **"Text Message • SMS"** / **"Text Message • RCS"** (green), color tertiaryLabel (measured #BCBCBC-#D0D0D0 on white) |
 | mic | inside field right: SF "mic" 17 pt gray; when text present replaced by send |
 | send | filled circle **28-30** in bubble color (#0088FF or green), white `arrow.up` 15 pt bold, inside field at right 4 [est] |
 | bottom padding | bar sits 8 above safe-area (34) -> field bottom at 42 from screen bottom with no keyboard [est] |
@@ -126,7 +126,7 @@ avatar: circle with gray gradient `linear-gradient(#A5ABB8,#858994)` + white per
 | top | caller name 34/41 400 (Large Title, SF Pro Display) centered at ~y 120; subtitle "mobile" / "Unknown Caller" / city 17 gray-white 70% |
 | unlocked incoming | two circles **75** dia: Decline red #FF383C left (x center 25%), Accept green #34C759 right (75%), glyphs phone.down.fill / phone.fill white 30; labels 13/18 white below, 8 gap. above them: two glass buttons "Remind Me" (clock) and "Message" (bubble) 44 circles with labels [src iDownloadBlog feature list] |
 | locked incoming | "slide to answer" glass track 300x75 radius 38 with green knob 64 [src behavior per SlashGear/Apple Support; dims est] |
-| in-call | 2x3 grid of glass circles **72**, gap 24/28: speaker, FaceTime, mute / more, **end (red)**, keypad; labels 12 below; timer "00:12" under name [est] |
+| in-call | 2x3 grid of glass circles **77** (measured; we use 76) with a 1 px light rim, ~42 pt apart: speaker, FaceTime, mute / more, **end (red)**, keypad; labels **15** below; timer "00:47" small ABOVE the name, name 34 bold [src apple press hold assist render] |
 | iOS 26 new | "Hold Assist", "Call Screening" for unknown callers (Screen Unknown Callers asks for name/reason before ringing) [src 9to5Mac] - nice hook for an unknown-number demo |
 
 ---
@@ -354,6 +354,62 @@ layout: `grid-template-columns: minmax(360px, 420px) 1fr` with phone centered in
 
 ---
 
+## fidelity pass (2026-09-27)
+
+each skin checked against real screenshots in light and dark. colors live as css vars on a per-skin class in `src/app/globals.css` (light on the class, dark under `html[data-theme="dark"]`); components only read `var(--<skin>-*)`, and the screen root takes its ground/ink as tailwind classes (`bg-[var(..)]`) so they stay in the utilities layer. side-by-sides (real left, ours right) are build artifacts, not in the repo.
+
+### iphone (iMessage, iOS 26)
+
+vars: `.sk-ios` on the chat screen root and on the call screen root, `--ios-*`. follows the page theme (was light only). references: apple newsroom iOS 26 press renders (thread, hold assist call), an idownloadblog device screenshot (light), macrumors device screenshots (dark, aurora chat background). **no real iOS 26 dark thread on a plain black ground was found** (searched apple support, macrumors, 9to5mac, idownloadblog); dark values are HIG dark system colors plus prior-iOS measurements, flagged below.
+
+diff -> fix
+
+| what differed | fix |
+|---|---|
+| hard-coded light colors everywhere (bubbles, glass, status bar ink, scroll-edge fade, banners, cards, rich theme) | all moved to `--ios-*`; real dark palette added; home indicator follows the theme (`DeviceFrame` in Phone.tsx reads `useDark()` unless `dark` is forced, as the call phone does) |
+| ~45 pt dead gap between header and first date stamp | thread top pad `sb+112` -> `sb+76`: "iMessage / Today" tucks under the name pill like the ref |
+| name pill 12 pt in a 24 pt capsule | 15/600 in a 28 pt capsule (measured) |
+| grouped gap 2, sender-change gap 9 | 3 and 10 (measured 4 / 10-11 pt) |
+| composer 36 pt, field with a gray border, placeholder secondaryLabel | 38 pt, no border (faint rim), placeholder tertiaryLabel |
+| sent bubble per-bubble `linear-gradient(#1A93FF,#0088FF)` with a flat tail (seam) | flat systemBlue shared by bubble + tail (`.sk-ios-sent`); the tail is now a clip-path box so it can share any fill |
+| call: timer under the name, 72 circles, 12 pt labels, no rim | timer above the name, name semibold, 76 circles + 1 px rim, 15 pt labels, 40 gap. button rows unchanged |
+
+left, and why
+
+- **sent gradient by screen height**: tried `background-attachment: fixed`. the phone screen is transformed (`translateZ(0)`, for the rounded clip), so chrome paints fixed as scroll and every bubble got its own banded gradient. doing it right needs a scroll-driven offset per bubble; not worth it for a ~15% lightness shift.
+- call background stays a dark gray gradient in both themes (real iOS paints the poster / blurred avatar; no default-poster reference). end button stays systemRed; the press render reads darker (#AC0401) through the glass tint.
+- header right button stays a phone (the ref shows FaceTime video) because it starts our voice call.
+- SF Pro is not on non-Apple machines; the stack falls back to Inter, which sets a touch wider.
+- link-preview / gmail card image areas stay light in dark (they are images).
+
+colors
+
+| token | light | dark | source |
+|---|---|---|---|
+| `--ios-bg` | #FFFFFF | #000000 | HIG systemBackground |
+| `--ios-ink` | #000000 | #FFFFFF | label |
+| `--ios-gray` (stamps, receipts, typing dots) | #8A8A8E | #8D8D93 | secondaryLabel over the ground (#3C3C43 / #EBEBF5 at 60%) |
+| `--ios-placeholder` | rgba(60,60,67,.3) | rgba(235,235,245,.3) | tertiaryLabel |
+| `--ios-blue`, `--ios-sent` | #0088FF | #0091FF | HIG systemBlue (2025) |
+| `--ios-recv` | #E9E9EB | #262628 | light measured; dark **derived**: between systemGray5 #2C2C2E and systemGray6 #1C1C1E, equal to the long-measured iOS 13-18 value (#262629), 15:1 with white text |
+| `--ios-red`, `--ios-green` | #FF383C, #34C759 | #FF4245, #30D158 | HIG 2025 |
+| `--ios-glass` | rgba(255,255,255,.62) | rgba(44,44,46,.62) | est; dark matches the macrumors dark header buttons |
+| `--ios-field` | rgba(255,255,255,.92) | rgba(36,36,38,.86) | est |
+| `--ios-sep` | rgba(60,60,67,.18) | rgba(84,84,88,.6) | separator |
+| `--ios-info-bg` / `-ink` | #F2F2F7 / #3C3C43 | #1C1C1E / rgba(235,235,245,.75) | systemGray6 |
+| `--ios-err-bg` / `-ink` | #FFF1F0 / #C4271F | #3A1715 / #FF6961 | est |
+| `--ios-call-*` | same in both themes | | the call screen is dark in both |
+
+sources
+
+- HIG color (2025 values): https://developer.apple.com/design/human-interface-guidelines/color
+- apple newsroom iOS 26 (thread + hold assist renders): https://www.apple.com/newsroom/2025/06/apple-elevates-the-iphone-experience-with-ios-26/
+- idownloadblog device screenshot: https://www.idownloadblog.com/2025/11/19/fix-imessage-background-not-changing/
+- macrumors dark screenshots: https://www.macrumors.com/guide/ios-26-messages-app/ (images.macrumors.com/article-new/2025/06/messages-live-translation.jpg, 2025/07/ios-26-messages-select-copy-paste.jpg)
+- 9to5mac typing indicator: https://9to5mac.com/2026/01/12/ios-26s-messages-app-adds-five-great-new-group-chat-features/
+
+---
+
 ## sources
 - iPhone 16 sizes/insets: https://useyourloaf.com/blog/iphone-16-screen-sizes/
 - iPhone 17 sizes/insets: https://useyourloaf.com/blog/iphone-17-screen-sizes/
@@ -385,7 +441,7 @@ layout: `grid-template-columns: minmax(360px, 420px) 1fr` with phone centered in
 - Perplexity citation patterns: https://www.aiuxplayground.com/gallery/perplexity-citations/ , https://www.aydesign.ai/blog/ai-citation-source-ui-patterns-2026
 
 ## open gaps (verify with screenshots)
-- exact iMessage received gray, bubble padding, tail curve, iOS 26 header dims.
+- iMessage: dark received gray (derived, not measured); sent gradient endpoints; unlocked incoming call (no capture).
 - all Google Messages hexes (depend on dynamic color) and bubble radii.
 - all Samsung Messages values incl. current placeholder string.
 - call-screen button sizes on all three.
