@@ -2,7 +2,7 @@
 
 [![CI](https://github.com/KrishP147/persona-onboarding/actions/workflows/ci.yml/badge.svg)](https://github.com/KrishP147/persona-onboarding/actions/workflows/ci.yml)
 
-**live: https://persona-onboarding-omega.vercel.app** (chrome or edge for the call; the "why it said that" panel shows at 1280px and up)
+**live: https://persona-onboarding-gold.vercel.app** (chrome or edge for the call; the "why it said that" panel shows at 1280px and up)
 
 <!-- GIF placeholder: 20s loop of a text, the call, a hangup mid-sentence, and the recap text landing. record it last, save as docs/design/demo.gif, and add ![demo](docs/design/demo.gif) here. -->
 

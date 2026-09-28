@@ -1,6 +1,6 @@
 # loom script (5 minutes)
 
-open https://persona-onboarding-omega.vercel.app in chrome on a wide screen (the "why it said that" panel shows at 1280px and up). mute the call whenever you talk to the camera. have FUNNEL.md and STRESS_TESTS.md open in tabs.
+open https://persona-onboarding-gold.vercel.app in chrome on a wide screen (the "why it said that" panel shows at 1280px and up). mute the call whenever you talk to the camera. have FUNNEL.md and STRESS_TESTS.md open in tabs.
 
 ## 0:00 to 1:30: try to break it, live
 
