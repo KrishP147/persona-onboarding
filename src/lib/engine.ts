@@ -299,9 +299,15 @@ function gmailAsk(s: Session, channel: Channel = "text") {
 // Gmail pitches the model slips into other turns (help first, ask later).
 const GMAIL_PITCH = /\b(gmail|link|connect (your|my) (email|inbox|account)|read[- ]only|paste an email|without asking|pull up (your|the|those) (emails|inbox))\b/i;
 
+// "send me the link" counts unless that same sentence says not to ("i don't have to worry about..."
+// three sentences later once vetoed a clear "connect to my gmail").
+function asksForLink(text: string) {
+  return text.split(SENTENCE_BREAK).some((x) => WANTS_LINK.test(x) && !/\b(don'?t|do not|not|never)\b/i.test(x));
+}
+
 function gmailConsent(s: Session) {
   const text = lastUserText(s);
-  if (WANTS_LINK.test(text) && !/\b(don'?t|do not|no|not)\b/i.test(text)) return true;
+  if (asksForLink(text)) return true;
   const users = s.transcript.map((m, i) => (m.role === "user" ? i : -1)).filter((i) => i >= 0);
   const lastUser = users[users.length - 1] ?? -1;
   const prevAgent = s.transcript.slice(0, lastUser).reverse().find((m) => m.role === "agent" && (!m.kind || m.kind === "text"));
@@ -313,7 +319,7 @@ function gmailConsent(s: Session) {
 // A clear "skip setup" (not every "skip"): skip this / all of this / the setup / the rest / ahead.
 const SKIP_SETUP = /\b(skip (all (of )?)?(this|that|it|setup|the setup|the rest|ahead|the questions)|(forget|no more|enough) (the )?(setup|questions)|stop asking (me )?questions)\b/i;
 const SKIP_OFFER = /\b(skip|jump (right )?in|get (right )?started|start (on|with))\b/i;
-const YES = /^\s*(yes|yeah|yep|yup|sure|ok(ay)?|do it|please|go ahead|let'?s do it|sounds good|perfect)\b/i;
+const YES = /^\s*((oh|ah|um+|uh+|well|hmm+|haha)[,.!]?\s+)?(yes|yeah|yep|yup|sure|ok(ay)?|do it|please|go ahead|let'?s do it|sounds good|perfect)\b/i;
 
 function lastUserText(s: Session) {
   return [...s.transcript].reverse().find((m) => m.role === "user")?.text ?? "";
@@ -464,7 +470,8 @@ async function runTool(ctx: Ctx, name: string, input: Record<string, unknown>): 
     case "read_page":
       return readPage(String(input.url ?? "").trim());
     case "text_them": {
-      const body = String(input.text ?? "").trim().slice(0, 2000);
+      // Same house style as any other text (no em dashes, no *emphasis*, no leaked notes).
+      const body = cleanModelText(String(input.text ?? ""), s.slots.userName.value).replace(/\s*[—]\s*/g, ", ").replace(/\*([^*\n]+)\*/g, "$1").trim().slice(0, 2000);
       if (!body) return "error: nothing to post";
       const posted = msg("agent", "text", body);
       ctx.newMessages.push(posted);
@@ -593,7 +600,7 @@ const EMPTY_PROMISE = /\b(give me (a|one) (sec|second|moment|minute)|one sec(ond
 // the most recent message context..."). Only user-facing words ever go out; any sentence like this is dropped.
 const LEAK =
   /\b(the system|system (prompt|message|note|instruction)s?|my (instructions|prompt|guidelines)|(the|my) instructions (say|tell|are)|instructed to|message context|most recent message|(is|was|has been|have been) already sent|already been sent|tool (call|result|output)s?|function call|the (assistant|model)\b|language model|conversation (history|log)|the transcript|recap instruction|(i'?m|i am) (not )?(allowed|supposed|permitted) to|as per (my|the) (rules|instructions)|onboarding (step|flow|item)s?)\b/i;
-const META = /\b(i'?m waiting for|i should (stay|wait|remain|let|keep)|since (they|he|she|the user)|the user|i'?ll (stay quiet|wait (silently|quietly))|let them (check|speak|respond)|stay quiet|respond when ready|they haven'?t said)\b/i;
+const META = /\b(let me back up|i'?m waiting for|i should (stay|wait|remain|let|keep)|since (they|he|she|the user)|the user|i'?ll (stay quiet|wait (silently|quietly))|let them (check|speak|respond)|stay quiet|respond when ready|they haven'?t said)\b/i;
 
 // Talking ABOUT them instead of TO them ("I'll text Paul a quick message... letting him know...").
 const THIRD_PERSON = /\b(letting (him|her|them) know|acknowledging the|a quick message (to|for)|(text|message|ping|remind) (him|her)\b)/i;
@@ -997,7 +1004,7 @@ export async function handleUserMessage(
   let linkSent: Msg[] = [];
   let linkNote: string | undefined;
   const lastLinkAsk = [...s.transcript].slice(0, -1).reverse().find((m) => m.role === "agent" && (!m.kind || m.kind === "text"));
-  const askedForLink = WANTS_LINK.test(clean) && !/\b(don'?t|do not|not)\b/i.test(clean);
+  const askedForLink = asksForLink(clean);
   if (s.slots.gmail.status === "missing" && (askedForLink || (lastLinkAsk?.text.includes(GMAIL_ASK_MARK) && gmailConsent(s)))) {
     const ctx: Ctx = { s, channel, actions: [], newMessages: [] };
     const out = await runTool(ctx, "send_gmail_link", {});

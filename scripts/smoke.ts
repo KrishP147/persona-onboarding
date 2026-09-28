@@ -119,6 +119,8 @@ async function main() {
   check("meta talk about its own setup never goes out", leak === "", leak);
   const keep = cleanModelText("got it, krish. i'll keep an eye out. i have two time slots open tuesday.");
   check("normal replies survive the leak filter", keep.includes("keep an eye out") && keep.includes("time slots"), keep);
+  const drPatel = cleanModelText("hold on, you're covering a lot. let me back up real quick. got it, dr. patel on wednesday.");
+  check("'let me back up' dropped, 'dr.' isn't a sentence end", !/back up/.test(drPatel) && drPatel.includes("dr. patel on wednesday"), drPatel);
   const typed = parseTypedEmail("here's a draft:\n\nto: a@b.com\nsubject: late\n\nhi,\n\nrunning 10 min late.\n\nbest,\nkrish\n\nlet me know if you'd like any changes, or if you'd like me to send it.");
   check("typed email parsed, assistant chatter left out", typed?.to === "a@b.com" && typed.subject === "late" && typed.body === "hi,\n\nrunning 10 min late.\n\nbest,\nkrish", JSON.stringify(typed));
   check("a later \"send\" is not a name", !/send/i.test(filler.slots.agentName.value ?? "") && !cmd.newMessages.some((m) => m.kind === "contact_card"), said(cmd));
