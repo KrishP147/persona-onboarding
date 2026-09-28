@@ -1,7 +1,7 @@
 "use client";
 // google messages on android 16, material 3 expressive, dark. values from docs/design/phone-ui-spec.md A2
 import type { CSSProperties, ReactNode } from "react";
-import type { BubbleProps, CallProps, ComposerProps, HeaderProps, Pos, RichCardProps, Skin } from "./types";
+import type { BubbleProps, CallProps, ComposerProps, HeaderProps, Pos, RichCardProps, Skin, UnknownProps } from "./types";
 import { AGENT_NUMBER, BubbleBody, BubbleIcon, GoogleG, MicIcon, PersonaLogo, PersonSilhouette, PhoneIcon, RecTimer, callLog, eventKind, isToday, time, useClock, useElapsed } from "./shared";
 
 const C = {
@@ -367,6 +367,27 @@ function Banner({ tone, children }: { tone: "info" | "error"; children: ReactNod
   );
 }
 
+// google messages: unknown-sender card over the composer. its real row is add contact / report spam;
+// only add contact does something here, so the other slot dismisses
+function UnknownNotice({ onAdd, onDismiss }: UnknownProps) {
+  return (
+    <div className="mx-1 mt-4 mb-1 rounded-[20px] px-4 pt-3 pb-2" style={{ background: C.high, color: C.recvInk }} role="region" aria-label="Unknown sender">
+      <div className="text-[14px] leading-5 font-medium">Not in your contacts</div>
+      <div className="text-[12.5px] leading-[18px]" style={{ color: C.mute }}>
+        Add them to see their name when they text or call.
+      </div>
+      <div className="mt-1.5 flex justify-end gap-1">
+        <button type="button" onClick={onDismiss} className="h-10 px-4 rounded-full text-[14px] font-medium hover:bg-white/10" style={{ color: C.primary }}>
+          Dismiss
+        </button>
+        <button type="button" onClick={onAdd} className="h-10 px-4 rounded-full text-[14px] font-medium" style={{ background: C.primary, color: C.onPrimary }}>
+          Add contact
+        </button>
+      </div>
+    </div>
+  );
+}
+
 // m3 expressive "cookie": a 9-lobe scallop that turns slowly behind the photo
 function Cookie({ size, color }: { size: number; color: string }) {
   const n = 9;
@@ -488,6 +509,7 @@ export const pixel: Skin = {
   Media,
   UnknownAvatar,
   Banner,
+  UnknownNotice,
   CallScreen,
   RichCard,
   rich: { ink: C.recvInk, mute: C.mute, accent: C.primary, onAccent: C.onPrimary, line: "rgba(255,255,255,.1)", danger: C.error, track: "rgba(255,255,255,.14)" },

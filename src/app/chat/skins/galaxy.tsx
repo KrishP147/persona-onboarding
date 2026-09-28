@@ -1,7 +1,7 @@
 "use client";
 // samsung messages on one ui 8, light. values from docs/design/phone-ui-spec.md A3
 import type { CSSProperties, ReactNode } from "react";
-import type { BubbleProps, CallProps, ComposerProps, HeaderProps, Pos, RichCardProps, Skin } from "./types";
+import type { BubbleProps, CallProps, ComposerProps, HeaderProps, Pos, RichCardProps, Skin, UnknownProps } from "./types";
 import { AGENT_NUMBER, BubbleBody, BubbleIcon, GoogleG, MicIcon, PersonaLogo, PersonSilhouette, PhoneIcon, RecTimer, callLog, eventKind, time, useClock, useElapsed } from "./shared";
 
 const C = {
@@ -351,6 +351,24 @@ function Banner({ tone, children }: { tone: "info" | "error"; children: ReactNod
   );
 }
 
+// samsung messages: the unknown-number bar is "add to contacts | block". block has no meaning here,
+// so the bar keeps add to contacts and a close
+function UnknownNotice({ onAdd, onDismiss }: UnknownProps) {
+  return (
+    <div className="mx-1 mt-4 mb-1 rounded-[20px] flex items-stretch overflow-hidden" style={{ background: C.recv }} role="region" aria-label="Unknown sender">
+      <button type="button" onClick={onAdd} className="flex-1 h-12 text-[15px] font-semibold" style={{ color: C.accent }}>
+        Add to contacts
+      </button>
+      <span className="w-px my-3" style={{ background: "#E3E3E3" }} aria-hidden />
+      <button type="button" onClick={onDismiss} aria-label="Dismiss" className="w-14 h-12 flex items-center justify-center" style={{ color: C.mute }}>
+        <svg width="12" height="12" viewBox="0 0 12 12" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" aria-hidden>
+          <path d="M1.5 1.5l9 9M10.5 1.5l-9 9" />
+        </svg>
+      </button>
+    </div>
+  );
+}
+
 function CallScreen(p: CallProps) {
   const timer = useElapsed(p.startedAt);
   const state = p.muted ? "muted" : p.speaking ? "speaking" : p.listening ? "listening" : "";
@@ -453,6 +471,7 @@ export const galaxy: Skin = {
   Media,
   UnknownAvatar,
   Banner,
+  UnknownNotice,
   CallScreen,
   RichCard,
   rich: { ink: C.ink, mute: C.mute, accent: C.accent, onAccent: "#fff", line: "#EDEDF0", danger: C.red, track: "#EDEDF0" },

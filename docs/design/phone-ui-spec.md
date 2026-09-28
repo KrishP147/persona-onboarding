@@ -117,7 +117,7 @@ font stack: `-apple-system, "SF Pro Text", "SF Pro", system-ui, "Helvetica Neue"
 | missed call | NOT native in Messages. simulator liberty: centered system row `Missed Call · 9:41 AM` 11/13 gray with phone.down glyph red; or render a FaceTime-style card |
 
 ### unknown number (iOS)
-avatar: circle with gray gradient `linear-gradient(#A5ABB8,#858994)` + white person silhouette (glyph 60% of dia) [est]. header name = formatted number `+1 (416) 555-0134`. above composer: gray text row "This sender is not in your contacts. **Report Junk**" (blue link), 13/18 centered [est]. iOS 26 also filters into "Unknown Senders" list [src MacRumors].
+avatar: circle with gray gradient `linear-gradient(#A5ABB8,#858994)` + white person silhouette (glyph 60% of dia) [est]. header name = formatted number `+1 (416) 555-0134`. above composer: gray text row "This sender is not in your contacts. **Report Junk**" (blue link), 13/18 centered [est]. **sim:** Report Junk is dropped (it did nothing here); the blue action is **Dismiss** (hides the line for this conversation), and the line goes away once the contact card is saved. iOS 26 also filters into "Unknown Senders" list [src MacRumors].
 
 ### iOS 26 call screen (full-screen style)
 | element | spec [est unless noted] |
@@ -200,7 +200,7 @@ font stack: `"Google Sans Text", "Google Sans", "Roboto Flex", Roboto, system-ui
 | missed call | not native; use centered row with `phone_missed` 16 icon in error color + "Missed call · 9:41 AM" 12/16 |
 
 ### unknown number
-avatar: 40 circle, tonal color (M3 palette picked by hash of number, e.g. #7FCFFF bg w/ #003549 person glyph dark mode) with default `person` glyph [est]. header shows number `+1 416-555-0134` [est]. banner card above composer, radius 16: "Unknown sender" + **Report spam** / **Not spam** tonal buttons; links disabled until marked safe [est; long-standing GM behavior].
+avatar: 40 circle, tonal color (M3 palette picked by hash of number, e.g. #7FCFFF bg w/ #003549 person glyph dark mode) with default `person` glyph [est]. header shows number `+1 416-555-0134` [est]. banner card above composer, radius 16: "Unknown sender" + **Report spam** / **Not spam** tonal buttons; links disabled until marked safe [est; long-standing GM behavior]. **sim:** card keeps only working actions: **Add contact** (the contact card's save) and **Dismiss**.
 
 ### Pixel Phone call screen (M3E)
 | element | spec |
@@ -268,7 +268,7 @@ typography: SamsungOne / "One UI Sans" (not web-licensed) -> `"SamsungOne", "Sam
 - link preview: white card radius 18, image top, title 14/600, url 12 gray.
 - reactions: emoji pill under the bubble's bottom corner, white bg, 1 px #E3E3E3 border, h 22.
 - missed call: Samsung Messages doesn't log calls in thread; use centered gray row like above.
-- unknown number avatar: circle with light tinted bg (#E3E8F0) + gray person silhouette; header shows number as title; Samsung/Hiya "Suspected spam" red label possible under number.
+- unknown number avatar: circle with light tinted bg (#E3E8F0) + gray person silhouette; header shows number as title; Samsung/Hiya "Suspected spam" red label possible under number. real unknown-number bar under the header: "Add to contacts | Block". **sim:** "Add to contacts" (the contact card's save) + a close (x) that dismisses; block is dropped.
 - Samsung Phone incoming (One UI 8): name 32/600 center at ~y 180, number 16 gray, "Mobile · Canada" 13; bottom row: **green circle (accept) left, red circle (decline) right**, each dia 72, swipe outward any direction; bottom center pill "Send message" 13. In-call: 3x3 grid of 56 circular icon buttons (Record, Video call, Bluetooth, Speaker, Mute, Keypad, Hold, Add call...), end button red circle 72 centered bottom.
 
 ---

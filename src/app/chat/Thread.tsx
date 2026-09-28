@@ -6,6 +6,7 @@ import { DraftCard, draftMsgId } from "./cards/DraftCard";
 import { KnowCard, useGradSlot } from "./cards/KnowCard";
 import type { Pos, Skin } from "./skins/types";
 import type { Chat } from "./useChat";
+import { usePref } from "./usePref";
 import type { Turn } from "./why/frameworks";
 
 export interface WhyHooks {
@@ -38,6 +39,8 @@ export function Thread({ skin, chat, why, scrollRef }: { skin: Skin; chat: Chat;
   const readAt = thread.slice(lastUserIdx + 1).find((x) => x.role === "agent")?.ts;
   const S = skin;
   const grad = useGradSlot(chat, thread);
+  // "not in your contacts": dismissed once per conversation, gone for good once the contact is saved
+  const [dismissed, setDismissed] = usePref(`persona-unknown-dismissed:${session?.id ?? "new"}`, false);
   const gradAt = grad.at;
   const draftId = draftMsgId(session);
   const draftIdx = draftId ? thread.findIndex((m) => m.id === draftId) : -1;
@@ -101,7 +104,7 @@ export function Thread({ skin, chat, why, scrollRef }: { skin: Skin; chat: Chat;
       })}
       {gradAt === -1 && know}
       {(typing || revealing) && <S.Typing />}
-      {!chat.saved && S.UnknownNotice && thread.length > 0 && <S.UnknownNotice />}
+      {!session?.contactSaved && !dismissed && thread.length > 0 && <S.UnknownNotice onAdd={chat.saveContact} onDismiss={() => setDismissed(true)} />}
       <div ref={bottomRef} className="h-1" />
       {why.sheetOpen && <div className="h-[50%]" aria-hidden />}
       {(chat.offline || chat.error) && (

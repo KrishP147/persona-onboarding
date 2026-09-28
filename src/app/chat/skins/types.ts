@@ -39,6 +39,12 @@ export interface ComposerProps {
   onMic: () => void;
 }
 
+// unknown sender: only actions that work here (save = the contact card's save, dismiss hides it)
+export interface UnknownProps {
+  onAdd: () => void;
+  onDismiss: () => void;
+}
+
 export interface CallProps {
   saved: boolean;
   said: string;
@@ -95,7 +101,7 @@ export interface Skin {
   Media: FC<{ src: string }>;
   UnknownAvatar: FC<{ size: number }>;
   Banner: FC<{ tone: "info" | "error"; children: ReactNode }>;
-  UnknownNotice?: FC; // iphone: "not in your contacts" line over the composer
+  UnknownNotice: FC<UnknownProps>; // "not in your contacts" line/card over the composer, per os
   CallScreen: FC<CallProps>;
   RichCard: FC<RichCardProps>; // skin-native shell for rich cards in the thread
   rich: RichTheme;

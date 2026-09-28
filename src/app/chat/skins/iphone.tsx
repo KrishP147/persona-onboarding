@@ -1,7 +1,7 @@
 "use client";
 // imessage on ios 26 (liquid glass), light. values from docs/design/phone-ui-spec.md A1
 import type { CSSProperties, ReactNode } from "react";
-import type { BubbleProps, CallProps, ComposerProps, HeaderProps, Pos, RichCardProps, Skin } from "./types";
+import type { BubbleProps, CallProps, ComposerProps, HeaderProps, Pos, RichCardProps, Skin, UnknownProps } from "./types";
 import { AGENT_NUMBER, BubbleBody, BubbleIcon, GoogleG, MicIcon, PersonaLogo, PersonSilhouette, PhoneIcon, RecTimer, callLog, eventKind, isToday, time, useClock, useElapsed } from "./shared";
 
 const BLUE = "#0088FF";
@@ -378,12 +378,15 @@ function Banner({ tone, children }: { tone: "info" | "error"; children: ReactNod
   );
 }
 
-function UnknownNotice() {
+// ios: gray line + one blue action. report junk is gone (it did nothing here); dismiss hides the line
+function UnknownNotice({ onDismiss }: UnknownProps) {
   return (
     <div className="text-center text-[13px] leading-[18px] pt-5 pb-1" style={{ color: GRAY }}>
       This sender is not in your contacts.
       <br />
-      <span style={{ color: BLUE }}>Report Junk</span>
+      <button type="button" onClick={onDismiss} className="min-h-8 px-2" style={{ color: BLUE }}>
+        Dismiss
+      </button>
     </div>
   );
 }
