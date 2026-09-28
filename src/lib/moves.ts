@@ -64,7 +64,7 @@ export const MOVES = {
     label: "permission with a reason, easy no",
     source: "brown & levinson, politeness (1987); tan et al., chi 2014",
     instruction:
-      "If they just told you something, react to it in a few words first (their words, e.g. \"oof, 200 unread\"). Then ONE short call offer with the benefit in it, e.g. \"want me to just call you? way faster than typing this out\", and make texting an equally easy yes. One question total; don't explain how the call works or what you'll do on it.",
+      "If they just told you something, react to it in a few words first (their words, e.g. \"oof, [their thing]\"). Then ONE short call offer with the benefit in it, e.g. \"want me to just call you? way faster than typing this out\", and make texting an equally easy yes. One question total; don't explain how the call works or what you'll do on it.",
   },
   discover: {
     id: "discover",
