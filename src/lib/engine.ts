@@ -600,6 +600,11 @@ const EMPTY_PROMISE = /\b(give me (a|one) (sec|second|moment|minute)|one sec(ond
 // the most recent message context..."). Only user-facing words ever go out; any sentence like this is dropped.
 const LEAK =
   /\b(the system|system (prompt|message|note|instruction)s?|my (instructions|prompt|guidelines)|(the|my) instructions (say|tell|are)|instructed to|message context|most recent message|(is|was|has been|have been) already sent|already been sent|tool (call|result|output)s?|function call|the (assistant|model)\b|language model|conversation (history|log)|the transcript|recap instruction|(i'?m|i am) (not )?(allowed|supposed|permitted) to|as per (my|the) (rules|instructions)|onboarding (step|flow|item)s?)\b/i;
+// Promises it has no tool for: calling a business, booking, touching their inbox beyond reading and
+// drafting, or a deliverable "later" ("i'm calling dr. patel now", "flagging that email", "i'll pull the list together").
+// "i'll call you" is fine (that's us), so only third parties count.
+const CANT_DO =
+  /\b(i'?m|i am|i'?ll|i will|let me|going to|gonna)\s+(just\s+)?(call(ing)?|ring(ing)?|phon(e|ing)|dial(ing)?)\s+(them|their|the (dentist|doctor|office|restaurant|place|clinic|salon|hotel|shop|store)|dr\.?\s|[a-z]+'s\b)|\b(i'?m|i'?ll|i will|let me)\s+(book|reserv|flag|star|archiv|delet|unsubscrib|set(ting)? up (a )?(filter|reminder))\w*|\b(flagging|archiving|deleting) (that|it|this|the|those|them)\b|\bi'?ll (get|put|pull|have) (that|those|it|them|the|your)\b[^.!?]{0,40}\b(together|ready|over to you)\b/i;
 const META = /\b(let me back up|i'?m waiting for|i should (stay|wait|remain|let|keep)|since (they|he|she|the user)|the user|i'?ll (stay quiet|wait (silently|quietly))|let them (check|speak|respond)|stay quiet|respond when ready|they haven'?t said)\b/i;
 
 // Talking ABOUT them instead of TO them ("I'll text Paul a quick message... letting him know...").
@@ -617,7 +622,7 @@ export function cleanModelText(t: string, userName?: string | null) {
   const cleaned = t.replace(/\*\*([^*\n]+)\*\*/g, "$1").replace(/^#{1,4}\s+/gm, "").replace(TOOL_NAMES, " ").replace(STAGE_BRACKETS, keepFillIns).replace(/^\s*\[|\]\s*$/gm, "").replace(/[ \t]{2,}/g, " ").trim();
   return cleaned
     .split(/\n\s*\n/)
-    .map((b) => b.split(SENTENCE_BREAK).filter((x) => !META.test(x) && !LEAK.test(x) && !/\bSTATE\b/.test(x) && !EMPTY_PROMISE.test(x) && !narratesAbout(x, userName)).join(" "))
+    .map((b) => b.split(SENTENCE_BREAK).filter((x) => !META.test(x) && !LEAK.test(x) && !/\bSTATE\b/.test(x) && !EMPTY_PROMISE.test(x) && !CANT_DO.test(x) && !narratesAbout(x, userName)).join(" "))
     .filter((b) => b.trim())
     .join("\n\n")
     .trim();
@@ -670,7 +675,7 @@ function capSentences(text: string, max: number) {
 
 function emitAgentText(ctx: Ctx, raw: string) {
   // House style: no em dashes, no stage directions like "(waiting for reply)".
-  const text = stopAtRepeat(raw.replace(TOOL_NAMES, " ").replace(STAGE_BRACKETS, keepFillIns)).replace(/\s*[—]\s*/g, ", ").replace(/\((on call|said on the call|texted in the chat|posted in the chat)\)\s*/gi, "").replace(/^\s*\*?\([^)]*\)\*?\s*$/gm, "").trim();
+  const text = stopAtRepeat(raw.replace(TOOL_NAMES, " ").replace(STAGE_BRACKETS, keepFillIns)).replace(/\s*[—]\s*/g, ", ").replace(/\((?:[a-z]+ ){0,3}(?:on|in) (?:the |our )?(?:call|chat)\)\s*/gi, "").replace(/^\s*\*?\([^)]*\)\*?\s*$/gm, "").trim();
   // On a call, three sentences is already a lot to listen to; trim anything longer.
   const spoken = ctx.channel === "voice" ? capSentences(text.replace(/\n+/g, " ").trim(), 3) : text;
   // An email typed out in the reply stays one bubble (split per paragraph it read like several texts).
@@ -848,7 +853,11 @@ async function captureAgentName(s: Session, channel: Channel, text: string): Pro
   return { card: ctx.newCard, pending: ctx.pending ?? [] };
 }
 
-export async function handleUserMessage(
+export async function handleUserMessage(...args: Parameters<typeof handleUserMessageInner>): Promise<TurnResult> {
+  return sealGoodbye(args[0], await handleUserMessageInner(...args));
+}
+
+async function handleUserMessageInner(
   s: Session,
   channel: Channel,
   text: string,
@@ -1133,7 +1142,7 @@ function eventMsg(s: Session, text: string): Msg {
 
 export async function handleEvent(s: Session, e: SessionEvent): Promise<TurnResult> {
   const start = s.transcript.length;
-  const r = await handleEventInner(s, e);
+  const r = sealGoodbye(s, await handleEventInner(s, e));
   // Anything the event added to the transcript (e.g. "Call ended (12s)") goes out with the reply, in order.
   const added = s.transcript.slice(start);
   const updated = r.newMessages.filter((m) => !added.includes(m));
@@ -1146,6 +1155,16 @@ async function handleEventInner(s: Session, e: SessionEvent): Promise<TurnResult
   switch (e.type) {
     case "open": {
       if (s.transcript.length > 0) return idle(); // resume after refresh: no duplicate greeting
+// Last line of defense: whatever path hung up, a spoken goodbye went out first.
+function sealGoodbye(s: Session, r: TurnResult): TurnResult {
+  if (!r.actions.some((a) => a.type === "end_call")) return r;
+  if (r.newMessages.some((m) => m.role === "agent" && m.channel === "voice" && GOODBYE.test(m.text))) return r;
+  const ctx: Ctx = { s, channel: "voice", actions: [], newMessages: [], move: EVENT_MOVES.recap };
+  emitAgentText(ctx, goodbyeLine(s));
+  r.newMessages.push(...ctx.newMessages);
+  return r;
+}
+
       // Scripted, like Persona's real first text: who it is, what it does, the legal line, then the one ask.
       const intro = [
         msg("agent", "text", "Hey! I'm your new personal assistant"),
@@ -1220,7 +1239,8 @@ async function handleEventInner(s: Session, e: SessionEvent): Promise<TurnResult
         avoid: e.reason === "agent_ended" ? /\b(cut off|dropped|lost you|got disconnected)\b/i : undefined,
       });
       // A text always follows a call. If the model's recap got filtered to nothing, the code-written one goes out.
-      if (!r.newMessages.some((m) => m.role === "agent" && m.channel === "text" && !m.kind)) {
+      const recaps = r.newMessages.filter((m) => m.role === "agent" && m.channel === "text" && !m.kind);
+      if (!recaps.length) {
         const ctx: Ctx = { s, channel: "text", actions: [], newMessages: [], move: EVENT_MOVES.recap };
         emitAgentText(ctx, recapFallback(s, e.reason));
         r.newMessages.push(...ctx.newMessages);
@@ -1239,6 +1259,12 @@ async function handleEventInner(s: Session, e: SessionEvent): Promise<TurnResult
         ctx.actions.push({ type: "end_call" });
         return { session: s, newMessages: ctx.newMessages, chips: computeDirective(s, "voice").chips, actions: ctx.actions };
       }
+      } else if (recaps.length > 1) {
+        // Exactly one recap text: extra bubbles fold into the first.
+        recaps[0].text = recaps.map((m) => m.text).join(" ");
+        const extra = new Set(recaps.slice(1));
+        r.newMessages = r.newMessages.filter((m) => !extra.has(m));
+        s.transcript = s.transcript.filter((m) => !extra.has(m));
       // When the conversation has just run out, pick it back up gently instead of "still there?".
       const line = !heardThemThisCall(s)
         ? "hello? can you hear me okay?"
@@ -1351,7 +1377,9 @@ async function handleEventInner(s: Session, e: SessionEvent): Promise<TurnResult
         inboxNote = `Nothing in their unread mail looks urgent (no deadlines, money issues, or people waiting). Don't list emails or invent any. Just say it's connected and nothing needs them right now; you'll keep the rest for a digest.`;
         fallback = "gmail's connected. nothing urgent in there, i'll keep the rest for a digest.";
       }
-      return turn(s, s.call.active ? "voice" : "text", `Their Gmail just connected. ${inboxNote}`, fallback, t.interrupt ? { move: EVENT_MOVES.interrupt } : {});
+      // A promise made while they signed in ("i'll pull the shopping list together once it's done") comes first.
+      const waiting = "If you told them you'd do something once it connected (a list, a plan, a draft), deliver it now, in full, before anything else, and give the inbox item one short line after it.";
+      return turn(s, s.call.active ? "voice" : "text", `Their Gmail just connected. ${waiting} ${inboxNote}`, fallback, t.interrupt ? { move: EVENT_MOVES.interrupt } : {});
     }
     case "gmail_failed": {
       const cancelled = /access_denied|cancel/i.test(e.error);

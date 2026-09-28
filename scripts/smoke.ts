@@ -40,6 +40,8 @@ async function main() {
   await handleEvent(s, { type: "call_started" });
   const hang = await handleEvent(s, { type: "call_ended", reason: "user_hangup" });
   check("recap after user hangup", hang.newMessages.some((m) => m.role === "agent" && m.channel === "text"), said(hang));
+  const oneText = (r: TurnResult) => r.newMessages.filter((m) => m.role === "agent" && m.channel === "text" && !m.kind).length === 1;
+  check("exactly one recap text per call end", oneText(end) && oneText(hang), `${said(end)} || ${said(hang)}`);
 
   // rename mid-call keeps voice until next call
   const t = newSession();
@@ -121,6 +123,10 @@ async function main() {
   check("normal replies survive the leak filter", keep.includes("keep an eye out") && keep.includes("time slots"), keep);
   const drPatel = cleanModelText("hold on, you're covering a lot. let me back up real quick. got it, dr. patel on wednesday.");
   check("'let me back up' dropped, 'dr.' isn't a sentence end", !/back up/.test(drPatel) && drPatel.includes("dr. patel on wednesday"), drPatel);
+  const cant = cleanModelText("got it, next wednesday. i'm calling dr. patel right now. flagging that email for you. i'll get that list pulled together for you.");
+  check("promises it can't keep are dropped", cant === "got it, next wednesday.", cant);
+  const canCall = cleanModelText("i'll call you in a sec. i can't call the dentist from here yet, but here's a script.");
+  check("calling the user and honest can'ts survive", canCall.includes("call you") && canCall.includes("can't call the dentist"), canCall);
   const typed = parseTypedEmail("here's a draft:\n\nto: a@b.com\nsubject: late\n\nhi,\n\nrunning 10 min late.\n\nbest,\nkrish\n\nlet me know if you'd like any changes, or if you'd like me to send it.");
   check("typed email parsed, assistant chatter left out", typed?.to === "a@b.com" && typed.subject === "late" && typed.body === "hi,\n\nrunning 10 min late.\n\nbest,\nkrish", JSON.stringify(typed));
   check("a later \"send\" is not a name", !/send/i.test(filler.slots.agentName.value ?? "") && !cmd.newMessages.some((m) => m.kind === "contact_card"), said(cmd));
