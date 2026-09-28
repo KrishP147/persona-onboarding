@@ -64,7 +64,7 @@ the short version of the philosophy: the model talks, code decides. anything tha
 - `src/lib/engine.ts`: turns, tools, events, the goodbye and recap safety nets
 - `src/lib/llm.ts`: the model layer (gemini or claude)
 - `src/lib/triage.ts`: what in their inbox deserves an interruption, and logging whether it was acted on
-- `src/app/useVoiceCall.ts`: turn taking on the call (pauses, interruptions, silence, locked voice), deepgram and cartesia
+- `src/app/chat/useVoiceCall.ts`: turn taking on the call (pauses, interruptions, silence, locked voice), deepgram and cartesia
 - `src/app/api/voice/`: speech token and text to speech routes
 - `harness/`: the difficult users and the grader
 - `scripts/smoke.ts`: keyless checks
