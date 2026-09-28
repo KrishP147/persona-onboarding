@@ -2,6 +2,7 @@
 // the message list, drawn by the current skin. same order, grouping and receipts on every phone.
 import { Fragment, useEffect, useRef, type ReactNode, type RefObject } from "react";
 import type { Msg } from "@/lib/types";
+import { DraftCard, draftMsgId } from "./cards/DraftCard";
 import { KnowCard, useGradSlot } from "./cards/KnowCard";
 import type { Pos, Skin } from "./skins/types";
 import type { Chat } from "./useChat";
@@ -39,6 +40,7 @@ export function Thread({ skin, chat, why, scrollRef }: { skin: Skin; chat: Chat;
   const readAt = thread.slice(lastUserIdx + 1).find((x) => x.role === "agent")?.ts;
   const S = skin;
   const gradAt = useGradSlot(chat, thread);
+  const draftId = draftMsgId(session);
   const know = gradAt !== null && <KnowCard skin={skin} chat={chat} />;
 
   return (
@@ -57,6 +59,7 @@ export function Thread({ skin, chat, why, scrollRef }: { skin: Skin; chat: Chat;
         else if (m.kind === "gmail_link") body = <S.GmailCard pos={pos} connected={session?.slots.gmail.status === "filled"} onConnect={chat.connectGmail} />;
         else if (m.kind === "gif") body = <S.Media src={m.text} />;
         else if (m.kind === "link_preview") body = <S.LinkPreview url={m.text} pos={pos} />;
+        else if (m.id === draftId) body = <DraftCard skin={skin} chat={chat} />;
         else if (m.kind === "contact_card") body = <S.ContactCard name={m.text} pos={pos} saved={!!session?.contactSaved} onSave={chat.saveContact} />;
         else
           body = (
