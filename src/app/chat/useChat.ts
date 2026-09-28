@@ -127,6 +127,8 @@ export function useChat() {
   // "what do you know about me": the id of the user text that asked, so the what-i-know card can
   // anchor right after that turn (see cards/KnowCard.tsx useGradSlot). in-memory only, not persisted.
   const [knowAskId, setKnowAskId] = useState<string | null>(null);
+  // replying to one message (hover or swipe "reply"): shown above the composer until sent or cancelled
+  const [replyTo, setReplyTo] = useState<Msg | null>(null);
   const apply = useCallback(
     (r: TurnResult, sentAt?: number) => {
       if (idRef.current && r.session.id !== idRef.current) return; // stale reply from another session
@@ -337,13 +339,15 @@ export function useChat() {
   const send = async (text: string, extra?: { attachments: Attachment[] }) => {
     if (!idRef.current || (!text.trim() && pending.length === 0 && !extra)) return;
     const atts = extra?.attachments ?? pending;
+    const quoted = extra ? undefined : replyTo?.id;
     if (!extra) {
       setDraftState("");
       setPending([]);
+      setReplyTo(null);
     }
     // your own message lands right away, like any messaging app.
     const clientId = nanoid(10);
-    upsert([{ id: clientId, role: "user", channel: "text", text, ts: now(), ...(atts.length ? { attachments: atts } : {}) }]);
+    upsert([{ id: clientId, role: "user", channel: "text", text, ts: now(), ...(atts.length ? { attachments: atts } : {}), ...(quoted ? { replyTo: quoted } : {}) }]);
     setReceipt(clientId, "sent");
     // the request is on the server within a beat; if it fails, the message comes back out.
     const deliveredTimer = setTimeout(() => setReceipt(clientId, "delivered"), 350);
@@ -354,7 +358,7 @@ export function useChat() {
     if (call.status === "idle") clearRing();
     busyRef.current++;
     try {
-      const reply = await post<TurnResult>("/api/chat", { sessionId: idRef.current, channel: "text", text, attachments: atts, clientId, tz: localTz() });
+      const reply = await post<TurnResult>("/api/chat", { sessionId: idRef.current, channel: "text", text, attachments: atts, clientId, tz: localTz(), ...(quoted ? { replyTo: quoted } : {}) });
       clearTimeout(deliveredTimer);
       setReceipt(clientId, "seen"); // the agent has read it; its reply follows at a human pace
       apply(reply, sentAt);
@@ -549,6 +553,8 @@ export function useChat() {
     restart,
     attachFiles,
     knowAskId,
+    replyTo,
+    setReplyTo,
     saveDraftEdit,
     discardDraft,
   };

@@ -46,6 +46,7 @@ export interface Msg {
   attachments?: Attachment[];
   move?: Move; // which research-backed move produced this agent message (shown in the side panel)
   guards?: string[]; // safety nets in code that changed this reply this turn (shown in "why it said that")
+  replyTo?: string; // the message they swiped/hovered to reply to (its id)
   discarded?: boolean; // an email draft they threw away (the card shows it as one muted line)
 }
 
@@ -93,7 +94,7 @@ export interface Session {
   graduatedReason?: string;
   graduatedAt?: string; // ISO time setup ended (first time only), for the what-i-know card and setup time
   demoOffered?: boolean; // the sample inbox was offered (once) after google sign-in failed or stalled
-  nameCheck?: { value: string; as: "user" | "agent" }; // a bare name answered two open name questions: we leaned one way and asked which
+  nameCheck?: { value: string; as: "user" | "agent" | "confirm" }; // a bare name answered two open name questions: we leaned one way and asked which
   agentNameDefaulted?: boolean; // they skipped naming it: goes by "Persona" until they pick one
   emailSeen?: string[]; // email text the agent has seen (subjects, snippets): slot values found only here are quarantined
   metrics?: SessionMetrics; // per-session cost and model latency (src/lib/usage.ts meter)

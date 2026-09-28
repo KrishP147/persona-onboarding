@@ -1,6 +1,6 @@
 "use client";
 // the message list, drawn by the current skin. same order, grouping and receipts on every phone.
-import { Fragment, useEffect, useRef, type ReactNode, type RefObject } from "react";
+import { Fragment, useEffect, useRef, useState, type ReactNode, type RefObject } from "react";
 import type { Msg } from "@/lib/types";
 import { DraftCard, draftMsgId } from "./cards/DraftCard";
 import { KnowCard, useGradSlot } from "./cards/KnowCard";
@@ -20,6 +20,68 @@ export interface WhyHooks {
 }
 
 const TEN_MIN = 10 * 60 * 1000;
+
+// one line that stands for a message: in the reply bar and above a reply
+export function snippet(m: Msg) {
+  if (m.kind === "gif") return "GIF";
+  if (/^to:/i.test(m.text) && m.role === "agent") return `email draft: ${m.text.match(/^subject: (.*)$/im)?.[1] ?? "(no subject)"}`;
+  if (m.attachments?.length && !m.text.trim()) return m.attachments.map((a) => a.name).join(", ");
+  return m.text.replace(/\s+/g, " ").trim();
+}
+
+const ReplyGlyph = ({ size = 14 }: { size?: number }) => (
+  <svg width={size} height={size} viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+    <path d="M6.5 3.5 2.5 7.5l4 4" />
+    <path d="M2.5 7.5h6.5a4.5 4.5 0 0 1 4.5 4.5v.5" />
+  </svg>
+);
+
+// a message you can reply to: hover shows a reply button (mouse), a swipe right past ~56px replies (touch)
+function Replyable({ mine, onReply, children }: { mine: boolean; onReply: () => void; children: ReactNode }) {
+  const [dx, setDx] = useState(0);
+  const start = useRef<{ x: number; y: number } | null>(null);
+  const soft = { background: "color-mix(in srgb, currentColor 9%, transparent)" };
+  return (
+    <div
+      className="group relative"
+      onTouchStart={(e) => (start.current = { x: e.touches[0].clientX, y: e.touches[0].clientY })}
+      onTouchMove={(e) => {
+        const s = start.current;
+        if (!s) return;
+        const x = e.touches[0].clientX - s.x;
+        const y = e.touches[0].clientY - s.y;
+        // scrolling, not swiping
+        if (Math.abs(y) > Math.abs(x) && dx === 0) return void (start.current = null);
+        setDx(Math.max(0, Math.min(72, x)));
+      }}
+      onTouchEnd={() => {
+        if (dx >= 56) onReply();
+        setDx(0);
+        start.current = null;
+      }}
+      style={{ transform: dx ? `translateX(${dx}px)` : undefined, transition: dx ? "none" : "transform 200ms" }}
+    >
+      {dx > 0 && (
+        <span className="absolute left-0 top-1/2 -translate-y-1/2 -translate-x-8 flex h-7 w-7 items-center justify-center rounded-full" style={{ ...soft, opacity: Math.min(1, dx / 56) }} aria-hidden>
+          <ReplyGlyph />
+        </span>
+      )}
+      {children}
+      <button
+        type="button"
+        aria-label="Reply"
+        onClick={(e) => {
+          e.stopPropagation();
+          onReply();
+        }}
+        className={`absolute top-1/2 -translate-y-1/2 ${mine ? "left-3" : "right-3"} z-10 h-7 w-7 items-center justify-center rounded-full opacity-0 pointer-events-none flex [@media(hover:hover)]:group-hover:opacity-100 [@media(hover:hover)]:group-hover:pointer-events-auto focus-visible:opacity-100 focus-visible:pointer-events-auto transition-opacity`}
+        style={soft}
+      >
+        <ReplyGlyph />
+      </button>
+    </div>
+  );
+}
 
 export function Thread({ skin, chat, why, scrollRef }: { skin: Skin; chat: Chat; why: WhyHooks; scrollRef: RefObject<HTMLDivElement | null> }) {
   const { thread, typing, revealing, receipts, session } = chat;
@@ -45,6 +107,18 @@ export function Thread({ skin, chat, why, scrollRef }: { skin: Skin; chat: Chat;
   // the what-i-know card shows only at these two anchors (graduation, and any "what do you know" ask); never elsewhere
   const knowIdxs = new Set([grad.at, grad.knowAt].filter((i): i is number => i !== null));
   const know = <KnowCard skin={skin} chat={chat} setupMs={grad.setupMs} />;
+  const reply = (m: Msg) => {
+    chat.setReplyTo(m);
+    requestAnimationFrame(() => scrollRef.current?.closest(".phone-screen")?.querySelector<HTMLElement>("textarea, input[type=text]")?.focus());
+  };
+  // tapping the quote above a reply jumps back to the original, with a brief glow
+  const jumpTo = (id: string) => {
+    const el = scrollRef.current?.querySelector<HTMLElement>(`[data-msg-id="${id}"]`);
+    if (!el) return;
+    el.scrollIntoView({ block: "center", behavior: "smooth" });
+    el.animate([{ background: "color-mix(in srgb, currentColor 14%, transparent)" }, { background: "transparent" }], { duration: 1400, easing: "ease-out" });
+  };
+  const byId = new Map(thread.map((x) => [x.id, x]));
 
   return (
     <div ref={scrollRef} className={`relative flex-1 overflow-y-auto overscroll-contain ${skin.threadClass}`} role="log" aria-live="polite" aria-label="Messages">
@@ -68,6 +142,7 @@ export function Thread({ skin, chat, why, scrollRef }: { skin: Skin; chat: Chat;
         else if (m.kind === "contact_card") body = <S.ContactCard name={m.text} pos={pos} saved={!!session?.contactSaved} onSave={chat.saveContact} />;
         else
           body = (
+            <Replyable mine={m.role === "user"} onReply={() => reply(m)}>
             <S.Bubble
               m={m}
               mine={m.role === "user"}
@@ -78,7 +153,10 @@ export function Thread({ skin, chat, why, scrollRef }: { skin: Skin; chat: Chat;
               receipt={m.role === "user" && m.id === lastUserId ? (receipts[m.id] ?? "seen") : undefined}
               receiptAt={readAt}
             />
+            </Replyable>
           );
+        if (m.kind === "gif") body = <Replyable mine={m.role === "user"} onReply={() => reply(m)}>{body}</Replyable>;
+        const quoted = m.replyTo ? byId.get(m.replyTo) : undefined;
         return (
           <Fragment key={m.id}>
             <div
@@ -89,6 +167,22 @@ export function Thread({ skin, chat, why, scrollRef }: { skin: Skin; chat: Chat;
               className={turn ? "cursor-pointer" : undefined}
             >
               {showTime && <S.DateStamp ts={m.ts} first={i === 0} />}
+              {quoted && (
+                <button
+                  type="button"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    jumpTo(quoted.id);
+                  }}
+                  className={`flex w-full px-4 pt-1 text-[12px] leading-4 opacity-60 hover:opacity-90 ${m.role === "user" ? "justify-end" : "justify-start"}`}
+                  aria-label={`Replying to: ${snippet(quoted)}`}
+                >
+                  <span className="flex max-w-[75%] items-center gap-1 truncate">
+                    <ReplyGlyph size={12} />
+                    <span className="truncate">{snippet(quoted)}</span>
+                  </span>
+                </button>
+              )}
               {body}
             </div>
             {knowIdxs.has(i) && know}
