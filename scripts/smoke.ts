@@ -2,7 +2,7 @@
 import { getSecret, loadSession, newSession, saveSession, setSecret, withSession } from "../src/lib/store";
 import { CLAIMS_LINK, GUARD_PIPELINE, dropAskedQuestions, fixCallTypos, makeGuardEnv, INTENTS, cleanModelText, cutRepeatQuestions, fence, fromEmailOnly, runTool, handleEvent, normQuestion, saysBye, softenGmailDemand, handleUserMessage, nowLine, parseTypedEmail, MAX_BUBBLES, emitAgentText } from "../src/lib/engine";
 import { computeDirective } from "../src/lib/policy";
-import { KNOW_ASK, mergeGrowingUtterance, toTurns } from "../src/lib/engine/turn";
+import { KNOW_ASK, fixTypoInNeed, mergeGrowingUtterance, toTurns } from "../src/lib/engine/turn";
 import { crc32, pick } from "../src/lib/moves";
 import { readMood } from "../src/lib/mood";
 import { DEMO_INBOX, scoreItem } from "../src/lib/triage";
@@ -550,6 +550,16 @@ async function main() {
   const askId = lz.transcript.find((m) => m.role === "agent" && /what do you want to call me/i.test(m.text))?.id;
   await handleUserMessage(lz, "text", "luna", undefined, false, "u-lz", undefined, askId);
   check("a Reply to the name question names it", lz.slots.agentName.value === "Luna", String(lz.slots.agentName.value));
+
+  // replay (user retest): need saved as "talking to uy", then "no like talking to u, not uy"
+  const ty = newSession();
+  ty.slots.helpNeed = { value: "talking to uy", status: "filled", asks: 1 };
+  await handleUserMessage(ty, "text", "no like talking to u, not uy");
+  check("'X, not Y' fixes the typo in the saved need", ty.slots.helpNeed.value === "talking to u", String(ty.slots.helpNeed.value));
+  const ty2 = newSession();
+  ty2.slots.helpNeed = { value: "my inbox", status: "filled", asks: 1 };
+  fixTypoInNeed(ty2, "i want tuesday, not monday");
+  check("a correction about something else leaves the need alone", ty2.slots.helpNeed.value === "my inbox", String(ty2.slots.helpNeed.value));
 
   const dn = newSession();
   dn.transcript.push({ id: "u-k", role: "user", channel: "text", text: "what do you know about me?", ts: Date.now() });

@@ -375,6 +375,18 @@ export function mergeGrowingUtterance(s: Session, text: string) {
   if (s.callDeclinedAt !== undefined) s.callDeclinedAt = shift(s.callDeclinedAt);
 }
 
+// "no like talking to u, not uy": they fixed a typo in what they said, so what we saved from it gets the fix too
+// (the need stayed "talking to uy" and the recap repeated it).
+export function fixTypoInNeed(s: Session, text: string) {
+  const need = s.slots.helpNeed.value;
+  const m = text.match(/([\p{L}\p{N}'-]+)\s*,?\s+not\s+["']?([\p{L}\p{N}'-]+)["']?\s*[.!]?\s*$/iu);
+  if (!need || !m) return;
+  const [, right, wrong] = m;
+  const re = new RegExp(`(?<![\\p{L}\\p{N}])${wrong.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}(?![\\p{L}\\p{N}])`, "iu");
+  if (right.toLowerCase() === wrong.toLowerCase() || !re.test(need)) return;
+  s.slots.helpNeed = { ...s.slots.helpNeed, value: need.replace(re, right), updatedAt: Date.now() };
+}
+
 export const KNOW_ASK = /\bwhat (do|did|have) you (know|remember|got|saved|learned)( so far)? (about|on|of) me\b|\bwhat('?s| is) (my profile|saved about me)\b|\bshow me what you know\b/i;
 
 // Fold one turn's meter into the session's running numbers (and the dev ledger for `pnpm metrics`).
@@ -426,6 +438,7 @@ export async function handleUserMessageInner(
   const userMsg = msg("user", channel, clean, { ...(attachments?.length ? { attachments } : {}), ...(clientId ? { id: clientId } : {}), ...(quoted ? { replyTo: quoted } : {}) });
   s.transcript.push(userMsg);
   recordOutcome(s, clean); // did they act on the last interruption, or wave it off?
+  fixTypoInNeed(s, clean);
   // A real answer ("mostly applying to jobs and schoolwork") pays for the question: the next turn can
   // respond AND move things forward. Without this, a call went "yeah, that's a lot." and died.
   if (clean.trim().split(/\s+/).length >= 5) s.consecutiveAsks = 0;
