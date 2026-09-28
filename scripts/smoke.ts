@@ -496,6 +496,32 @@ async function main() {
   await handleUserMessage(onlyIntro, "text", "luna");
   check("only the intro question open: a bare name still names the assistant (no check)", onlyIntro.slots.agentName.value === "Luna" && !onlyIntro.nameCheck);
 
+  // replay (user retest): "what do you want to call me?", "hi", "hey! what's up?", "not much" -> it named itself "Not Much"
+  const wu = newSession();
+  await handleEvent(wu, { type: "open" });
+  wu.transcript.push(
+    { id: "u-wu1", role: "user", channel: "text", text: "hi", ts: Date.now() },
+    { id: "a-wu1", role: "agent", channel: "text", text: "hey! what's up?", ts: Date.now() },
+  );
+  await handleUserMessage(wu, "text", "not much");
+  check("a newer question ('what's up?') means the reply answers that, not the name", wu.slots.agentName.value !== "Not Much" && !wu.transcript.some((m) => m.kind === "contact_card" && /not much/i.test(m.text)), String(wu.slots.agentName.value));
+  const odd = newSession();
+  await handleEvent(odd, { type: "open" });
+  const oddR = await handleUserMessage(odd, "text", "not much");
+  check("small talk right after the name question gets a check, not a name", odd.slots.agentName.status === "missing" && /is "not much" what you want to call me\?/.test(said(oddR)), said(oddR));
+  const oddNo = await handleUserMessage(odd, "text", "no lol");
+  check("...'no' asks for the name again", odd.slots.agentName.status === "missing" && /what do you want to call me\?/.test(said(oddNo)), said(oddNo));
+  const fx = newSession();
+  await handleEvent(fx, { type: "open" });
+  await handleUserMessage(fx, "text", "luna");
+  const fxR = await handleUserMessage(fx, "text", "luna isn't your name. don't save a name for yourself yet");
+  check("'X isn't your name / don't save a name yet' undoes it, card and all", fx.slots.agentName.status === "missing" && !fx.transcript.some((m) => m.kind === "contact_card") && /scratch that/.test(said(fxR)), said(fxR));
+  const keepName = newSession();
+  await handleEvent(keepName, { type: "open" });
+  await handleUserMessage(keepName, "text", "luna");
+  await handleUserMessage(keepName, "text", "luna isn't a bad name right");
+  check("'luna isn't a bad name' keeps it", keepName.slots.agentName.value === "Luna");
+
   const dn = newSession();
   dn.transcript.push({ id: "u-k", role: "user", channel: "text", text: "what do you know about me?", ts: Date.now() });
   check("'what do you know about me' shows the card", KNOW_ASK.test("what do you know about me?") && !KNOW_ASK.test("what do you know about paris"));

@@ -186,6 +186,8 @@ export async function captureAgentName(s: Session, channel: Channel, text: strin
   // The name question was asked in the last couple of exchanges ("call me" first, then "luna" still answers it).
   const askIdx = s.transcript.findLastIndex((m) => m.role === "agent" && NAME_ASK.test(m.text));
   if (askIdx < 0 || s.transcript.slice(askIdx + 1).filter((m) => m.role === "user").length > 2) return;
+  // a newer question ("what's up?") means this answers that, not the name
+  if (!renamingDefault && !NAME_HINT.test(text) && !nameAskIsNewest(s, s.transcript.findLast((m) => m.role === "user"))) return;
   const own = text.trim().match(OWN_NAME);
   if (own) {
     if (s.slots.userName.status !== "filled") {
@@ -203,6 +205,18 @@ export async function captureAgentName(s: Session, channel: Channel, text: strin
   return { card: ctx.newCard ?? ctx.newMessages.find((x) => x.kind === "contact_card"), pending: ctx.pending ?? [] };
 }
 
+// words that make a reply small talk, not a name ("not much", "chillin", "good wbu")
+const PHRASEY = /\b(not|much|nothing|nm|nmu|good|fine|great|ok|okay|chill|chilling|chillin|same|busy|tired|just|doing|lol|lmao|haha|wbu|hbu|sup|bored|working|school|work|idk|nun|nothin)\b/i;
+const ISNT_NAME = /\b(isn'?t|is not|ain'?t|not)\s+(my|your|ur|a|the)?\s*name\b/i;
+const NOT_NAME_FIX = /\b(don'?t|do not|dont)\b[^.?!]{0,12}\b(save|pick|give|set|use|take)\b[^.?!]{0,25}\bname\b|\bthat'?s not (your|ur) name\b/i;
+
+// The name question only counts while it's the newest thing we asked: "what's up?" after it means "not much" answers that.
+export function nameAskIsNewest(s: Session, userMsg?: Msg) {
+  const before = userMsg ? s.transcript.slice(0, s.transcript.indexOf(userMsg)) : s.transcript;
+  const q = before.findLast((m) => m.role === "agent" && (!m.kind || m.kind === "text") && m.text.includes("?"));
+  return !!q && NAME_ASK.test(q.text);
+}
+
 export const USER_NAME_ASK = /\b(what'?s your name|what is your name|what (should|do|can) i call you|who am i (talking|texting) (to|with)|your name\?)/i;
 const MINE = /\b(my name|that'?s me|it'?s me|i'?m|i am|mine|me)\b/i;
 const YOURS = /\b(call you|your name|for you|name you|you'?re|you are|yours|you)\b/i;
@@ -212,10 +226,41 @@ export async function nameAmbiguity(s: Session, channel: Channel, text: string, 
   if (channel !== "text" || s.call.active) return null;
   const out = (ctx: Ctx): TurnResult => ({ session: s, newMessages: [userMsg, ...ctx.newMessages], chips: computeDirective(s, channel).chips, actions: [] });
   const ctx: Ctx = { s, channel, actions: [], newMessages: [], move: EVENT_MOVES.named };
+  // "not much isn't your name" / "don't save a name for yourself yet": undo it, card and all, and ask properly.
+  const named = s.slots.agentName.value;
+  if (named && !s.agentNameDefaulted && (NOT_NAME_FIX.test(text) || (text.toLowerCase().includes(named.toLowerCase()) && ISNT_NAME.test(text)))) {
+    s.slots.agentName = { value: null, status: "missing", asks: s.slots.agentName.asks };
+    s.transcript = s.transcript.filter((m) => m.kind !== "contact_card");
+    s.nameCheck = undefined;
+    emitAgentText(ctx, "got it, scratch that, my bad. no name yet. whenever you want to pick one, just tell me what to call me.");
+    guard(ctx, "unsaved a name they said wasn't one");
+    recordAsk(s, null);
+    return out(ctx);
+  }
   // Their answer to "is rowan your name, or what you'd like to call me?"
   const check = s.nameCheck;
   if (check) {
     s.nameCheck = undefined;
+    // "is 'not much' what you want to call me?": yes names it, no asks again
+    if (check.as === "confirm") {
+      if (/^\s*(yes|yeah|yep|yup|ya|sure|correct|right|mhm|lol yes|haha yes)\b/i.test(text)) {
+        await runTool(ctx, "set_slot", { slot: "agentName", value: check.value });
+        await Promise.all(ctx.pending ?? []);
+        emitAgentText(ctx, `${nameAck(check.value)} save my contact card so you know it's me`);
+        if (ctx.newCard) {
+          s.transcript.push(ctx.newCard);
+          ctx.newMessages.push(ctx.newCard);
+        }
+        recordAsk(s, null);
+        return out(ctx);
+      }
+      if (/^\s*(no|nah|nope|not really|lol no|haha no)\b/i.test(text)) {
+        emitAgentText(ctx, "haha no worries. so what do you want to call me?");
+        recordAsk(s, "agentName");
+        return out(ctx);
+      }
+      return null;
+    }
     const mine = MINE.test(text) && !/\bcall you\b/i.test(text);
     const yours = YOURS.test(text) && !/\bmy name\b/i.test(text);
     if (check.as === "user" && yours && !mine) {
@@ -250,6 +295,13 @@ export async function nameAmbiguity(s: Session, channel: Channel, text: string, 
   if (OWN_NAME.test(text.trim()) || NAME_HINT.test(text)) return null;
   const bare = text.trim().match(/^([\p{L}][\p{L}'-]{0,19}(?: [\p{L}][\p{L}'-]{0,19})?)[.!]?$/u)?.[1];
   if (!bare || NOT_A_NAME.test(bare)) return null;
+  // The name question is the newest one, but the answer reads like small talk ("not much", "chillin"): ask first.
+  if (s.slots.agentName.status === "missing" && nameAskIsNewest(s, userMsg) && PHRASEY.test(bare)) {
+    s.nameCheck = { value: titled(bare), as: "confirm" };
+    emitAgentText(ctx, `haha wait, is "${bare.toLowerCase()}" what you want to call me?`);
+    guard(ctx, "asked before taking an odd answer as its name");
+    return out(ctx);
+  }
   // Both still open: each asked within their last couple of replies, neither answered yet.
   const lastUser = s.transcript.findLastIndex((m) => m.role === "user" && m !== userMsg);
   const agentAsk = s.transcript.findLastIndex((m) => m.role === "agent" && NAME_ASK.test(m.text));
@@ -650,6 +702,7 @@ export async function nameFirst(s: Session, channel: Channel, text: string, hear
   // The "Persona" default is a placeholder: naming it for real goes through here too (ack + card before anything else).
   if (channel !== "text" || s.call.active || (s.slots.agentName.status !== "missing" && !s.agentNameDefaulted)) return null;
   if (s.lastAskedSlot !== "agentName" && !NAME_HINT.test(text)) return null;
+  if (!NAME_HINT.test(text) && !nameAskIsNewest(s, s.transcript.findLast((m) => m.role === "user"))) return null;
   const e = await heard.catch(() => null);
   const value = (e?.agentName ?? hintedAgentName(text) ?? (s.lastAskedSlot === "agentName" ? firstSentenceName(text) : null))?.trim().replace(/\b\p{L}/gu, (c) => c.toUpperCase());
   if (!value || value.length > 30) return null;
