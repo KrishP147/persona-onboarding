@@ -5,6 +5,7 @@ import type { Skin, SkinId } from "./skins/types";
 import { PhoneIcon } from "./skins/shared";
 import { Thread, type WhyHooks } from "./Thread";
 import type { Chat } from "./useChat";
+import { MicTrouble } from "./MicTrouble";
 
 // screen size (css px) and frame geometry per device, from phone-ui-spec.md section 0
 export const FRAMES: Record<SkinId, { w: number; h: number; screenW: number; screenH: number; x: number; y: number; r: number }> = {
@@ -172,6 +173,7 @@ export function CallPhone({ skin, chat, zoom }: { skin: Skin; chat: Chat; zoom: 
             muted={call.muted}
             onMute={call.toggleMute}
           />
+          <MicTrouble call={call} />
         </div>
       </DeviceFrame>
     </div>
