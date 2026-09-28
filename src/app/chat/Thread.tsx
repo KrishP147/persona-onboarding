@@ -185,10 +185,12 @@ export function Thread({ skin, chat, why, scrollRef }: { skin: Skin; chat: Chat;
               )}
               {body}
             </div>
+            {i === grad.at && <S.EventRow text="🎓 you've graduated from onboarding" />}
             {knowIdxs.has(i) && know}
           </Fragment>
         );
       })}
+      {grad.at === -1 && <S.EventRow text="🎓 you've graduated from onboarding" />}
       {knowIdxs.has(-1) && know}
       {(typing || revealing) && <S.Typing />}
       {!session?.contactSaved && !dismissed && thread.length > 0 && <S.UnknownNotice onAdd={chat.saveContact} onDismiss={() => setDismissed(true)} />}

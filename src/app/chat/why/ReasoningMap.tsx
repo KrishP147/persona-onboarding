@@ -13,7 +13,13 @@ const LANE = 30; // call lane sits this far right of the texts lane
 const PIN = 16; // edges attach this far in from a node's left edge
 const SAT_H = 20;
 
-type Step = { kind: "turn"; t: Turn; y: number; lane: 0 | 1 } | { kind: "wp"; id: string; text: string; y: number; lane: 0 | 1 };
+type Step = { kind: "turn"; t: Turn; y: number; h: number; lane: 0 | 1 } | { kind: "wp"; id: string; text: string; y: number; h: number; lane: 0 | 1 };
+
+// long labels wrap instead of cutting off: each row grows by the lines its text needs (up to 3), estimated
+// from the node width (13px medium text is about 7px a character, 11.5px waypoint text about 6px)
+const MOVE_LINE = 17;
+const WP_LINE = 15;
+const linesFor = (text: string, px: number, perChar: number) => Math.min(3, Math.max(1, Math.ceil((text.length * perChar) / Math.max(40, px))));
 type MState = "done" | "declined" | "open";
 export type Milestone = { id: string; label: string; state: MState; at?: number };
 
@@ -42,29 +48,30 @@ export function milestonesOf(session: Session | null, turns: Turn[], messages: M
 }
 
 // the flow: turns in order, with call lines in their own lane and events as small waypoints
-function layout(messages: Msg[], byId: Map<string, Turn>) {
+function layout(messages: Msg[], byId: Map<string, Turn>, nodeW: number) {
   const steps: Step[] = [];
   let y = 0;
   for (const m of messages) {
     const t = byId.get(m.id);
     if (t) {
-      steps.push({ kind: "turn", t, y, lane: m.channel === "voice" ? 1 : 0 });
-      y += NODE_H + GAP;
+      const h = NODE_H + (linesFor(t.move.label, nodeW - 26, 7) - 1) * MOVE_LINE;
+      steps.push({ kind: "turn", t, y, h, lane: m.channel === "voice" ? 1 : 0 });
+      y += h + GAP;
     } else if (m.kind === "event" || m.kind === "gmail_link") {
       const prev = steps[steps.length - 1];
       const text = m.kind === "gmail_link" ? "gmail link sent" : m.text.toLowerCase();
       // an event that opens or closes a call sits in the lane it leads into
       const lane: 0 | 1 = /^call started/.test(text) ? 1 : /^call (ended|declined)/.test(text) ? 0 : (prev?.lane ?? 0);
-      steps.push({ kind: "wp", id: m.id, text, y, lane });
-      y += WP_H + GAP;
+      const h = WP_H + (linesFor(text, nodeW - 20, 6.2) - 1) * WP_LINE;
+      steps.push({ kind: "wp", id: m.id, text, y, h, lane });
+      y += h + GAP;
     }
   }
   // no trailing waypoints before the first turn: the map starts at turn 1
   while (steps[0]?.kind === "wp") {
     const drop = steps.shift()!;
-    const d = WP_H + GAP;
+    const d = drop.h + GAP;
     for (const s of steps) s.y -= d;
-    void drop;
     y -= d;
   }
   return { steps, height: Math.max(0, y - GAP) };
@@ -98,13 +105,14 @@ export function ReasoningMap({
   sheet?: boolean;
 }) {
   const byId = useMemo(() => new Map(turns.map((t) => [t.m.id, t])), [turns]);
-  const { steps, height } = useMemo(() => layout(messages, byId), [messages, byId]);
   const miles = useMemo(() => milestonesOf(session, turns, messages), [session, turns, messages]);
   const [cursor, setCursor] = useState<string | null>(null);
   const [how, setHow] = useState(false);
   const [popH, setPopH] = useState(0);
   const [scrolled, setScrolled] = useState(false);
   const [w, setW] = useState(width ?? 340);
+  const nodeW = Math.min(212, Math.max(150, w - LANE - 118));
+  const { steps, height } = useMemo(() => layout(messages, byId, nodeW), [messages, byId, nodeW]);
   const boxRef = useRef<HTMLDivElement>(null);
   const graphRef = useRef<HTMLDivElement>(null);
   const popRef = useRef<HTMLDivElement>(null);
@@ -112,7 +120,7 @@ export function ReasoningMap({
   const focusId = cursor && byId.has(cursor) ? cursor : (activeId ?? turns[turns.length - 1]?.m.id ?? null);
   const open = activeId ? steps.find((s) => s.kind === "turn" && s.t.m.id === activeId) : undefined;
   const openTurn = open?.kind === "turn" ? open.t : undefined;
-  const popTop = open ? open.y + NODE_H + 8 : 0;
+  const popTop = open ? open.y + open.h + 8 : 0;
   const graphH = Math.max(height, open ? popTop + popH : 0);
 
   // node width follows the map's width; satellites get what's left
@@ -123,7 +131,6 @@ export function ReasoningMap({
     ro.observe(el);
     return () => ro.disconnect();
   }, []);
-  const nodeW = Math.min(212, Math.max(150, w - LANE - 118));
   const satX = (lane: number) => lane * LANE + nodeW + 12;
 
   useLayoutEffect(() => {
@@ -148,7 +155,7 @@ export function ReasoningMap({
     if (!box || !g || !s) return;
     // offsets are from the scroller itself (it is the positioned parent)
     const top = g.offsetTop + s.y - 12;
-    const bottom = g.offsetTop + s.y + NODE_H + (withPop ? popH : 0) + 12;
+    const bottom = g.offsetTop + s.y + s.h + (withPop ? popH : 0) + 12;
     const reduced = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
     const behavior = reduced ? "auto" : "smooth";
     if (top < box.scrollTop) box.scrollTo({ top, behavior });
@@ -223,7 +230,7 @@ export function ReasoningMap({
   for (let i = 1; i < steps.length; i++) {
     const a = steps[i - 1];
     const b = steps[i];
-    const ay = a.y + (a.kind === "turn" ? NODE_H : WP_H);
+    const ay = a.y + a.h;
     const by = b.y;
     const ax = x0(a.lane);
     const bx = x0(b.lane);
@@ -232,7 +239,7 @@ export function ReasoningMap({
   // call bands: runs of the call lane
   const bands: { y: number; h: number }[] = [];
   for (const s of steps) {
-    const bottom = s.y + (s.kind === "turn" ? NODE_H : WP_H);
+    const bottom = s.y + s.h;
     const prev = bands[bands.length - 1];
     if (s.lane !== 1) continue;
     const prevStep = steps[steps.indexOf(s) - 1];
@@ -241,7 +248,7 @@ export function ReasoningMap({
   }
   const nextMile = miles.find((m) => m.state === "open");
   const lastStep = steps[steps.length - 1];
-  const tailY = lastStep ? lastStep.y + (lastStep.kind === "turn" ? NODE_H : WP_H) : 0;
+  const tailY = lastStep ? lastStep.y + lastStep.h : 0;
 
   return (
     <section
@@ -286,7 +293,7 @@ export function ReasoningMap({
               <path key={i} d={d} fill="none" stroke="var(--p-step-300)" strokeWidth="1.5" />
             ))}
             {steps.map((s) =>
-              s.kind === "turn" && s.t.guards.length ? <path key={`g${s.t.m.id}`} d={`M${s.lane * LANE + nodeW} ${s.y + NODE_H / 2}H${satX(s.lane)}`} stroke="var(--p-step-300)" strokeWidth="1" strokeDasharray="2 2" fill="none" /> : null,
+              s.kind === "turn" && s.t.guards.length ? <path key={`g${s.t.m.id}`} d={`M${s.lane * LANE + nodeW} ${s.y + s.h / 2}H${satX(s.lane)}`} stroke="var(--p-step-300)" strokeWidth="1" strokeDasharray="2 2" fill="none" /> : null,
             )}
             {nextMile && turns.length > 0 && <path d={`M${x0(0)} ${tailY}V${tailY + GAP}`} stroke="var(--p-step-300)" strokeWidth="1.5" strokeDasharray="3 3" fill="none" />}
           </svg>
@@ -297,9 +304,9 @@ export function ReasoningMap({
           ))}
           {steps.map((s) =>
             s.kind === "wp" ? (
-              <div key={s.id} className="absolute flex items-center gap-1.5 text-[11.5px] text-ink-mute" style={{ top: s.y, left: s.lane * LANE + PIN - 5, height: WP_H }} role="listitem">
-                <span className="w-[10px] h-[10px] rotate-45 rounded-[2px] border-[1.5px] border-ink-faint bg-alt shrink-0" aria-hidden />
-                <span className="truncate" style={{ maxWidth: nodeW }} title={s.text}>
+              <div key={s.id} className="absolute flex items-start gap-1.5 text-[11.5px] leading-[15px] text-ink-mute pt-[3px]" style={{ top: s.y, left: s.lane * LANE + PIN - 5, minHeight: s.h }} role="listitem">
+                <span className="mt-[2px] w-[10px] h-[10px] rotate-45 rounded-[2px] border-[1.5px] border-ink-faint bg-alt shrink-0" aria-hidden />
+                <span className="break-words line-clamp-3" style={{ maxWidth: nodeW }} title={s.text}>
                   {s.text}
                 </span>
               </div>
@@ -361,7 +368,7 @@ function TurnNode({
   const t = s.t;
   const shown = t.guards.length > 2 ? t.guards.slice(0, 1) : t.guards;
   const more = t.guards.length - shown.length;
-  const top = s.y + (NODE_H - (shown.length + (more ? 1 : 0)) * (SAT_H + 2)) / 2;
+  const top = s.y + (s.h - (shown.length + (more ? 1 : 0)) * (SAT_H + 2)) / 2;
   return (
     <div role="listitem">
       <button
@@ -375,7 +382,7 @@ function TurnNode({
         onFocus={() => setHover(t.m.id)}
         onBlur={() => setHover(null)}
         className={`absolute text-left rounded-[16px] bg-canvas border pl-3 pr-2.5 py-2 transition-[box-shadow,border-color] duration-150 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-pblue ${on || hot ? "shadow-[0_8px_24px_-12px_rgba(19,21,21,.35)]" : ""}`}
-        style={{ top: s.y, left: s.lane * LANE, width: w, height: NODE_H, borderColor: on || hot ? t.fw.color : "var(--p-step-200)", borderWidth: on ? 1.5 : 1 }}
+        style={{ top: s.y, left: s.lane * LANE, width: w, height: s.h, borderColor: on || hot ? t.fw.color : "var(--p-step-200)", borderWidth: on ? 1.5 : 1 }}
       >
         <span className="flex items-center gap-1.5 text-[11px] leading-4">
           <span className="font-mono font-semibold px-1 rounded bg-alt text-ink">T{t.n}</span>
@@ -384,7 +391,7 @@ function TurnNode({
             {t.fw.label}
           </span>
         </span>
-        <span className="mt-1 block text-[13px] leading-[17px] font-medium text-ink truncate" title={t.move.label}>
+        <span className="mt-1 block text-[13px] leading-[17px] font-medium text-ink break-words line-clamp-3" title={t.move.label}>
           {t.move.label}
         </span>
       </button>
