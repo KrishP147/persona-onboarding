@@ -212,7 +212,7 @@ export async function nameAmbiguity(s: Session, channel: Channel, text: string, 
   if (channel !== "text" || s.call.active) return null;
   const out = (ctx: Ctx): TurnResult => ({ session: s, newMessages: [userMsg, ...ctx.newMessages], chips: computeDirective(s, channel).chips, actions: [] });
   const ctx: Ctx = { s, channel, actions: [], newMessages: [], move: EVENT_MOVES.named };
-  // Their answer to "is yasen your name, or what you'd like to call me?"
+  // Their answer to "is rowan your name, or what you'd like to call me?"
   const check = s.nameCheck;
   if (check) {
     s.nameCheck = undefined;
@@ -246,7 +246,7 @@ export async function nameAmbiguity(s: Session, channel: Channel, text: string, 
     }
     return null; // a yes to "that's what i call you", or something else: the lean stands, carry on
   }
-  // A bare name ("yasen"), not "i'm yasen" or "call you yasen": those already say which.
+  // A bare name ("rowan"), not "i'm rowan" or "call you rowan": those already say which.
   if (OWN_NAME.test(text.trim()) || NAME_HINT.test(text)) return null;
   const bare = text.trim().match(/^([\p{L}][\p{L}'-]{0,19}(?: [\p{L}][\p{L}'-]{0,19})?)[.!]?$/u)?.[1];
   if (!bare || NOT_A_NAME.test(bare)) return null;
