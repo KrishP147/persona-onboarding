@@ -136,6 +136,7 @@ export function ReasoningMap({
     const g = graphRef.current;
     const s = steps.find((x) => x.kind === "turn" && x.t.m.id === id);
     if (!box || !g || !s) return;
+    // offsets are from the scroller itself (it is the positioned parent)
     const top = g.offsetTop + s.y - 12;
     const bottom = g.offsetTop + s.y + NODE_H + (withPop ? popH : 0) + 12;
     const reduced = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
@@ -255,7 +256,7 @@ export function ReasoningMap({
       <div
         ref={boxRef}
         onScroll={(e) => setScrolled(e.currentTarget.scrollTop > 2)}
-        className={`min-h-0 overflow-y-auto overscroll-contain px-5 pb-5 pt-1 border-t transition-[border-color] duration-150 ${scrolled ? "border-step-200 [mask-image:linear-gradient(to_bottom,transparent,#000_28px)]" : "border-transparent"}`}
+        className={`relative min-h-0 overflow-y-auto overscroll-contain px-5 pb-5 pt-1 border-t transition-[border-color] duration-150 ${scrolled ? "border-step-200 [mask-image:linear-gradient(to_bottom,transparent,#000_28px)]" : "border-transparent"}`}
       >
         <div
           ref={graphRef}

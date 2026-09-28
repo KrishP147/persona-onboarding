@@ -102,7 +102,7 @@ export function ThemeToggle({ className = "" }: { className?: string }) {
             aria-label={LABEL[p]}
             title={LABEL[p]}
             onClick={() => set(p)}
-            className={`w-8 h-[28px] flex items-center justify-center rounded-full transition-[background-color,color,box-shadow] duration-150 ease-[var(--ease-press)] ${on ? "bg-canvas text-ink shadow-[0_1px_2px_rgba(0,0,0,.08),0_2px_8px_-2px_rgba(0,0,0,.08)] dark:bg-step-300" : "text-ink-mute hover:text-ink"}`}
+            className={`w-7 md:w-8 h-[28px] flex items-center justify-center rounded-full transition-[background-color,color,box-shadow] duration-150 ease-[var(--ease-press)] ${on ? "bg-canvas text-ink shadow-[0_1px_2px_rgba(0,0,0,.08),0_2px_8px_-2px_rgba(0,0,0,.08)] dark:bg-step-300" : "text-ink-mute hover:text-ink"}`}
           >
             <Icon p={p} />
           </button>

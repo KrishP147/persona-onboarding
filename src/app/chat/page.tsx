@@ -117,7 +117,7 @@ export default function Home() {
 
   return (
     <main className="min-h-dvh bg-canvas text-ink flex flex-col overflow-x-clip">
-      <TopBar skin={picked?.id ?? null} setSkin={setSkin} pill={pill(false)} onRestart={restart} mock={chat.mock} />
+      <TopBar skin={picked?.id ?? null} setSkin={setSkin} pill={pill(vw < 768)} onRestart={restart} mock={chat.mock} />
       {/* phones sit centered; a call adds a second phone and the map joins on the right, all gliding to share the middle (lg+) */}
       <Stage
         sig={[call ? "call" : "", showWhy && lg ? "map" : ""].join("|")}

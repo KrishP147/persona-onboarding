@@ -9,12 +9,13 @@ import { ThemeToggle } from "@/components/ThemeToggle";
 
 const LABEL: Record<SkinId, string> = { iphone: "iPhone", pixel: "Pixel", galaxy: "Galaxy" };
 
-export function Wordmark() {
+// tight: the top bar below md keeps just the mark (the name stays for screen readers)
+export function Wordmark({ tight = false }: { tight?: boolean }) {
   return (
     <Link href="/" className="flex items-center gap-2 text-ink" aria-label="Persona home">
       {/* the mark in currentColor, so it flips with the theme */}
       <Mark className="w-[22px] h-[22px]" />
-      <span className="text-[20px] font-semibold tracking-[-0.2px]">Persona</span>
+      <span className={`text-[20px] font-semibold tracking-[-0.2px] ${tight ? "max-md:sr-only" : ""}`}>Persona</span>
     </Link>
   );
 }
@@ -80,8 +81,8 @@ export function TopBar({ skin, setSkin, pill, onRestart, mock }: { skin: SkinId 
   return (
     <nav aria-label="Page" className="hidden sm:grid grid-cols-[1fr_auto_1fr] items-center h-16 px-6">
       <div className="flex items-center gap-3">
-        <Wordmark />
-        {mock && <span className="text-[12.5px] text-ink-mute bg-alt rounded-full px-2.5 py-0.5">mock mode</span>}
+        <Wordmark tight />
+        {mock && <span className="hidden lg:inline whitespace-nowrap text-[12.5px] text-ink-mute bg-alt rounded-full px-2.5 py-0.5">mock mode</span>}
       </div>
       <PhonePicker value={skin} onChange={setSkin} />
       <div className="flex justify-end items-center gap-2">
