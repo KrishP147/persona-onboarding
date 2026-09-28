@@ -1,6 +1,6 @@
 "use client";
 // "what i know about you": shown once setup ends, in the phone's own card style. edit or forget any of it.
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import type { Msg } from "@/lib/types";
 import type { Pos, Skin } from "../skins/types";
 import type { Chat } from "../useChat";
@@ -34,7 +34,7 @@ const ROWS: { key: Key; label: string; edit?: string; noun: string }[] = [
 function prefill(chat: Chat, text: string) {
   chat.setDraft(text);
   requestAnimationFrame(() => {
-    const el = document.querySelector<HTMLInputElement>(".phone-screen input[aria-label='Message']");
+    const el = document.querySelector<HTMLTextAreaElement>(".phone-screen [aria-label='Message']");
     if (!el) return;
     el.focus();
     el.setSelectionRange(text.length, text.length);
@@ -149,43 +149,40 @@ const clock = (ms: number) => {
   return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, "0")}`;
 };
 
-const anchorKey = (sid: string) => `persona-grad-anchor:${sid}`;
-function readAnchor(sid: string | undefined) {
-  if (!sid) return null;
-  try {
-    return localStorage.getItem(anchorKey(sid));
-  } catch {
-    return null;
+// index of the last message at/before a given instant, or -1 if the thread hasn't caught up to it yet
+function indexAtOrBefore(thread: Msg[], t: number): number {
+  let i = -1;
+  for (let k = 0; k < thread.length; k++) {
+    if (thread[k].ts > t) break;
+    i = k;
   }
+  return i;
 }
 
-// where the card sits: after the turn that ended setup (seen live), else pinned at the end.
-// at: thread index to render after, -1 for the end, null when not graduated.
-// setupMs: first text from them to setup ending, when the turn that ended it is known.
-export function useGradSlot(chat: Chat, thread: Msg[]): { at: number | null; setupMs: number | null } {
-  const phase = chat.session?.phase;
-  const sid = chat.session?.id;
-  const [prev, setPrev] = useState(phase);
-  const [live, setLive] = useState<string | null>(null);
-  if (phase !== prev) {
-    setPrev(phase);
-    // a live switch to graduated: anchor on the text that did it
-    if (phase === "graduated" && prev && prev !== "graduated") setLive([...thread].reverse().find((m) => m.role === "user")?.id ?? null);
-  }
-  useEffect(() => {
-    if (!live || !sid) return;
-    try {
-      localStorage.setItem(anchorKey(sid), live);
-    } catch {}
-  }, [live, sid]);
-  if (phase !== "graduated") return { at: null, setupMs: null };
-  const anchor = live ?? readAnchor(sid);
-  const i = anchor ? thread.findIndex((m) => m.id === anchor) : -1;
-  if (i < 0) return { at: -1, setupMs: null };
-  // after that turn's replies, before their next text
+// walk forward over that turn's own output (agent replies, event rows), landing right before
+// whatever they say next, or at the end (-1) if they haven't said anything since
+function afterTurn(thread: Msg[], i: number): number {
   let j = i;
   while (j + 1 < thread.length && thread[j + 1].role !== "user") j++;
+  return j === thread.length - 1 ? -1 : j;
+}
+
+// where the card sits: (a) once, right after the turn that graduated them (derived straight from
+// session.graduatedAt, set once server-side, so this is the same answer on every render and every
+// reload — no live phase-diffing, no localStorage), or (b) after a turn where they asked what we
+// know (chat.knowAskId). Never any other index, and never a "pin at the end" fallback.
+// at/knowAt: thread index to render after, -1 for the end, null when that anchor doesn't apply.
+export function useGradSlot(chat: Chat, thread: Msg[]): { at: number | null; knowAt: number | null; setupMs: number | null } {
+  const graduatedAt = chat.session?.graduatedAt;
+  let at: number | null = null;
+  if (graduatedAt) {
+    const i = indexAtOrBefore(thread, Date.parse(graduatedAt));
+    if (i >= 0) at = afterTurn(thread, i);
+  }
+  const knowId = chat.knowAskId;
+  const knowIdx = knowId ? thread.findIndex((m) => m.id === knowId) : -1;
+  const knowAt = knowIdx >= 0 ? afterTurn(thread, knowIdx) : null;
   const start = thread.find((m) => m.role === "user")?.ts;
-  const end = (thread[i + 1] ?? thread[i]).ts;
-  return { at: j === thread.length - 1 ? -1 : j, setupMs: start != null && end >= start ? end - start : null };
+  const setupMs = at !== null && graduatedAt != null && start != null ? Math.max(0, Date.parse(graduatedAt) - start) : null;
+  return { at, knowAt, setupMs };
 }
