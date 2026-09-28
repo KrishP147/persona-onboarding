@@ -11,7 +11,7 @@ import { webEnabled } from "../web";
 
 import { currentMeter, metered, percentile, recordTurn, type Meter } from "../usage";
 import { type Ctx, emitAgentText, ensureCard, goodbyeLine, guard, msg, outageLine } from "./context";
-import { CALL_NO, CARD_ASK, CARD_WANT, CLEAR_BYE, DELEGATE, hintedAgentName, DEMO_YES, GMAIL_TROUBLE, HOLD, INSULT_NAME, LAUGH, NAME_ASK, NAME_HINT, NEGATED_CALL, NOT_A_NAME, NO_CALLS, OFFERED_CALL, OWN_NAME, SEND_CMD, SEND_REQUEST, SENT_Q, SKIP_SETUP, THANKS, USER_BYE, WAITING_ON_THEM, WANTS_OUT, YES, asTurnBy, asksForLink, gmailConsent, lastUserText, saidNow, saysBye } from "./intents";
+import { CALL_NO, CARD_ASK, CARD_WANT, CLEAR_BYE, DELEGATE, hintedAgentName, DEMO_YES, GMAIL_TROUBLE, HOLD, INSULT_NAME, LAUGH, NAME_ASK, NAME_HINT, NEGATED_CALL, NOT_A_NAME, NO_CALLS, OFFERED_CALL, OWN_NAME, SEND_CMD, SEND_REQUEST, SENT_Q, SKIP_SETUP, STOP_TALKING, THANKS, USER_BYE, WAITING_ON_THEM, WANTS_OUT, YES, asTurnBy, asksForLink, gmailConsent, lastUserText, saidNow, saysBye } from "./intents";
 import { LAUGH_LEAD, cleanModelText, dropDraftEcho, fence, nowLine, parseTypedEmail } from "./text";
 import { GMAIL_ASK_MARK, GUARD_PIPELINE, type GuardEnv, type TurnOpts, rememberQuestions, sealGoodbye } from "./guards";
 import { LOOKUP_TOOLS, MAX_TOOL_ROUNDS, TERMS_LINK, TOOLS, WEB_TOOLS, gifAllowed, makeGif, runTool, saveDraftTool, sendEmailTool } from "./tools";
@@ -271,6 +271,13 @@ export async function handleUserMessageInner(
       const ctx: Ctx = { s, channel, actions: [{ type: "patience", ms: 90000 }], newMessages: [], move: EVENT_MOVES.silence };
       emitAgentText(ctx, "sure, take your time.");
       return { session: s, newMessages: [userMsg, ...ctx.newMessages], chips: computeDirective(s, channel).chips, actions: ctx.actions };
+    }
+    // "stop talking" / "shh": yield. No words back (not even "ok i'll stop"), and a long quiet before any check-in.
+    if (STOP_TALKING.test(clean)) {
+      s.call.holding = true;
+      const ctx: Ctx = { s, channel, actions: [{ type: "patience", ms: 90000 }], newMessages: [], move: EVENT_MOVES.silence };
+      guard(ctx, "yielded: they said stop");
+      return { session: s, newMessages: [userMsg], chips: computeDirective(s, channel).chips, actions: ctx.actions };
     }
     // "i'll let you know once it's connected": they're off doing something, so wait like after "hold on".
     s.call.holding = WAITING_ON_THEM.test(clean);

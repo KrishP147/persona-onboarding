@@ -52,13 +52,18 @@ export function gmailConsent(s: Session) {
   const lastUser = users[users.length - 1] ?? -1;
   const prevAgent = s.transcript.slice(0, lastUser).reverse().find((m) => m.role === "agent" && (!m.kind || m.kind === "text"));
   // "yeah it's been rough, i lose track..." agrees with the feeling, not to a link: a yes must be short or explicit.
-  const explicitYes = YES.test(text) && (text.trim().split(/\s+/).length <= 5 || /\b(sure|go ahead|send|do it|please|ok(ay)?|connect)\b/i.test(text));
+  // Any sentence can carry it ("that'd be great. sure." once sent no link: the yes wasn't first).
+  const explicitYes = text.split(SENTENCE_BREAK).some((x) => (YES.test(x) || AGREE.test(x)) && !/\b(no|not|don'?t|nah)\b/i.test(x) && (x.trim().split(/\s+/).length <= 5 || /\b(sure|go ahead|send|do it|please|ok(ay)?|connect)\b/i.test(x)));
   return !!prevAgent && ASKED_LINK.test(prevAgent.text) && explicitYes;
 }
 
 // A clear "skip setup" (not every "skip"): skip this / all of this / the setup / the rest / ahead.
 export const SKIP_SETUP = /\b(skip (all (of )?)?(this|that|it|setup|the setup|the rest|ahead|the questions)|(forget|no more|enough) (the )?(setup|questions)|stop asking (me )?questions)\b/i;
 export const SKIP_OFFER = /\b(skip|jump (right )?in|get (right )?started|start (on|with))\b/i;
+// Agreement that doesn't start with "yes" ("that'd be great", "please do").
+export const AGREE = /\b(that'?d be (great|good|nice|awesome|perfect|amazing)|that would be (great|good|nice|awesome|perfect)|sounds (good|great|perfect)|please do|go for it|absolutely|definitely|of course|for sure|yes please)\b/i;
+// "stop talking", "shh", "enough": on a call, the agent yields.
+export const STOP_TALKING = /^\s*(ok(ay)?,? )?(stop( talking| it)?|shh+|hush|quiet|be quiet|enough|stop stop|zip it)[.! ]*$/i;
 export const YES = /^\s*((oh|ah|um+|uh+|well|hmm+|haha)[,.!]?\s+)?(yes|yeah|yep|yup|sure|ok(ay)?|do it|please|go ahead|let'?s do it|sounds good|perfect)\b/i;
 
 export function lastUserText(s: Session) {
@@ -172,6 +177,8 @@ export const INTENTS: Record<string, IntentDef> = {
   SKIP_SETUP: { re: SKIP_SETUP, means: "a clear skip of setup", says: ["skip this", "no more questions", "stop asking me questions"], notSays: ["skip the gym today", "i skipped lunch"] },
   SKIP_OFFER: { re: SKIP_OFFER, means: "our offer to skip ahead", says: ["want to skip the rest?", "want to jump right in?"], notSays: ["what should i call you?"] },
   YES: { re: YES, means: "a yes at the start", says: ["yes", "oh, yeah sure", "sounds good"], notSays: ["no", "maybe yes", "haha"] },
+  AGREE: { re: AGREE, means: "agreement without a leading yes", says: ["that'd be great", "please do", "sounds good"], notSays: ["that's a lot", "i'm good"] },
+  STOP_TALKING: { re: STOP_TALKING, means: "stop talking (on a call: yield)", says: ["Stop talking.", "shh", "ok, stop"], notSays: ["stop by the store later", "don't stop"] },
   CALL_OK: { re: CALL_OK, means: "ok to ring them", says: ["sure", "call me", "k"], notSays: ["haha", "hmm"] },
   DELEGATE: { re: DELEGATE, means: "they hand us the choice", says: ["you pick", "idk", "surprise me"], notSays: ["luna", "i pick luna"] },
   CALL_NO: { re: CALL_NO, means: "no to a call", says: ["nah", "text is fine", "don't call"], notSays: ["sure", "yes call me"] },

@@ -1,6 +1,6 @@
 // Keyless smoke test of the engine's safety nets (mock mode). Run: pnpm tsx scripts/smoke.ts
 import { getSecret, loadSession, newSession, saveSession, setSecret, withSession } from "../src/lib/store";
-import { GUARD_PIPELINE, INTENTS, cleanModelText, cutRepeatQuestions, fence, fromEmailOnly, runTool, handleEvent, normQuestion, saysBye, softenGmailDemand, handleUserMessage, nowLine, parseTypedEmail } from "../src/lib/engine";
+import { CLAIMS_LINK, GUARD_PIPELINE, INTENTS, cleanModelText, cutRepeatQuestions, fence, fromEmailOnly, runTool, handleEvent, normQuestion, saysBye, softenGmailDemand, handleUserMessage, nowLine, parseTypedEmail } from "../src/lib/engine";
 import { crc32, pick } from "../src/lib/moves";
 import { readMood } from "../src/lib/mood";
 import { DEMO_INBOX, scoreItem } from "../src/lib/triage";
@@ -457,6 +457,40 @@ async function main() {
   swap.slots.agentName = { ...swap.slots.agentName, value: "Julia", status: "filled" };
   await applyExtracted(swap, { agentName: null, userName: "Julia", helpNeed: null, declined: [] }, async () => {});
   check("'hi julia' never makes the user julia", swap.slots.userName.value !== "Julia", String(swap.slots.userName.value));
+
+  // gmail link on a clear yes, even when the yes isn't first; "stop talking" yields (regressions from a live call)
+  const onCall = async () => {
+    const c = newSession();
+    await handleEvent(c, { type: "open" });
+    await handleUserMessage(c, "text", "luna");
+    await handleUserMessage(c, "text", "i'm krish");
+    const rang = await handleUserMessage(c, "text", "call me");
+    await handleEvent(c, { type: "call_started" });
+    return { c, rang };
+  };
+  const askLink = (c: ReturnType<typeof newSession>) =>
+    c.transcript.push({ id: "ask", role: "agent", channel: "voice", ts: Date.now(), text: "want me to text you a link to connect your gmail? that way i can keep an eye on the emails that come with it." });
+  const e2e = await onCall();
+  askLink(e2e.c);
+  const yesLink = await handleUserMessage(e2e.c, "voice", "That'd be great. Sure.");
+  check("e2e: text naming -> card -> call -> gmail yes -> link in the transcript", e2e.c.transcript.some((m) => m.kind === "contact_card") && e2e.rang.actions.some((a) => a.type === "start_call") && yesLink.newMessages.some((m) => m.kind === "gmail_link") && e2e.c.transcript.some((m) => m.kind === "gmail_link"), said(yesLink));
+  for (const yes of ["sure", "yes please", "please do", "oh yeah, go ahead"]) {
+    const y = await onCall();
+    askLink(y.c);
+    const r = await handleUserMessage(y.c, "voice", yes);
+    check(`yes to the gmail ask sends the link: "${yes}"`, r.newMessages.some((m) => m.kind === "gmail_link"), said(r));
+  }
+  const noLink = await onCall();
+  askLink(noLink.c);
+  const nl = await handleUserMessage(noLink.c, "voice", "not right now, that's a lot");
+  check("a no to the gmail ask sends no link", !nl.newMessages.some((m) => m.kind === "gmail_link"), said(nl));
+  const hush = await onCall();
+  const st = await handleUserMessage(hush.c, "voice", "Stop talking.");
+  check("'stop talking' on a call: no words back, just waits", !st.newMessages.some((m) => m.role === "agent") && st.actions.some((a) => a.type === "patience"), said(st));
+  const claim = cleanModelText("my bad, give me just a second here. you should see it pop up in your texts in a moment.");
+  check("'you should see it pop up in your texts' counts as a link claim", /pop up in your texts/.test(claim) && CLAIMS_LINK.test(claim), claim);
+  const metaWait = cleanModelText("The call's already ended. I'll wait for them to text back.");
+  check("'i'll wait for them to text back' never goes out", !/wait for them/i.test(metaWait), metaWait);
 
   // the guard pipeline runs in a fixed, named order (goodbye before hangup comes before the gmail rules, etc.)
   const order = GUARD_PIPELINE.map((g) => g.name);
