@@ -41,17 +41,10 @@ export function Thread({ skin, chat, why, scrollRef }: { skin: Skin; chat: Chat;
   const grad = useGradSlot(chat, thread);
   // "not in your contacts": dismissed once per conversation, gone for good once the contact is saved
   const [dismissed, setDismissed] = usePref(`persona-unknown-dismissed:${session?.id ?? "new"}`, false);
-  const gradAt = grad.at;
   const draftId = draftMsgId(session);
-  const draftIdx = draftId ? thread.findIndex((m) => m.id === draftId) : -1;
-  // a draft from before setup ended moves under the what-i-know card (shown once, not twice); later drafts stay in place
-  const draftUnder = gradAt !== null && draftIdx >= 0 && (gradAt === -1 || draftIdx <= gradAt);
-  const know = gradAt !== null && (
-    <>
-      <KnowCard skin={skin} chat={chat} setupMs={grad.setupMs} pos={draftUnder ? "first" : "single"} />
-      {draftUnder && <DraftCard skin={skin} chat={chat} pos="last" />}
-    </>
-  );
+  // the what-i-know card shows only at these two anchors (graduation, and any "what do you know" ask); never elsewhere
+  const knowIdxs = new Set([grad.at, grad.knowAt].filter((i): i is number => i !== null));
+  const know = <KnowCard skin={skin} chat={chat} setupMs={grad.setupMs} />;
 
   return (
     <div ref={scrollRef} className={`relative flex-1 overflow-y-auto overscroll-contain ${skin.threadClass}`} role="log" aria-live="polite" aria-label="Messages">
@@ -65,13 +58,13 @@ export function Thread({ skin, chat, why, scrollRef }: { skin: Skin; chat: Chat;
         const turn = why.on ? why.byId.get(m.id) : undefined;
         const lit = turn && (why.hoverId === m.id || why.activeId === m.id) ? turn.fw.color : null;
         let body: ReactNode;
-        const moved = draftUnder && m.id === draftId;
-        if (moved) body = null;
+        if (m.discarded) body = <S.EventRow text="draft discarded" />;
         else if (m.kind === "event") body = <S.EventRow text={m.text} />;
         else if (m.kind === "gmail_link") body = <S.GmailCard pos={pos} connected={session?.slots.gmail.status === "filled"} onConnect={chat.connectGmail} />;
         else if (m.kind === "gif") body = <S.Media src={m.text} />;
         else if (m.kind === "link_preview") body = <S.LinkPreview url={m.text} pos={pos} />;
-        else if (m.id === draftId && !draftUnder) body = <DraftCard skin={skin} chat={chat} />;
+        else if (m.id === draftId) body = <DraftCard skin={skin} chat={chat} />;
+        else if (m.role === "agent" && /^to:/i.test(m.text)) body = <S.EventRow text="earlier draft (updated below)" />;
         else if (m.kind === "contact_card") body = <S.ContactCard name={m.text} pos={pos} saved={!!session?.contactSaved} onSave={chat.saveContact} />;
         else
           body = (
@@ -98,11 +91,11 @@ export function Thread({ skin, chat, why, scrollRef }: { skin: Skin; chat: Chat;
               {showTime && <S.DateStamp ts={m.ts} first={i === 0} />}
               {body}
             </div>
-            {gradAt === i && know}
+            {knowIdxs.has(i) && know}
           </Fragment>
         );
       })}
-      {gradAt === -1 && know}
+      {knowIdxs.has(-1) && know}
       {(typing || revealing) && <S.Typing />}
       {!session?.contactSaved && !dismissed && thread.length > 0 && <S.UnknownNotice onAdd={chat.saveContact} onDismiss={() => setDismissed(true)} />}
       <div ref={bottomRef} className="h-1" />
