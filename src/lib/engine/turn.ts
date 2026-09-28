@@ -8,6 +8,7 @@ import { connectDemo } from "../google";
 import { EVENT_MOVES, chooseMove, markUsed, pick, withAngle } from "../moves";
 import { applyExtracted, extract } from "../extract";
 import { webEnabled } from "../web";
+import { teamLine, teamMatch, teamNote } from "../team";
 
 import { currentMeter, metered, percentile, recordTurn, type Meter } from "../usage";
 import { type Ctx, emitAgentText, ensureCard, goodbyeLine, guard, msg, outageLine } from "./context";
@@ -76,6 +77,7 @@ export async function generate(ctx: Ctx, extraInstruction?: string): Promise<str
   const typed = s.transcript.filter((m) => m.role === "user" && m.channel === "text");
   const keep = [...new Set([...typed.filter((m) => /https?:\/\/|www\.|\S@\S/.test(m.text)).slice(-4), ...(s.call.active ? typed.slice(-3) : [])])];
   if (keep.length) state += `\nTHEY TYPED IN THE CHAT (recent; "the link i sent" means these): ${keep.map((m) => JSON.stringify(m.text.slice(0, 240))).join(", ")}`;
+  if (s.teamMember) state += `\n${teamNote(s.teamMember)}`;
   if (extraInstruction) state += `\n\nINSTRUCTION: ${extraInstruction}`;
   if (!extraInstruction || ctx.softInstruction) {
     // One research-backed move per turn, chosen in code, so the principles actually get applied.
@@ -396,8 +398,28 @@ export async function nameAmbiguity(s: Session, channel: Channel, text: string, 
 }
 
 export async function handleUserMessage(...args: Parameters<typeof handleUserMessageInner>): Promise<TurnResult> {
-  const [r, meter] = await metered(async () => sealGoodbye(args[0], await asTurnBy(args[0], "user", () => handleUserMessageInner(...args))));
-  noteMetrics(args[0], meter);
+  const [s, channel, text] = args;
+  // easter egg follow up: a yes to "is this THE zach?" (anything else just moves on)
+  if (s.teamGuess && !s.teamMember && s.transcript.findLast((m) => m.role === "agent" && (!m.kind || m.kind === "text"))?.move?.id === "team") {
+    if (YES.test(text.replace(LAUGH_LEAD, "")) || /\b(it'?s me|that'?s me|the one|in the flesh|guilty)\b/i.test(text)) s.teamMember = s.teamGuess;
+  }
+  const [r, meter] = await metered(async () => sealGoodbye(s, await asTurnBy(s, "user", () => handleUserMessageInner(...args))));
+  noteMetrics(s, meter);
+  // their name is on the persona team: "woah, is this THE zach?" in place of this turn's words (cards, links,
+  // a ringing call or a send stay; then it's back to normal)
+  const key = teamMatch(s);
+  if (key) {
+    s.teamGuess = key;
+    const busy = r.actions.some((a) => a.type === "start_call" || a.type === "end_call") || !!s.lastSent;
+    const words = busy ? [] : r.newMessages.filter((m) => m.role === "agent" && (!m.kind || m.kind === "text") && !m.move?.id?.startsWith("default"));
+    s.transcript = s.transcript.filter((m) => !words.includes(m));
+    r.newMessages = r.newMessages.filter((m) => !words.includes(m));
+    if (words.length) r.actions = r.actions.filter((a) => a.type !== "speak");
+    const ctx: Ctx = { s, channel: s.call.active ? "voice" : channel, actions: [], newMessages: [], move: { id: "team", label: "a familiar name", source: "easter egg" } };
+    emitAgentText(ctx, teamLine(key));
+    r.newMessages.push(...ctx.newMessages);
+    r.actions.push(...ctx.actions);
+  }
   // "what do you know about me": the what-i-know card answers it (it's never shown unasked after setup).
   if (args[1] === "text" && KNOW_ASK.test(args[2])) r.actions = [...(r.actions ?? []), { type: "show_know" }];
   return r;
@@ -600,6 +622,9 @@ export async function handleUserMessageInner(
       if (e) await applyExtracted(s, { ...e, agentName: null }, async () => {});
       const name = !hadName && s.slots.userName.status === "filled" ? s.slots.userName.value : null;
       ensureCard(ctx);
+      // "...send me the gmail link, and call me": everything in one message still gets everything
+      const linkToo = s.slots.gmail.status === "missing" && asksForLink(clean) && !(await runTool(ctx, "send_gmail_link", {})).startsWith("error");
+      if (linkToo) emitAgentText(ctx, "there's the gmail link, tap it whenever.");
       const ring = pick(s, "call-now", ["sure, calling you now. it'll be quick and help get you set up.", "calling you now. quick one, just to get you set up.", "on it, calling you now. it won't take long."]);
       emitAgentText(ctx, name ? `nice to meet you ${name}! ${ring}` : ring);
       return { session: s, newMessages: [userMsg, ...(early?.msgs ?? []), ...ctx.newMessages], chips: computeDirective(s, channel).chips, actions: ctx.actions };
