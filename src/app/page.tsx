@@ -35,7 +35,7 @@ function Hero() {
       <div className="relative z-30 flex justify-end px-4 pt-3 sm:absolute sm:right-5 sm:top-3 sm:p-0">
         <ThemeToggle />
       </div>
-      <p className="px-5 pt-3 text-center font-sans text-[12.5px] tracking-[0.005em] text-ink-mute">A trial demo by Krish for Persona, not the real product. Click <a href={SITE} className="underline underline-offset-2 hover:text-ink">here</a> to visit Persona, or go to yourpersona.com.</p>
+      <p className="px-5 pt-3 text-center font-sans text-[12.5px] tracking-[0.005em] text-ink-mute">A trial demo by <a href="https://krishpunjabi.com" target="_blank" rel="noopener noreferrer" className="underline underline-offset-2 hover:text-ink">Krish</a> for Persona, not the real product. Click <a href={SITE} className="underline underline-offset-2 hover:text-ink">here</a> to visit Persona, or go to yourpersona.com.</p>
       <div className="mx-auto flex w-full flex-col items-center gap-8 px-5 pb-12 pt-10 sm:pt-14 lg:w-max lg:-translate-x-[76px] lg:flex-row lg:gap-[69px] lg:px-0 lg:py-[102px]">
         <div className="order-2 w-full max-w-[596px] lg:order-1 lg:w-[596.443px] lg:max-w-none lg:translate-y-[40px]">
           <HeroPhone />
@@ -202,7 +202,7 @@ function Footer() {
               <br />
               Made in Miami, USA.
               <br />
-              A trial demo by Krish for Persona, not the real product. Click <a href={SITE} className="underline underline-offset-2 hover:text-ink">here</a> to visit Persona, or go to yourpersona.com.
+              A trial demo by <a href="https://krishpunjabi.com" target="_blank" rel="noopener noreferrer" className="underline underline-offset-2 hover:text-ink">Krish</a> for Persona, not the real product. Click <a href={SITE} className="underline underline-offset-2 hover:text-ink">here</a> to visit Persona, or go to yourpersona.com.
             </p>
           </div>
           <div>
