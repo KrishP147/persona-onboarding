@@ -159,10 +159,12 @@ export default function Home() {
         <MenuSheet
           skin={picked?.id ?? null}
           setSkin={setSkin}
-          reasoning={showWhy}
-          setReasoning={(v) => {
-            toggleWhy(v);
-            if (v) setMenuOpen(false);
+          canReason={turns.length > 0}
+          onReasoning={() => {
+            setMenuOpen(false);
+            if (!showWhy) toggleWhy(true);
+            const last = turns[turns.length - 1];
+            if (last) select(last.m.id);
           }}
           mock={chat.mock}
           onClose={() => setMenuOpen(false)}

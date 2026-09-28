@@ -94,7 +94,7 @@ export function TopBar({ skin, setSkin, pill, onRestart, mock }: { skin: SkinId 
 }
 
 // phones: the menu is a bottom sheet with the phone picker, the reasoning switch and restart
-export function MenuSheet({ skin, setSkin, reasoning, setReasoning, onRestart, onClose, mock }: { skin: SkinId | null; setSkin: (id: SkinId) => void; reasoning: boolean; setReasoning: (v: boolean) => void; onRestart: () => void; onClose: () => void; mock: boolean }) {
+export function MenuSheet({ skin, setSkin, canReason, onReasoning, onRestart, onClose, mock }: { skin: SkinId | null; setSkin: (id: SkinId) => void; canReason: boolean; onReasoning: () => void; onRestart: () => void; onClose: () => void; mock: boolean }) {
   const headRef = useRef<HTMLHeadingElement>(null);
   useEffect(() => {
     headRef.current?.focus();
@@ -121,23 +121,17 @@ export function MenuSheet({ skin, setSkin, reasoning, setReasoning, onRestart, o
           Phone
         </h2>
         <PhonePicker value={skin} onChange={setSkin} size="lg" />
-        <label className="mt-5 flex items-center justify-between gap-4 min-h-11">
+        {/* reasoning lives outside the thread: this opens the map sheet on the latest turn */}
+        <button onClick={onReasoning} disabled={!canReason} className="mt-5 w-full min-h-11 flex items-center justify-between gap-4 text-left disabled:opacity-50">
           <span className="flex items-center gap-3">
             <MapGlyph />
             <span>
               <span className="block text-[15px] font-medium">Examine reasoning</span>
-              <span className="block text-[13px] text-ink-mute">a map of the move behind each reply{mock ? " · mock mode" : ""}</span>
+              <span className="block text-[13px] text-ink-mute">{canReason ? "why it said what it said, turn by turn" : "shows up once it has replied"}{mock ? " · mock mode" : ""}</span>
             </span>
           </span>
-          <button
-            role="switch"
-            aria-checked={reasoning}
-            onClick={() => setReasoning(!reasoning)}
-            className={`relative w-[51px] h-[31px] rounded-full shrink-0 transition-colors duration-200 ${reasoning ? "bg-pgreen" : "bg-step-200"}`}
-          >
-            <span className={`absolute top-[2px] left-[2px] w-[27px] h-[27px] rounded-full bg-white shadow transition-transform duration-200 ease-[var(--ease-house)] ${reasoning ? "translate-x-5" : ""}`} />
-          </button>
-        </label>
+          <span aria-hidden className="text-ink-mute">›</span>
+        </button>
         <button onClick={onRestart} className="mt-6 w-full h-12 rounded-full bg-ink text-white text-[16px] font-medium active:scale-[.99]">
           Restart conversation
         </button>
