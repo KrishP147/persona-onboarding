@@ -2,7 +2,7 @@
 // google messages on android 16, material 3 expressive, dark. values from docs/design/phone-ui-spec.md A2
 import type { CSSProperties, ReactNode } from "react";
 import type { BubbleProps, CallProps, ComposerProps, HeaderProps, Pos, RichCardProps, Skin } from "./types";
-import { AGENT_NUMBER, BubbleBody, BubbleIcon, GoogleG, MicIcon, PersonaLogo, PersonSilhouette, PhoneIcon, RecTimer, callLog, eventKind, isToday, time, useClock, useElapsed } from "./shared";
+import { AGENT_NUMBER, BubbleBody, BubbleIcon, GoogleG, MicIcon, PauseIcon, PersonaLogo, PersonSilhouette, PhoneIcon, RecTimer, callLog, eventKind, isToday, time, useClock, useElapsed } from "./shared";
 
 const C = {
   app: "#111318",
@@ -385,7 +385,8 @@ function Cookie({ size, color }: { size: number; color: string }) {
 
 function CallScreen(p: CallProps) {
   const timer = useElapsed(p.startedAt);
-  const state = p.muted ? "muted" : p.speaking ? "speaking" : p.listening ? "listening" : "";
+  const holdTimer = useElapsed(p.heldAt ?? null);
+  const state = p.held ? "" : p.muted ? "muted" : p.speaking ? "speaking" : p.listening ? "listening" : "";
   const oval = "w-24 h-16 rounded-full flex items-center justify-center transition-[border-radius] active:rounded-[20px]";
   return (
     <div
@@ -408,14 +409,14 @@ function CallScreen(p: CallProps) {
           {p.status === "connecting" && "connecting…"}
           {p.status === "active" && (
             <>
-              <span className="tabular-nums">{timer}</span>
+              <span className="tabular-nums">{p.held ? `on hold · ${holdTimer}` : timer}</span>
               {state && ` · ${state}`}
             </>
           )}
           {p.status === "ended" && "call ended"}
         </div>
       </div>
-      {p.status === "active" && (
+      {p.status === "active" && !p.held && (
         <div className="mt-6 px-8 space-y-3 text-[15px] leading-[21px] text-center">
           {p.said && (
             <div data-caption="agent" className="text-[#E3E3E3]">
@@ -453,6 +454,14 @@ function CallScreen(p: CallProps) {
                   <MicIcon off={p.muted} size={24} />
                 </button>
                 <span className="text-[12px]" aria-hidden>{p.muted ? "Unmute" : "Mute"}</span>
+              </div>
+            )}
+            {p.onHold && p.status === "active" && (
+              <div className="flex flex-col items-center gap-1.5">
+                <button onClick={p.onHold} aria-pressed={!!p.held} aria-label={p.held ? "Unhold" : "Hold"} className={oval} style={p.held ? { background: C.primary, color: C.onPrimary, borderRadius: 20 } : { background: C.recv }}>
+                  <PauseIcon size={24} />
+                </button>
+                <span className="text-[12px]" aria-hidden>{p.held ? "Unhold" : "Hold"}</span>
               </div>
             )}
           </div>

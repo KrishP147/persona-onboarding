@@ -307,6 +307,13 @@ export function useVoiceCall(opts: {
   const [startedAt, setStartedAt] = useState<number | null>(null);
   const [muted, setMuted] = useState(false);
   const mutedRef = useRef(false);
+  // hold: mic off and the agent quiet, nothing sent anywhere, nothing times out
+  const [held, setHeld] = useState(false);
+  const [heldAt, setHeldAt] = useState<number | null>(null);
+  const heldRef = useRef(false);
+  const heldEndRef = useRef<{ final: boolean } | null>(null); // a hangup that came in on hold, decided on unhold
+  const endTimer = useRef<ReturnType<typeof setTimeout> | null>(null); // the beat after "bye"
+  const micOff = () => mutedRef.current || heldRef.current;
   const lastFillerRef = useRef("");
 
   const recRef = useRef<Rec | null>(null);
@@ -395,11 +402,11 @@ export function useVoiceCall(opts: {
 
   const armSilence = useCallback(() => {
     clear(silenceTimer);
-    if (mutedRef.current) return; // unmute arms it again
+    if (micOff()) return; // unmute / unhold arms it again
     const wait = patienceRef.current ?? SILENCE_MS;
     silenceTimer.current = setTimeout(() => {
       patienceRef.current = null;
-      const idle = activeRef.current && !mutedRef.current && !waitingRef.current && queueRef.current === 0 && !bufferRef.current;
+      const idle = activeRef.current && !micOff() && !waitingRef.current && queueRef.current === 0 && !bufferRef.current;
       if (idle) optsRef.current.onSilence();
     }, wait);
   }, []);
@@ -414,7 +421,7 @@ export function useVoiceCall(opts: {
   );
 
   const startRec = useCallback(() => {
-    if (!activeRef.current || mutedRef.current) return; // mic off: the fallback recognizer stays stopped
+    if (!activeRef.current || micOff()) return; // mic off: the fallback recognizer stays stopped
     try {
       recRef.current?.start();
     } catch {
@@ -490,7 +497,7 @@ export function useVoiceCall(opts: {
       }
       pickedRef.current = deviceId && deviceId !== "default" ? deviceId : undefined;
       const track = next.getAudioTracks()[0];
-      next.getAudioTracks().forEach((t) => (t.enabled = !mutedRef.current));
+      next.getAudioTracks().forEach((t) => (t.enabled = !micOff()));
       const old = streamRef.current;
       streamRef.current = next;
       wireStream(next);
@@ -506,7 +513,7 @@ export function useVoiceCall(opts: {
           const live = dg && !dg.dropped ? dg : null;
           stopDeepgramRef.current = live?.stop ?? null;
           pauseDeepgramRef.current = live?.pause ?? null;
-          live?.pause(mutedRef.current);
+          live?.pause(micOff());
           if (!live) webSpeechRef.current?.();
         }
       }
@@ -542,8 +549,8 @@ export function useVoiceCall(opts: {
         const w = watchRef.current;
         if (!w) return;
         const now = Date.now();
-        // Can't measure (context suspended) or not meant to hear anything (muted): don't blame the mic.
-        if (w.ctx.state !== "running" || mutedRef.current || !w.source) {
+        // Can't measure (context suspended) or not meant to hear anything (muted, on hold): don't blame the mic.
+        if (w.ctx.state !== "running" || micOff() || !w.source) {
           if (w.ctx.state === "suspended") void w.ctx.resume().catch(() => {});
           w.lastEnergy = now;
           w.mutedSince = null;
@@ -644,8 +651,12 @@ export function useVoiceCall(opts: {
   const teardown = useCallback(() => {
     mutedRef.current = false;
     setMuted(false);
+    heldRef.current = false;
+    heldEndRef.current = null;
+    setHeld(false);
+    setHeldAt(null);
     activeRef.current = false;
-    [silenceTimer, turnTimer, fillerTimer].forEach(clear);
+    [silenceTimer, turnTimer, fillerTimer, endTimer].forEach(clear);
     try {
       recRef.current?.abort();
     } catch {}
@@ -694,6 +705,7 @@ export function useVoiceCall(opts: {
     // Resolves once this line has finished playing (or was cut off), so the chat can wait for it.
     (text: string, isFiller = false): Promise<void> => {
       if (!activeRef.current || !text.trim()) return Promise.resolve();
+      if (heldRef.current) return Promise.resolve(); // on hold: a late reply stays in the thread, unspoken
       if (!isFiller) clear(fillerTimer);
       clear(silenceTimer);
       queueRef.current += 1;
@@ -712,7 +724,7 @@ export function useVoiceCall(opts: {
         setSpeaking(false);
         if (pendingEndRef.current) {
           pendingEndRef.current = false;
-          setTimeout(() => hangUp("agent_ended"), 400); // a beat after "bye", like a person
+          endTimer.current = setTimeout(() => hangUp("agent_ended"), 400); // a beat after "bye", like a person
         } else if (!waitingRef.current) armSilence();
       };
       let finished = () => {};
@@ -752,6 +764,11 @@ export function useVoiceCall(opts: {
   const endAfterSpeaking = useCallback(
     (final = false) => {
       finalEndRef.current = final;
+      // never hang up on someone who put us on hold: decide when they're back
+      if (heldRef.current) {
+        heldEndRef.current = { final: final || !!heldEndRef.current?.final };
+        return;
+      }
       if (queueRef.current > 0 || window.speechSynthesis?.speaking) pendingEndRef.current = true;
       else hangUp("agent_ended");
     },
@@ -774,7 +791,7 @@ export function useVoiceCall(opts: {
     // that through" if it's still coming at ~3s (clark & fox tree 2002: uh/um mark short vs long
     // delays; shiwa et al. 2008: fillers soften slow replies). Never on fast replies, never stacked twice.
     clear(fillerTimer);
-    const stillWaiting = () => waitingRef.current && queueRef.current === 0 && !mutedRef.current && activeRef.current;
+    const stillWaiting = () => waitingRef.current && queueRef.current === 0 && !micOff() && activeRef.current;
     fillerTimer.current = setTimeout(() => {
       if (!stillWaiting()) return;
       if (Math.random() < 0.5) void speak(pickFiller(SHORT_FILLERS, lastFillerRef), true);
@@ -792,7 +809,7 @@ export function useVoiceCall(opts: {
   // Mic off or on: the track goes silent, the deepgram recorder pauses (nothing is sent), and the
   // fallback recognizer stops; back on, all of it resumes.
   const applyMic = useCallback(() => {
-    const off = mutedRef.current;
+    const off = micOff();
     streamRef.current?.getAudioTracks().forEach((t) => (t.enabled = !off));
     pauseDeepgramRef.current?.(off);
     if (!off) return startRec();
@@ -815,6 +832,37 @@ export function useVoiceCall(opts: {
       if (bufferRef.current.trim()) flushTurn(); // what they said before muting still counts
     } else if (activeRef.current && queueRef.current === 0 && !waitingRef.current) armSilence();
   }, [applyMic, armSilence, flushTurn]);
+
+  // Hold: the agent stops mid-word, the mic goes off, nothing reaches stt or the server, and nothing
+  // times out (silence, fillers, the watchdog, a pending hangup). Client only: the server never hears of it.
+  // Unhold: one short line, spoken here, then it listens with a fresh silence window.
+  const toggleHold = useCallback(() => {
+    if (!activeRef.current) return;
+    const h = !heldRef.current;
+    heldRef.current = h;
+    setHeld(h);
+    setHeldAt(h ? Date.now() : null);
+    applyMic();
+    if (h) {
+      [silenceTimer, turnTimer, fillerTimer].forEach(clear);
+      if (endTimer.current || pendingEndRef.current) heldEndRef.current = { final: finalEndRef.current };
+      clear(endTimer);
+      pendingEndRef.current = false;
+      stopAudio();
+      queueRef.current = 0;
+      speakingTextRef.current = "";
+      bufferRef.current = ""; // half a sentence before hold isn't a turn
+      setSpeaking(false);
+      setCaption("");
+      setHeard("");
+      return;
+    }
+    const end = heldEndRef.current;
+    heldEndRef.current = null;
+    // a hangup we can't talk out of still happens; an ordinary goodbye is dropped: they came back to talk
+    if (end?.final) return hangUp("agent_ended");
+    void speak(BACK_LINE, true);
+  }, [applyMic, hangUp, speak]);
 
   const accept = useCallback(async () => {
     const W = window as unknown as { SpeechRecognition?: new () => Rec; webkitSpeechRecognition?: new () => Rec };
@@ -842,7 +890,7 @@ export function useVoiceCall(opts: {
     if (window.speechSynthesis) voiceRef.current = await lockVoice(styleRef.current);
 
     const onHeard: Heard = (finals, interim, speechFinal, span) => {
-      if (mutedRef.current) return; // muted: nothing they say reaches the agent
+      if (micOff()) return; // muted or on hold: nothing they say reaches the agent
       const latest = (finals || interim).trim();
       if (!latest) return;
       // A final goodbye is already on its way: let it finish; nothing said now changes the ending.
@@ -974,7 +1022,7 @@ export function useVoiceCall(opts: {
     if (dg) {
       stopDeepgramRef.current = dg.stop;
       pauseDeepgramRef.current = dg.pause;
-      dg.pause(mutedRef.current);
+      dg.pause(micOff());
       openDeepgramRef.current = openDeepgram;
       webSpeechRef.current = startWebSpeech;
     }
@@ -1007,11 +1055,12 @@ export function useVoiceCall(opts: {
     return () => window.removeEventListener("pagehide", onHide);
   }, []);
 
-  // muted is on purpose: never nag about a mic they switched off themselves
-  const micTrouble = micTroubleRaw && !muted && status === "active";
-  return { status, setStatus, speaking, listening, heard, caption, startedAt, accept, hangUp, speak, endAfterSpeaking, greeted, patience, muted, toggleMute, micTrouble, micToast, inputId, swapInput };
+  // muted or on hold is on purpose: never nag about a mic they switched off themselves
+  const micTrouble = micTroubleRaw && !muted && !held && status === "active";
+  return { status, setStatus, speaking, listening, heard, caption, startedAt, accept, hangUp, speak, endAfterSpeaking, greeted, patience, muted, toggleMute, held, heldAt, toggleHold, micTrouble, micToast, inputId, swapInput };
 }
 
+const BACK_LINE = "i'm back, go ahead.";
 const SHORT_FILLERS = ["hmm.", "mm, okay.", "oh, okay.", "yeah, hmm."];
 const LONG_FILLERS = ["um, let me think that through for a second.", "hmm, give me a sec to think.", "okay, let me think about that."];
 function pickFiller(list: string[], last: { current: string }) {

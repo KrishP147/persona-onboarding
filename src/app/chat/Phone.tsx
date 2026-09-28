@@ -173,6 +173,9 @@ export function CallPhone({ skin, chat, zoom }: { skin: Skin; chat: Chat; zoom: 
             onHangup={() => call.hangUp("user_hangup")}
             muted={call.muted}
             onMute={call.toggleMute}
+            held={call.held}
+            heldAt={call.heldAt}
+            onHold={call.toggleHold}
           />
           <MicTrouble call={call} />
         </div>
