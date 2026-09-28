@@ -162,9 +162,13 @@ async function startDeepgram(sessionId: string, stream: MediaStream, onHeard: He
   try {
     const r = await fetch(`/api/voice/token?s=${encodeURIComponent(sessionId)}`, { cache: "no-store" });
     if (!r.ok) return null;
-    const { token } = (await r.json()) as { token: string };
+    const j = (await r.json()) as { token: string; keyterms?: unknown };
+    const token = j.token;
+    // Words to listen harder for (names, jargon); the route may not send any.
+    const keyterms = Array.isArray(j.keyterms) ? j.keyterms.filter((k): k is string => typeof k === "string" && !!k.trim()) : [];
     const lang = (navigator.language || "en").toLowerCase().startsWith("en") ? "en" : "multi";
     const q = new URLSearchParams({ model: "nova-3", language: lang, interim_results: "true", smart_format: "true", endpointing: "400", utterance_end_ms: "1000", vad_events: "true" });
+    for (const k of keyterms) q.append("keyterm", k);
     const ws = new WebSocket(`wss://api.deepgram.com/v1/listen?${q}`, ["bearer", token]);
     const opened = await new Promise<boolean>((resolve) => {
       ws.onopen = () => resolve(true);
