@@ -31,7 +31,7 @@ export function DeviceFrame({ skin, bp, zoom, dark, children }: { skin: Skin; bp
   const vars = { "--fw": `${f.w}px`, "--fh": `${f.h}px`, "--sx": `${f.x}px`, "--sy": `${f.y}px`, "--sw": `${f.screenW}px`, "--sh": `${f.screenH}px`, "--sr": `${f.r}px`, "--zoom": zoom } as CSSProperties;
   const sm = bp === "sm";
   // tailwind needs whole class names, so both breakpoints are spelled out
-  const outer = sm ? "sm:relative sm:w-[var(--fw)] sm:h-[var(--fh)] sm:[zoom:var(--zoom)] sm:shrink-0" : "lg:relative lg:w-[var(--fw)] lg:h-[var(--fh)] lg:[zoom:var(--zoom)] lg:shrink-0";
+  const outer = sm ? "w-full sm:relative sm:w-[var(--fw)] sm:h-[var(--fh)] sm:[zoom:var(--zoom)] sm:shrink-0" : "w-full lg:relative lg:w-[var(--fw)] lg:h-[var(--fh)] lg:[zoom:var(--zoom)] lg:shrink-0";
   const screen = sm
     ? "w-full h-dvh sm:absolute sm:left-[var(--sx)] sm:top-[var(--sy)] sm:w-[var(--sw)] sm:h-[var(--sh)] sm:rounded-[var(--sr)] overflow-hidden"
     : "w-full h-dvh lg:absolute lg:left-[var(--sx)] lg:top-[var(--sy)] lg:w-[var(--sw)] lg:h-[var(--sh)] lg:rounded-[var(--sr)] overflow-hidden";

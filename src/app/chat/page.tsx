@@ -77,7 +77,7 @@ export default function Home() {
   const frame = FRAMES[skin.id];
 
   return (
-    <main className="min-h-dvh bg-canvas text-ink flex flex-col">
+    <main className="min-h-dvh bg-canvas text-ink flex flex-col overflow-x-clip">
       <TopBar skin={picked?.id ?? null} setSkin={setSkin} showWhy={showWhy} toggleWhy={() => setShowWhy((v) => !v)} onRestart={restart} mock={chat.mock} />
       <div className={`flex-1 flex flex-wrap justify-center items-start gap-x-10 gap-y-6 sm:px-6 sm:pb-6 transition-opacity duration-300 ${picked ? "opacity-100" : "opacity-0"}`}>
         <DeviceFrame skin={skin} bp="sm" zoom={zoom}>

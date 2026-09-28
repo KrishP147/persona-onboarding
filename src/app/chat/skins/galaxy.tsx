@@ -80,10 +80,10 @@ function Header({ name, saved, onCall, callDisabled, onMenu }: HeaderProps) {
         </button>
         {/* one ui 8.5: avatar + name float in their own pill */}
         <div className="flex-1 min-w-0 flex">
-          <div className="max-w-full flex items-center gap-2.5 h-12 pl-1.5 pr-4 rounded-full" style={float}>
+          <div className="min-w-0 max-w-full flex items-center gap-2.5 h-12 pl-1.5 pr-4 rounded-full" style={float}>
             {saved ? <PersonaLogo size={36} /> : <UnknownAvatar size={36} />}
             <div className="min-w-0">
-              <div className="text-[17px] leading-[21px] font-semibold truncate">{name}</div>
+              <div className={`${saved ? "text-[17px]" : "text-[15px]"} leading-[21px] font-semibold truncate`}>{name}</div>
               {saved && <div className="text-[12px] leading-4 truncate" style={{ color: C.mute }}>{AGENT_NUMBER}</div>}
             </div>
           </div>
