@@ -11,7 +11,7 @@ import { webEnabled } from "../web";
 
 import { currentMeter, metered, percentile, recordTurn, type Meter } from "../usage";
 import { type Ctx, emitAgentText, ensureCard, goodbyeLine, guard, msg, outageLine } from "./context";
-import { CALL_NO, CARD_ASK, LAUGH_LEAD, CARD_WANT, CLEAR_BYE, DELEGATE, firstSentenceName, fixCallTypos, hintedAgentName, ownNameIn, DEMO_YES, GMAIL_TROUBLE, HOLD, INSULT_NAME, LAUGH, NAME_ASK, NAME_HINT, NEGATED_CALL, NOT_A_NAME, NO_CALLS, OFFERED_CALL, OWN_NAME, SEND_CMD, SEND_REQUEST, SENT_Q, SKIP_SETUP, STOP_TALKING, THANKS, USER_BYE, WAITING_ON_THEM, WANTS_OUT, YES, asTurnBy, asksForLink, gmailConsent, lastUserText, saidNow, saysBye } from "./intents";
+import { CALL_NO, CARD_ASK, LAUGH_LEAD, CARD_WANT, CLEAR_BYE, DELEGATE, firstSentenceName, fixCallTypos, hintedAgentName, ownNameIn, DEMO_YES, GMAIL_TROUBLE, HOLD, INSULT_NAME, LAUGH, NAME_ASK, NAME_HINT, NEGATED_CALL, NOT_A_NAME, NO_CALLS, OFFERED_CALL, OWN_NAME, SEND_CMD, SEND_REQUEST, SENT_Q, SKIP_SETUP, STOP_TALKING, repliedElsewhere, THANKS, USER_BYE, WAITING_ON_THEM, WANTS_OUT, YES, asTurnBy, asksForLink, gmailConsent, lastUserText, saidNow, saysBye } from "./intents";
 import { cleanModelText, dropDraftEcho, fence, nowLine, parseTypedEmail } from "./text";
 import { GMAIL_ASK_MARK, GUARD_PIPELINE, type TurnOpts, makeGuardEnv, sealGoodbye } from "./guards";
 import { LOOKUP_TOOLS, MAX_TOOL_ROUNDS, TERMS_LINK, TOOLS, WEB_TOOLS, gifAllowed, makeGif, runTool, saveDraftTool, sendEmailTool } from "./tools";
@@ -189,6 +189,8 @@ export async function captureAgentName(s: Session, channel: Channel, text: strin
   // The name question was asked in the last couple of exchanges ("call me" first, then "luna" still answers it).
   const askIdx = s.transcript.findLastIndex((m) => m.role === "agent" && NAME_ASK.test(m.text));
   if (askIdx < 0 || s.transcript.slice(askIdx + 1).filter((m) => m.role === "user").length > 2) return;
+  // a Reply to another message ("explain" on the intro) is about that message
+  if (repliedElsewhere(s, s.transcript.findLast((m) => m.role === "user")) && !NAME_HINT.test(text)) return;
   // a newer question ("what's up?") means this answers that, not the name
   if (!renamingDefault && !NAME_HINT.test(text) && !nameAskIsNewest(s, s.transcript.findLast((m) => m.role === "user"))) return;
   const own = text.trim().match(OWN_NAME);
@@ -243,6 +245,8 @@ export async function nameAmbiguity(s: Session, channel: Channel, text: string, 
     recordAsk(s, null);
     return out(ctx);
   }
+  // A Reply to some other message ("explain" on the intro) is about that message, never a name.
+  if (repliedElsewhere(s, userMsg)) return null;
   // Their answer to "is rowan your name, or what you'd like to call me?"
   const check = s.nameCheck;
   if (check) {
@@ -260,7 +264,8 @@ export async function nameAmbiguity(s: Session, channel: Channel, text: string, 
         recordAsk(s, null);
         return out(ctx);
       }
-      if (/^\s*(no|nah|nope|not really|lol no|haha no)\b/i.test(text)) {
+      // a bare "no" asks again; "no explain the message i replied to" is a request: the model answers it
+      if (/^\s*(no|nah|nope|not really|lol no|haha no)\b/i.test(text) && text.trim().split(/\s+/).length <= 3) {
         emitAgentText(ctx, "haha no worries. so what do you want to call me?");
         recordAsk(s, "agentName");
         return out(ctx);
@@ -665,7 +670,7 @@ export async function handleUserMessageInner(
   // They answered something else instead of naming it ("i need help with my inbox"): follow them, then a
   // double text takes "persona" as a default they can change. A short "hi" or "?" gets one more chance.
   let skippedName = false;
-  if (channel === "text" && !s.call.active && s.phase !== "graduated" && s.slots.agentName.status === "missing" && s.lastAskedSlot === "agentName" && !OWN_NAME.test(clean.trim()) && !DELEGATE.test(clean) && !LAUGH.test(clean) && !NAME_HINT.test(clean)) {
+  if (channel === "text" && !s.call.active && s.phase !== "graduated" && s.slots.agentName.status === "missing" && s.lastAskedSlot === "agentName" && !repliedElsewhere(s, userMsg) && !OWN_NAME.test(clean.trim()) && !DELEGATE.test(clean) && !LAUGH.test(clean) && !NAME_HINT.test(clean)) {
     const askIdx = s.transcript.findLastIndex((m) => m.role === "agent" && NAME_ASK.test(m.text));
     const replies = s.transcript.slice(askIdx + 1).filter((m) => m.role === "user").length;
     const e0 = await heard.catch(() => null);
@@ -718,7 +723,7 @@ export async function handleUserMessageInner(
   await Promise.all(named?.pending ?? []);
   const e = await heard;
   // Only rename the assistant from the extractor when they clearly meant to (answering the ask, or "call you X").
-  const meantAgentName = s.lastAskedSlot === "agentName" || /\b(call (you|yourself)|your name|name you|rename)\b/i.test(clean) || NAME_HINT.test(clean);
+  const meantAgentName = (s.lastAskedSlot === "agentName" && !repliedElsewhere(s, userMsg)) || /\b(call (you|yourself)|your name|name you|rename)\b/i.test(clean) || NAME_HINT.test(clean);
   await applyExtracted(s, meantAgentName ? e : { ...e, agentName: null }, async (value) => {
     const ctx: Ctx = { s, channel, actions: [], newMessages: [] };
     await runTool(ctx, "set_slot", { slot: "agentName", value });
@@ -736,6 +741,7 @@ export async function nameFirst(s: Session, channel: Channel, text: string, hear
   // The "Persona" default is a placeholder: naming it for real goes through here too (ack + card before anything else).
   if (channel !== "text" || s.call.active || (s.slots.agentName.status !== "missing" && !s.agentNameDefaulted)) return null;
   if (s.lastAskedSlot !== "agentName" && !NAME_HINT.test(text)) return null;
+  if (repliedElsewhere(s, s.transcript.findLast((m) => m.role === "user")) && !NAME_HINT.test(text)) return null;
   if (!NAME_HINT.test(text) && !nameAskIsNewest(s, s.transcript.findLast((m) => m.role === "user"))) return null;
   const e = await heard.catch(() => null);
   const value = (e?.agentName ?? hintedAgentName(text) ?? (s.lastAskedSlot === "agentName" ? firstSentenceName(text) : null))?.trim().replace(/\b\p{L}/gu, (c) => c.toUpperCase());

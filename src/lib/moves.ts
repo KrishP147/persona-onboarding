@@ -6,6 +6,7 @@
 // so you can see the research working. Sources: docs/journal/03-principles.md, 05-research.md.
 import type { Channel, Move, Session } from "./types";
 import { INBOUND_OWN_TURNS, userTurnsThisCall } from "./policy";
+import { replyFocus } from "./engine/intents";
 
 export interface MoveDef extends Move {
   instruction: string;
@@ -154,6 +155,12 @@ export const MOVES = {
     source: "grice (1975): quantity; fitzpatrick (2013): talk less, listen more",
     instruction: "Answer what they said, briefly and warmly, and stop. No question this turn: you asked something recently, so let the conversation breathe.",
   },
+  replied: {
+    id: "replied",
+    label: "they pointed at one message: answer about that one",
+    source: "clark & brennan (1991): grounding; grice (1975): relation",
+    instruction: "They used Reply on one message (quoted before their text). Answer about that message only, the way they asked (\"explain\" means explain it). No setup this turn: don't ask for a name, don't offer a call, don't bring up gmail.",
+  },
   graduate: {
     id: "graduate",
     label: "they know what they need: let them in",
@@ -181,6 +188,8 @@ export function chooseMove(s: Session, channel: Channel, opts: { callFirst: bool
   const text = lastUser(s);
   const need = s.slots.helpNeed;
   if (s.phase === "graduated") return MOVES.help;
+  // Reply on one message: that message is the topic, not setup.
+  if (replyFocus(s)) return MOVES.replied;
   if (opts.callFirst && channel === "text") return MOVES.askCall;
   // Two turns of pure help with setup still open: help again, then one light step back toward what's
   // missing (a run went a whole meal plan without ever returning to the name or the call).

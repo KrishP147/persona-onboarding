@@ -3,7 +3,7 @@ import { getSecret, loadSession, newSession, saveSession, setSecret, withSession
 import { CLAIMS_LINK, GUARD_PIPELINE, dropAskedQuestions, fixCallTypos, makeGuardEnv, INTENTS, cleanModelText, cutRepeatQuestions, fence, fromEmailOnly, runTool, handleEvent, normQuestion, saysBye, softenGmailDemand, handleUserMessage, nowLine, parseTypedEmail, MAX_BUBBLES, emitAgentText } from "../src/lib/engine";
 import { computeDirective } from "../src/lib/policy";
 import { KNOW_ASK, fixTypoInNeed, mergeGrowingUtterance, toTurns } from "../src/lib/engine/turn";
-import { crc32, pick } from "../src/lib/moves";
+import { chooseMove, crc32, pick } from "../src/lib/moves";
 import { readMood } from "../src/lib/mood";
 import { DEMO_INBOX, scoreItem } from "../src/lib/triage";
 import type { TurnResult } from "../src/lib/types";
@@ -529,6 +529,27 @@ async function main() {
   check("a reply carries its quote to the model", rp.transcript.find((m) => m.id === "u-rp1")?.replyTo === "a-rp1" && /\[replying to your message: "want me to check your inbox/.test(rpTurn), rpTurn.slice(0, 160));
   await handleUserMessage(rp, "text", "ok", undefined, false, "u-rp2", undefined, "nope-not-real");
   check("a reply to an unknown message is just a message", !rp.transcript.find((m) => m.id === "u-rp2")?.replyTo);
+  // replay of a real run: Reply "explain" on the capabilities intro. It's about that message, not the name.
+  const rx = newSession();
+  await handleEvent(rx, { type: "open" });
+  const caps = rx.transcript.find((m) => m.role === "agent" && /help with:/.test(m.text))!;
+  const rxR = await handleUserMessage(rx, "text", "explain", undefined, false, "u-rx1", undefined, caps.id);
+  check("Reply 'explain' on the intro: no name guess, no name saved", !/call me\?/.test(said(rxR)) && !rx.nameCheck && rx.slots.agentName.status === "missing" && !rx.agentNameDefaulted, said(rxR));
+  // mid-turn (their Reply is the newest message), the move is about that message and no call offer jumps in
+  rx.transcript.push({ id: "u-rx2", role: "user", channel: "text", text: "and this?", ts: Date.now(), replyTo: caps.id });
+  check("...and the turn's move is about the replied message", chooseMove(rx, "text", { callFirst: true, mayAsk: true }).id === "replied" && !computeDirective(rx, "text").callFirst);
+  const rxCheck = newSession();
+  await handleEvent(rxCheck, { type: "open" });
+  rxCheck.nameCheck = { value: "Explain", as: "confirm" };
+  const rxNo = await handleUserMessage(rxCheck, "text", "no explain the message i replied to");
+  check("'no, <a request>' to a name check isn't a bare no: no name re-ask", !/what do you want to call me\?/.test(said(rxNo)), said(rxNo));
+  // quiet after the name question: it never offered a call, so the nudge can't say "no pressure on the call"
+  const rxIdle = newSession();
+  await handleEvent(rxIdle, { type: "open" });
+  rxIdle.transcript.push({ id: "u-ri1", role: "user", channel: "text", text: "hmm", ts: Date.now() }, { id: "a-ri1", role: "agent", channel: "text", text: "haha no worries. so what do you want to call me?", ts: Date.now() });
+  rxIdle.transcript.forEach((m) => (m.ts -= 200000));
+  const rxN = await handleEvent(rxIdle, { type: "text_idle" });
+  check("name question left on read: no 'no pressure on the call'", !/\bcall\b/i.test(said(rxN)), said(rxN));
 
   // naming for sure: the direct answer, an explicit sentence, or a Reply to the name question. anything else: ask.
   const afterChat = async () => {
