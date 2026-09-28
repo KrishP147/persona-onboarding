@@ -1,6 +1,7 @@
 "use client";
 // desktop: one card per agent turn, anchored beside its bubble like a docs comment
 import { useCallback, useEffect, useLayoutEffect, useRef, useState, type RefObject } from "react";
+import { Guards } from "./Guards";
 import { PIPELINE, type Turn } from "./frameworks";
 
 const GAP = 8;
@@ -238,6 +239,7 @@ export function WhySidebar({
                     <div className="mt-1.5 text-[15px] leading-5 font-medium text-ink tracking-[-0.1px]">{t.move.label}</div>
                     <div className={`mt-1 text-[13px] leading-[18px] text-ink-mute ${open ? "" : "line-clamp-2"}`}>&ldquo;{t.m.text}&rdquo;</div>
                     <div className={`mt-1.5 text-[12px] leading-4 text-ink-faint italic ${open ? "" : "line-clamp-1"}`}>{t.move.source}</div>
+                    <Guards guards={t.guards} ink="var(--p-ink-mute)" mute="var(--p-ink-faint)" line="var(--p-step-200)" />
                   </button>
                   {open && (
                     <div id={`why-more-${t.m.id}`} className="pl-4 pr-3.5 pb-3.5 -mt-0.5 text-[13px] leading-[19px] text-ink-mute space-y-2">

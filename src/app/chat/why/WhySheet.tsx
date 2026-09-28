@@ -2,6 +2,7 @@
 // phone: a half-height sheet with one turn's card. ios grabber sheet or m3 bottom sheet, per skin.
 import { useEffect, useRef, useState } from "react";
 import type { Skin } from "../skins/types";
+import { Guards } from "./Guards";
 import { PIPELINE, type Turn } from "./frameworks";
 
 export function WhySheet({ skin, turns, id, onNav, onClose, metrics }: { skin: Skin; turns: Turn[]; id: string; onNav: (id: string) => void; onClose: () => void; metrics?: string | null }) {
@@ -94,6 +95,7 @@ export function WhySheet({ skin, turns, id, onNav, onClose, metrics }: { skin: S
         <p className="mt-2 text-[12.5px] leading-[18px] italic" style={{ color: c.mute }}>
           {t.move.source}
         </p>
+        <Guards guards={t.guards} ink={c.ink} mute={c.mute} line={c.line} />
         <p className="mt-2 text-[12px] leading-4" style={{ color: c.mute }}>
           traced: code picked this move; the model wrote the words.
         </p>

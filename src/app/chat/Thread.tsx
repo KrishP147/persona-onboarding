@@ -7,6 +7,7 @@ import { KnowCard, useGradSlot } from "./cards/KnowCard";
 import type { Pos, Skin } from "./skins/types";
 import type { Chat } from "./useChat";
 import type { Turn } from "./why/frameworks";
+import { Guards } from "./why/Guards";
 
 export interface WhyHooks {
   byId: Map<string, Turn>;
@@ -127,8 +128,11 @@ function WhyBadge({ turn, skin, why }: { turn: Turn; skin: Skin; why: WhyHooks }
         >
           <span className="flex items-start gap-2 rounded-xl px-2.5 py-1.5 text-[12px] leading-4 border" style={{ background: skin.why.surface, borderColor: skin.why.line, color: skin.why.ink }}>
             <span className="mt-[3px] w-1.5 h-1.5 rounded-full shrink-0" style={{ background: turn.fw.color }} aria-hidden />
-            <span className="line-clamp-2">
-              <span className="font-semibold">{turn.fw.label}</span> · {turn.move.label}
+            <span>
+              <span className="line-clamp-2">
+                <span className="font-semibold">{turn.fw.label}</span> · {turn.move.label}
+              </span>
+              <Guards guards={turn.guards} ink={skin.why.ink} mute={skin.why.mute} line={skin.why.line} compact />
             </span>
           </span>
         </button>
