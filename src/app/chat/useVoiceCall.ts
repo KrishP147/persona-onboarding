@@ -1,6 +1,7 @@
 "use client";
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { VoiceStyle } from "@/lib/types";
+import { turnEndDelay } from "./turnEnd";
 
 // Voice layer. Speech in: Deepgram streaming (short-lived token from /api/voice/token), else
 // browser Web Speech. Speech out: Cartesia via /api/voice/tts, else browser speechSynthesis.
@@ -8,8 +9,7 @@ import type { VoiceStyle } from "@/lib/types";
 //
 // Turn-taking rules (see docs/journal/04-voice-and-edge-cases.md):
 // - the user's turn ends after a pause whose length depends on whether they sound finished:
-//   ~0.7s when complete, longer mid-phrase or while spelling things out (humans gap ~0-200ms,
-//   and gaps past ~600-700ms start to read as hesitation: Stivers et al. 2009, Kendrick & Torreira 2015)
+//   ~0.7s when complete, much longer when it sounds unfinished (see turnEnd.ts)
 // - silence only counts when nobody is talking and nothing is pending; first reprompt at ~6s,
 //   and much longer while the user is off doing a task like the gmail sign-in
 // - the user can talk over the agent (barge-in); echoes of the agent's own words are ignored
@@ -31,22 +31,8 @@ type Rec = {
 // People tolerate a lot more quiet on a call with someone who is there for them than a form does;
 // quiet is fine: the only check-in comes after 20s (10s at the start of a call, in case they can't hear us).
 const SILENCE_MS = 25000; // first silence window; later windows come from the server (policy.ts silence ladder)
-const TURN_END_COMPLETE_MS = 700;
-const TURN_END_MIDPHRASE_MS = 850;
-const TURN_END_SPELLING_MS = 1400;
-const TRAILING = /\b(and|but|or|so|because|the|a|an|my|is|are|to|of|with|for|um+|uh+|like|then|if|at|dot)$/i;
-const SPELLING = /(\d\s*){3,}$|@|\bdot\b|\bat\b\s*$|\bemail is\b|\bnumber is\b|\baddress is\b/i;
-
-// How long to wait before deciding the user is done talking.
-function turnEndDelay(text: string, speechFinal = false) {
-  const t = text.trim();
-  if (SPELLING.test(t)) return TURN_END_SPELLING_MS;
-  if (TRAILING.test(t) || /,$/.test(t)) return TURN_END_MIDPHRASE_MS;
-  // Deepgram heard a pause AND the sentence sounds finished: answer quickly. A pause mid-thought
-  // ("yes. can you type this...") gets the normal wait, so one sentence isn't chopped into three turns.
-  if (speechFinal && /[.?!]$/.test(t)) return 250;
-  return TURN_END_COMPLETE_MS;
-}
+// They kept talking right after a turn went out ("...so i'm just" / "curious."): one turn, not two.
+const CONTINUE_MS = 1500;
 const VOICE_KEY = "persona-voice-";
 
 const MIC: MediaTrackConstraints = { echoCancellation: true, noiseSuppression: true, autoGainControl: true };
@@ -338,6 +324,8 @@ export function useVoiceCall(opts: {
   const interruptedRef = useRef(false);
   const quietReplyRef = useRef(0); // turn whose reply answers a cut-off (0: none): don't speak a bare "mm"
   const turnSeqRef = useRef(0);
+  const lastSentRef = useRef<{ text: string; at: number } | null>(null); // the last turn sent, and when
+  const continueRef = useRef(""); // a sent turn they're still finishing: resent with the rest
   const cutHeardRef = useRef(""); // what they actually heard of the line they cut off
   const pendingEndRef = useRef(false);
   const usingDeepgramRef = useRef(false);
@@ -686,6 +674,8 @@ export function useVoiceCall(opts: {
     patienceRef.current = null;
     interruptedRef.current = false;
     quietReplyRef.current = 0;
+    lastSentRef.current = null;
+    continueRef.current = "";
     setListening(false);
     setSpeaking(false);
     setHeard("");
@@ -788,11 +778,16 @@ export function useVoiceCall(opts: {
 
   // User finished a turn: send it, with a spoken filler if the reply is slow.
   const flushTurn = useCallback(() => {
-    const text = bufferRef.current.trim();
+    const own = bufferRef.current.trim();
     bufferRef.current = "";
+    // the rest of a sentence already sent goes out whole, as a turn that talks over the first half's reply
+    const prev = own ? continueRef.current : "";
+    continueRef.current = "";
+    const text = prev ? `${prev} ${own}` : own;
     if (text) setHeard(text); // keep their full sentence on screen until they speak again
     if (!text || !activeRef.current) return;
-    const interrupted = interruptedRef.current;
+    lastSentRef.current = { text, at: Date.now() };
+    const interrupted = interruptedRef.current || !!prev;
     const heardBefore = interrupted ? cutHeardRef.current : undefined;
     cutHeardRef.current = "";
     interruptedRef.current = false;
@@ -868,6 +863,8 @@ export function useVoiceCall(opts: {
       queueRef.current = 0;
       speakingTextRef.current = "";
       bufferRef.current = ""; // half a sentence before hold isn't a turn
+      continueRef.current = "";
+      lastSentRef.current = null;
       setSpeaking(false);
       setCaption("");
       setHeard("");
@@ -916,6 +913,9 @@ export function useVoiceCall(opts: {
       // unless it's clearly them cutting in: 3+ words we didn't just say, or a lone "wait"/"stop".
       // Ignored audio never shows up as "you".
       const now = Date.now();
+      // still finishing the sentence that just went out (reply in flight or barely started)
+      const sent = lastSentRef.current;
+      const continues = !!sent && (span ? span[0] : now) - sent.at < CONTINUE_MS && (waitingRef.current || queueRef.current > 0);
       const recent = lastSpokenRef.current;
       const overlapping = span ? playbackRef.current.filter((p) => span[0] < (p.end ?? now) + 300 && span[1] > p.start) : [];
       const duringUs = queueRef.current > 0 || overlapping.length > 0 || (!span && now - recent.endedAt < 1200);
@@ -925,7 +925,8 @@ export function useVoiceCall(opts: {
         const novel = heardWords.filter((w) => !said.some((x) => similar(w, x) >= 0.6));
         const cutsIn = novel.length >= 3 && novel.length / heardWords.length >= 0.5;
         const saysStop = heardWords.length <= 2 && STOP_WORDS.test(heardWords[0] ?? "") && !said.some((x) => similar(heardWords[0], x) >= 0.8);
-        if (!cutsIn && !saysStop) return;
+        const goesOn = continues && novel.length === heardWords.length; // none of it is our echo
+        if (!cutsIn && !saysStop && !goesOn) return;
       }
       // Real speech over the agent: stop talking and listen (barge-in).
       if (queueRef.current > 0) {
@@ -938,6 +939,11 @@ export function useVoiceCall(opts: {
         speakingTextRef.current = "";
         setSpeaking(false);
         interruptedRef.current = true;
+      }
+      if (continues && sent && !continueRef.current) {
+        continueRef.current = sent.text;
+        lastSentRef.current = null;
+        clear(fillerTimer); // no "hmm" over them while they finish
       }
       clear(silenceTimer);
       if (finals.trim()) bufferRef.current += ` ${finals.trim()}`;
@@ -956,7 +962,7 @@ export function useVoiceCall(opts: {
         if (interim.trim() && !finals.trim()) bufferRef.current += ` ${interim.trim()}`;
         flushTurn();
       };
-      turnTimer.current = setTimeout(() => fire(0), turnEndDelay(`${bufferRef.current} ${interim}`, speechFinal));
+      turnTimer.current = setTimeout(() => fire(0), turnEndDelay(`${bufferRef.current} ${interim}`, speechFinal, usingDeepgramRef.current));
     };
 
     // Prefer Deepgram; fall back to the browser recognizer if it can't start or drops mid-call.
