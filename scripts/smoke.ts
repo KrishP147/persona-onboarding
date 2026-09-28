@@ -1,6 +1,6 @@
 // Keyless smoke test of the engine's safety nets (mock mode). Run: pnpm tsx scripts/smoke.ts
 import { loadSession, newSession, saveSession, withSession } from "../src/lib/store";
-import { cleanModelText, handleEvent, handleUserMessage, nowLine, parseTypedEmail } from "../src/lib/engine";
+import { cleanModelText, handleEvent, softenGmailDemand, handleUserMessage, nowLine, parseTypedEmail } from "../src/lib/engine";
 import { readMood } from "../src/lib/mood";
 import { DEMO_INBOX, scoreItem } from "../src/lib/triage";
 import type { TurnResult } from "../src/lib/types";
@@ -132,6 +132,12 @@ async function main() {
   check("promises it can't keep are dropped", cant === "got it, next wednesday.", cant);
   const canCall = cleanModelText("i'll call you in a sec. i can't call the dentist from here yet, but here's a script.");
   check("calling the user and honest can'ts survive", canCall.includes("call you") && canCall.includes("can't call the dentist"), canCall);
+  const demand = newSession();
+  const soft = softenGmailDemand(demand, "voice", "Got it. Dentist and inbox, let's go. First though, I'll need your Gmail connected so I can see what we're working with.");
+  check("a gmail demand becomes the one polite ask", !/need your gmail/i.test(soft) && /want me to text you a link/i.test(soft) && soft.startsWith("Got it."), soft);
+  demand.transcript.push({ ...demand.transcript[0], id: "x", role: "agent", channel: "voice", text: "want me to text you a link to connect your gmail?", ts: Date.now() } as never);
+  const softAgain = softenGmailDemand(demand, "voice", "Sure. I'll need your inbox connected first.");
+  check("the polite ask is never repeated", softAgain === "Sure.", softAgain);
   const typed = parseTypedEmail("here's a draft:\n\nto: a@b.com\nsubject: late\n\nhi,\n\nrunning 10 min late.\n\nbest,\nkrish\n\nlet me know if you'd like any changes, or if you'd like me to send it.");
   check("typed email parsed, assistant chatter left out", typed?.to === "a@b.com" && typed.subject === "late" && typed.body === "hi,\n\nrunning 10 min late.\n\nbest,\nkrish", JSON.stringify(typed));
   check("a later \"send\" is not a name", !/send/i.test(filler.slots.agentName.value ?? "") && !cmd.newMessages.some((m) => m.kind === "contact_card"), said(cmd));

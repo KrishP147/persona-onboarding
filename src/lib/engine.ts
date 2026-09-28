@@ -298,7 +298,20 @@ function gmailAsk(s: Session, channel: Channel = "text") {
   return `want me to ${GMAIL_ASK_MARK}?${why} i never send anything without your ok. or you can just paste an email here.`;
 }
 // Gmail pitches the model slips into other turns (help first, ask later).
-const GMAIL_PITCH = /\b(gmail|link|connect (your|my) (email|inbox|account)|read[- ]only|paste an email|without asking|pull up (your|the|those) (emails|inbox))\b/i;
+// Gmail framed as a requirement rather than an offer.
+const GMAIL_DEMAND = /\b(i'?ll need|i need|you'?ll need|need you to|i have to have|have to (connect|get)|first,? (though,? )?(i'?ll |we'?ll )?need)\b[^.?!]{0,50}\b(gmail|inbox|email|google)\b/i;
+
+// Even when they brought up their inbox, gmail is never a demand ("first though, i'll need your gmail
+// connected"): that line becomes the one polite, skippable ask (once, never while a link is out).
+export function softenGmailDemand(s: Session, channel: Channel, text: string) {
+  if (s.slots.gmail.status !== "missing" || !GMAIL_DEMAND.test(text)) return text;
+  const kept = text.split(SENTENCE_BREAK).filter((x) => !GMAIL_DEMAND.test(x)).join(" ").trim();
+  const askedBefore = s.transcript.some((m) => m.role === "agent" && m.text.includes(GMAIL_ASK_MARK));
+  const ask = !askedBefore && !linkPending(s) ? gmailAsk(s, channel) : "";
+  const lead = channel === "voice" ? capSentences(kept.replace(/\?[^?]*$/, "."), 1) : kept;
+  return `${lead}${lead && ask ? (channel === "voice" ? " " : "\n\n") : ""}${ask}`.trim() || text;
+}
+const GMAIL_PITCH =/\b(gmail|link|connect (your|my) (email|inbox|account)|read[- ]only|paste an email|without asking|pull up (your|the|those) (emails|inbox))\b/i;
 
 // "send me the link" counts unless that same sentence says not to ("i don't have to worry about..."
 // three sentences later once vetoed a clear "connect to my gmail").
@@ -761,6 +774,9 @@ async function turn(
       text = `${lead}${lead ? (channel === "voice" ? " " : "\n\n") : ""}${gmailAsk(s, channel)}`.trim();
     }
     else if (!raisedIt && help) text = help;
+    // Even when they brought up their inbox, gmail is never a demand ("first though, i'll need your gmail
+    // connected"): that line becomes the one polite, skippable ask (once, never while a link is out).
+    else if (ctx.move?.id !== "ask-gmail") text = softenGmailDemand(s, channel, text);
   }
   // Already connected, declined, or the link is already sitting in their texts: no more gmail asks
   // (the most common grader note: "repeated the gmail request after it was connected / agreed").
