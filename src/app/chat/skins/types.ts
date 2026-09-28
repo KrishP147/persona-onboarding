@@ -57,6 +57,23 @@ export interface CallProps {
   unread?: number;
 }
 
+// colors for in-thread rich cards (what i know, send confirm), in the phone's own palette
+export interface RichTheme {
+  ink: string;
+  mute: string;
+  accent: string;
+  onAccent: string; // text on a filled accent button
+  line: string; // hairlines between rows
+  danger: string;
+  track: string; // empty part of a progress bar
+}
+
+export interface RichCardProps {
+  title: string;
+  children: ReactNode;
+  pos?: Pos;
+}
+
 export interface Skin {
   id: SkinId;
   label: string;
@@ -80,4 +97,6 @@ export interface Skin {
   Banner: FC<{ tone: "info" | "error"; children: ReactNode }>;
   UnknownNotice?: FC; // iphone: "not in your contacts" line over the composer
   CallScreen: FC<CallProps>;
+  RichCard: FC<RichCardProps>; // skin-native shell for rich cards in the thread
+  rich: RichTheme;
 }

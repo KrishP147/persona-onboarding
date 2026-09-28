@@ -1,7 +1,7 @@
 "use client";
 // imessage on ios 26 (liquid glass), light. values from docs/design/phone-ui-spec.md A1
 import type { CSSProperties, ReactNode } from "react";
-import type { BubbleProps, CallProps, ComposerProps, HeaderProps, Pos, Skin } from "./types";
+import type { BubbleProps, CallProps, ComposerProps, HeaderProps, Pos, RichCardProps, Skin } from "./types";
 import { AGENT_NUMBER, BubbleBody, BubbleIcon, GoogleG, MicIcon, PersonaLogo, PersonSilhouette, PhoneIcon, RecTimer, callLog, eventKind, isToday, time, useClock, useElapsed } from "./shared";
 
 const BLUE = "#0088FF";
@@ -346,6 +346,21 @@ function ContactCard({ name, saved, onSave, pos }: { name: string; saved: boolea
   );
 }
 
+// rich card: a grey received bubble with a title row, like a business chat card
+function RichCard({ title, children, pos = "single" }: RichCardProps) {
+  return (
+    <div data-role="agent" className={`${pos === "single" || pos === "first" ? "pt-[9px]" : "pt-[2px]"} flex justify-start`}>
+      <section aria-label={title} className="relative isolate w-[300px] max-w-[88%] rounded-[18px] text-black" style={{ background: RECV }}>
+        <div className="px-3 pt-[10px] pb-1.5 text-[13px] leading-[18px] font-semibold tracking-[-0.08px]" style={{ color: GRAY }}>
+          {title}
+        </div>
+        {children}
+        {hasTail(pos) && <Tail mine={false} color={RECV} />}
+      </section>
+    </div>
+  );
+}
+
 function Media({ src }: { src: string }) {
   return (
     <div data-role="agent" className="pt-[9px] flex justify-start">
@@ -485,4 +500,6 @@ export const iphone: Skin = {
   Banner,
   UnknownNotice,
   CallScreen,
+  RichCard,
+  rich: { ink: "#000", mute: GRAY, accent: BLUE, onAccent: "#fff", line: "rgba(0,0,0,.1)", danger: RED, track: "rgba(0,0,0,.1)" },
 };
