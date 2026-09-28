@@ -106,11 +106,9 @@ export function TopBar({
             {showWhy ? "Hide reasoning" : "Show reasoning"}
           </Pill>
         </span>
-        <span className="hidden lg:block">
-          <Pill onClick={toggleTypingHints} pressed={typingHints}>
-            Typing hints
-          </Pill>
-        </span>
+        <Pill onClick={toggleTypingHints} pressed={typingHints}>
+          Typing hints
+        </Pill>
         <Pill onClick={onRestart}>Restart</Pill>
       </div>
     </nav>
