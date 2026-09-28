@@ -513,6 +513,27 @@ async function main() {
   emitAgentText(dashCtx, "anything else – just text or call me. weather — sunny. highs 9–11");
   const dash = dashCtx.newMessages.map((m) => m.text).join(" ");
   check("no em dashes or spaced en dashes in replies", !/—| – /.test(dash) && /9–11/.test(dash), dash);
+  // "just let me in" is a skip; everything in one message (name, link, call) gets everything
+  const lmi = newSession();
+  await handleEvent(lmi, { type: "open" });
+  await handleUserMessage(lmi, "text", "just let me in");
+  check("'just let me in' graduates", lmi.phase === "graduated", lmi.phase);
+  const aio = newSession();
+  await handleEvent(aio, { type: "open" });
+  const aioR = await handleUserMessage(aio, "text", "call you nova, i need help sorting my inbox, send me the gmail link, and call me");
+  check("all in one message: card, gmail link and the call", aioR.newMessages.some((m) => m.kind === "contact_card") && aioR.newMessages.some((m) => m.kind === "gmail_link") && aioR.actions.some((a) => a.type === "start_call"), said(aioR));
+  // easter egg: a persona team name gets "is this THE zach?", a yes gives the model their public bio, then normal
+  const egg = newSession();
+  await handleEvent(egg, { type: "open" });
+  await handleUserMessage(egg, "text", "luna");
+  egg.transcript.push({ id: "a-egg", role: "agent", channel: "text", text: "and what's your name?", ts: Date.now() });
+  const egg1 = await handleUserMessage(egg, "text", "i'm zach");
+  check("team name: 'woah, is this THE zach? founder of persona?'", /is this THE zach\? founder of persona\?/.test(said(egg1)) && egg.teamGuess === "zach", said(egg1));
+  await handleUserMessage(egg, "text", "haha yes");
+  check("...a yes: they're recognized (bio goes to the model), asked only once", egg.teamMember === "zach" && !/is this THE/.test(said(await handleUserMessage(egg, "text", "anyway i need help with email"))));
+  const egg2 = newSession();
+  egg2.slots.userName = { value: "Sam", status: "filled", asks: 1, source: "text", updatedAt: Date.now() };
+  check("...other names: nothing", !/is this THE/.test(said(await handleUserMessage(egg2, "text", "hey"))) && !egg2.teamGuess);
   const yo = newSession();
   await handleEvent(yo, { type: "open" });
   await handleUserMessage(yo, "text", "yo");
