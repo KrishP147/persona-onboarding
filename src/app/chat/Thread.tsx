@@ -43,8 +43,9 @@ export function Thread({ skin, chat, why, scrollRef }: { skin: Skin; chat: Chat;
   const grad = useGradSlot(chat, thread);
   const gradAt = grad.at;
   const draftId = draftMsgId(session);
-  // after setup, the send card sits under the what-i-know card so the loop closes in one place
-  const draftUnder = gradAt !== null && !!draftId;
+  const draftIdx = draftId ? thread.findIndex((m) => m.id === draftId) : -1;
+  // a draft from before setup ended moves under the what-i-know card (shown once, not twice); later drafts stay in place
+  const draftUnder = gradAt !== null && draftIdx >= 0 && (gradAt === -1 || draftIdx <= gradAt);
   const know = gradAt !== null && (
     <>
       <KnowCard skin={skin} chat={chat} setupMs={grad.setupMs} pos={draftUnder ? "first" : "single"} />
@@ -64,7 +65,9 @@ export function Thread({ skin, chat, why, scrollRef }: { skin: Skin; chat: Chat;
         const turn = why.byId.get(m.id);
         const lit = turn && (why.hoverId === m.id || why.activeId === m.id) ? turn.fw.color : null;
         let body: ReactNode;
-        if (m.kind === "event") body = <S.EventRow text={m.text} />;
+        const moved = draftUnder && m.id === draftId;
+        if (moved) body = null;
+        else if (m.kind === "event") body = <S.EventRow text={m.text} />;
         else if (m.kind === "gmail_link") body = <S.GmailCard pos={pos} connected={session?.slots.gmail.status === "filled"} onConnect={chat.connectGmail} />;
         else if (m.kind === "gif") body = <S.Media src={m.text} />;
         else if (m.kind === "link_preview") body = <S.LinkPreview url={m.text} pos={pos} />;
@@ -93,7 +96,7 @@ export function Thread({ skin, chat, why, scrollRef }: { skin: Skin; chat: Chat;
             >
               {showTime && <S.DateStamp ts={m.ts} first={i === 0} />}
               {body}
-              {turn && why.inline !== "never" && <WhyBadge turn={turn} skin={skin} why={why} />}
+              {turn && !moved && why.inline !== "never" && <WhyBadge turn={turn} skin={skin} why={why} />}
             </div>
             {gradAt === i && know}
           </Fragment>
