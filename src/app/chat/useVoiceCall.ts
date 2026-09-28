@@ -49,6 +49,19 @@ function turnEndDelay(text: string, speechFinal = false) {
 }
 const VOICE_KEY = "persona-voice-";
 
+const MIC: MediaTrackConstraints = { echoCancellation: true, noiseSuppression: true, autoGainControl: true };
+// Dead mic: true digital silence (a quiet room still has a noise floor well above this) for 4s.
+const DEAD_RMS = 1e-4;
+const DEAD_MS = 4000;
+const TOAST_MS = 2500;
+
+// Which input the OS calls default right now (chrome lists a "default" entry; others put it first).
+const defaultInputKey = (list: MediaDeviceInfo[]) => {
+  const d = list.find((x) => x.deviceId === "default") ?? list[0];
+  return d ? `${d.deviceId}|${d.groupId}|${d.label}` : "";
+};
+const audioInputs = async () => (await navigator.mediaDevices.enumerateDevices()).filter((d) => d.kind === "audioinput");
+
 const VOICE_HINTS: Record<VoiceStyle, RegExp> = {
   feminine: /female|samantha|zira|aria|jenny|susan|victoria|karen|moira|tessa|libby|sonia|emma|ava/i,
   masculine: /\bmale|david|guy|daniel|mark|fred|ryan|thomas|george|andrew|brian/i,
@@ -140,9 +153,12 @@ function sentences(text: string) {
 // span: when the heard audio happened (wall clock ms), from deepgram's timestamps.
 type Heard = (finals: string, interim: string, speechFinal?: boolean, span?: [number, number]) => void;
 
-// Deepgram live transcription straight from the browser. Resolves to a stop function, or null
-// if it can't start (no token, blocked socket): the caller falls back to Web Speech.
-async function startDeepgram(sessionId: string, stream: MediaStream, onHeard: Heard, onDrop: () => void, onSpeechStart: () => void): Promise<(() => void) | null> {
+type Deepgram = { stop: () => void; swap: (stream: MediaStream) => Promise<void> };
+
+// Deepgram live transcription straight from the browser. Resolves to stop + swap (a new mic
+// stream, same socket), or null if it can't start (no token, blocked socket): the caller falls
+// back to Web Speech.
+async function startDeepgram(sessionId: string, stream: MediaStream, onHeard: Heard, onDrop: () => void, onSpeechStart: () => void): Promise<Deepgram | null> {
   try {
     const r = await fetch(`/api/voice/token?s=${encodeURIComponent(sessionId)}`, { cache: "no-store" });
     if (!r.ok) return null;
@@ -160,11 +176,15 @@ async function startDeepgram(sessionId: string, stream: MediaStream, onHeard: He
       return null;
     }
     const mime = ["audio/webm;codecs=opus", "audio/webm", "audio/mp4"].find((m) => MediaRecorder.isTypeSupported(m));
-    const rec = new MediaRecorder(stream, mime ? { mimeType: mime } : undefined);
-    rec.ondataavailable = (e) => {
-      if (e.data.size && ws.readyState === WebSocket.OPEN) ws.send(e.data);
+    const record = (s: MediaStream) => {
+      const r = new MediaRecorder(s, mime ? { mimeType: mime } : undefined);
+      r.ondataavailable = (e) => {
+        if (e.data.size && ws.readyState === WebSocket.OPEN) ws.send(e.data);
+      };
+      r.start(250);
+      return r;
     };
-    rec.start(250);
+    let rec = record(stream);
     const streamStart = Date.now(); // deepgram's timestamps count from here
     const keepAlive = setInterval(() => ws.readyState === WebSocket.OPEN && ws.send(JSON.stringify({ type: "KeepAlive" })), 8000);
     let stopped = false;
@@ -189,7 +209,7 @@ async function startDeepgram(sessionId: string, stream: MediaStream, onHeard: He
       } catch {}
       onDrop();
     };
-    return () => {
+    const stop = () => {
       stopped = true;
       clearInterval(keepAlive);
       try {
@@ -200,6 +220,24 @@ async function startDeepgram(sessionId: string, stream: MediaStream, onHeard: He
         ws.close();
       } catch {}
     };
+    // New mic, same socket: let the old recorder flush its last chunk, then record the new stream.
+    const swap = async (next: MediaStream) => {
+      if (stopped) return;
+      const old = rec;
+      await new Promise<void>((resolve) => {
+        if (old.state === "inactive") return resolve();
+        old.onstop = () => resolve();
+        setTimeout(resolve, 500);
+        try {
+          old.stop();
+        } catch {
+          resolve();
+        }
+      });
+      if (stopped || ws.readyState !== WebSocket.OPEN) return;
+      rec = record(next);
+    };
+    return { stop, swap };
   } catch {
     return null;
   }
@@ -246,6 +284,7 @@ export function useVoiceCall(opts: {
   const patienceRef = useRef<number | null>(null); // one-shot longer silence window
   const streamRef = useRef<MediaStream | null>(null);
   const stopDeepgramRef = useRef<(() => void) | null>(null);
+  const swapDeepgramRef = useRef<((s: MediaStream) => Promise<void>) | null>(null);
   const styleRef = useRef<VoiceStyle>("neutral"); // locked when the call connects
   const cloudTtsRef = useRef(true); // flips off for the rest of the call after a failure
   const genRef = useRef(0); // bumps on barge-in/hangup so queued audio is dropped
@@ -258,6 +297,25 @@ export function useVoiceCall(opts: {
   useEffect(() => {
     optsRef.current = opts;
   });
+  // Mic health: a dead-mic watchdog, input switching, and following the OS default mid-call.
+  const [micTroubleRaw, setMicTrouble] = useState(false);
+  const [micToast, setMicToast] = useState<string | null>(null);
+  const [inputId, setInputId] = useState<string | null>(null);
+  const watchRef = useRef<{
+    ctx: AudioContext;
+    analyser: AnalyserNode;
+    source: MediaStreamAudioSourceNode | null;
+    timer: ReturnType<typeof setInterval>;
+    offTrack: () => void;
+    offDevices: () => void;
+    lastEnergy: number;
+    defaultKey: string;
+  } | null>(null);
+  const silentRef = useRef(false); // no energy for DEAD_MS
+  const trackTroubleRef = useRef(false); // the track itself says muted/ended
+  const pickedRef = useRef<string | undefined>(undefined); // an input they chose; undefined follows the OS default
+  const swapSeqRef = useRef(0);
+  const toastTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const clear = (t: React.MutableRefObject<ReturnType<typeof setTimeout> | null>) => {
     if (t.current) clearTimeout(t.current);
@@ -323,6 +381,185 @@ export function useVoiceCall(opts: {
     setListening(true);
   }, []);
 
+  const syncTrouble = () => setMicTrouble(silentRef.current || trackTroubleRef.current);
+
+  const stopMicWatch = useCallback(() => {
+    swapSeqRef.current += 1; // a swap still in flight gives up
+    const w = watchRef.current;
+    watchRef.current = null;
+    if (toastTimer.current) clearTimeout(toastTimer.current);
+    toastTimer.current = null;
+    silentRef.current = false;
+    trackTroubleRef.current = false;
+    pickedRef.current = undefined;
+    setMicTrouble(false);
+    setMicToast(null);
+    setInputId(null);
+    if (!w) return;
+    clearInterval(w.timer);
+    w.offTrack();
+    w.offDevices();
+    try {
+      w.source?.disconnect();
+      w.analyser.disconnect();
+    } catch {}
+    void w.ctx.close().catch(() => {});
+  }, []);
+
+  // Point the analyser and the track listeners at this stream, and start the silence window over.
+  const wireStream = useCallback((stream: MediaStream) => {
+    const w = watchRef.current;
+    if (!w) return;
+    const track = stream.getAudioTracks()[0];
+    w.offTrack();
+    w.offTrack = () => {};
+    try {
+      w.source?.disconnect();
+    } catch {}
+    w.source = null;
+    try {
+      w.source = w.ctx.createMediaStreamSource(stream);
+      w.source.connect(w.analyser);
+    } catch {}
+    w.lastEnergy = Date.now();
+    silentRef.current = false;
+    trackTroubleRef.current = !!track && (track.muted || track.readyState === "ended");
+    if (track) {
+      const bad = () => {
+        trackTroubleRef.current = true;
+        syncTrouble();
+      };
+      const ok = () => {
+        trackTroubleRef.current = track.readyState === "ended";
+        if (watchRef.current) watchRef.current.lastEnergy = Date.now();
+        syncTrouble();
+      };
+      track.addEventListener("mute", bad);
+      track.addEventListener("ended", bad);
+      track.addEventListener("unmute", ok);
+      w.offTrack = () => {
+        track.removeEventListener("mute", bad);
+        track.removeEventListener("ended", bad);
+        track.removeEventListener("unmute", ok);
+      };
+    }
+    setInputId(track?.getSettings().deviceId ?? null);
+    syncTrouble();
+  }, []);
+
+  // New input mid-call (picked, or the OS moved): get it, rewire everything that listens, drop the old one.
+  const swapInput = useCallback(
+    async (deviceId?: string) => {
+      if (!activeRef.current || !watchRef.current) return;
+      const seq = ++swapSeqRef.current;
+      let next: MediaStream;
+      try {
+        next = await navigator.mediaDevices.getUserMedia({ audio: deviceId ? { ...MIC, deviceId: { exact: deviceId } } : MIC });
+      } catch {
+        if (seq === swapSeqRef.current) setMicToast("couldn't switch mic");
+        return;
+      }
+      if (seq !== swapSeqRef.current || !activeRef.current || !watchRef.current) {
+        next.getTracks().forEach((t) => t.stop());
+        return;
+      }
+      pickedRef.current = deviceId && deviceId !== "default" ? deviceId : undefined;
+      const track = next.getAudioTracks()[0];
+      next.getAudioTracks().forEach((t) => (t.enabled = !mutedRef.current));
+      const old = streamRef.current;
+      streamRef.current = next;
+      wireStream(next);
+      await swapDeepgramRef.current?.(next);
+      if (old !== next) old?.getTracks().forEach((t) => t.stop());
+      if (seq !== swapSeqRef.current) return;
+      if (toastTimer.current) clearTimeout(toastTimer.current);
+      setMicToast(`switched to ${track?.label || "a new mic"}`);
+      toastTimer.current = setTimeout(() => setMicToast(null), TOAST_MS);
+    },
+    [wireStream],
+  );
+
+  // One AudioContext per call: an analyser on the mic, checked every ~100ms, plus devicechange.
+  const startMicWatch = useCallback(
+    (stream: MediaStream) => {
+      stopMicWatch();
+      let ctx: AudioContext;
+      try {
+        ctx = new AudioContext();
+      } catch {
+        return; // no web audio: no watchdog, the call still works
+      }
+      const analyser = ctx.createAnalyser();
+      analyser.fftSize = 2048;
+      const buf = new Float32Array(analyser.fftSize);
+      const timer = setInterval(() => {
+        const w = watchRef.current;
+        if (!w) return;
+        const now = Date.now();
+        // Can't measure (context suspended) or not meant to hear anything (muted): don't blame the mic.
+        if (w.ctx.state !== "running" || mutedRef.current || !w.source) {
+          if (w.ctx.state === "suspended") void w.ctx.resume().catch(() => {});
+          w.lastEnergy = now;
+          return;
+        }
+        w.analyser.getFloatTimeDomainData(buf);
+        let sum = 0;
+        for (let i = 0; i < buf.length; i++) sum += buf[i] * buf[i];
+        if (Math.sqrt(sum / buf.length) >= DEAD_RMS) {
+          w.lastEnergy = now;
+          if (silentRef.current) {
+            silentRef.current = false;
+            syncTrouble();
+          }
+        } else if (now - w.lastEnergy >= DEAD_MS && !silentRef.current) {
+          silentRef.current = true;
+          syncTrouble();
+        }
+      }, 100);
+      // Unplugged, or the OS default moved: follow it without dropping the call.
+      const onDevices = async () => {
+        const w = watchRef.current;
+        if (!w || !activeRef.current) return;
+        let list: MediaDeviceInfo[];
+        try {
+          list = await audioInputs();
+        } catch {
+          return;
+        }
+        if (watchRef.current !== w) return;
+        const cur = streamRef.current?.getAudioTracks()[0];
+        const curId = cur?.getSettings().deviceId;
+        const gone = !cur || cur.readyState === "ended" || (!!curId && curId !== "default" && !list.some((d) => d.deviceId === curId));
+        const key = defaultInputKey(list);
+        const moved = !pickedRef.current && !!w.defaultKey && key !== w.defaultKey;
+        w.defaultKey = key;
+        if (gone || moved) void swapInput();
+      };
+      const md = navigator.mediaDevices;
+      md.addEventListener("devicechange", onDevices);
+      watchRef.current = {
+        ctx,
+        analyser,
+        source: null,
+        timer,
+        offTrack: () => {},
+        offDevices: () => md.removeEventListener("devicechange", onDevices),
+        lastEnergy: Date.now(),
+        defaultKey: "",
+      };
+      void audioInputs()
+        .then((list) => {
+          if (watchRef.current?.ctx === ctx) watchRef.current.defaultKey = defaultInputKey(list);
+        })
+        .catch(() => {});
+      if (ctx.state === "suspended") void ctx.resume().catch(() => {});
+      wireStream(stream);
+    },
+    [stopMicWatch, swapInput, wireStream],
+  );
+
+  useEffect(() => stopMicWatch, [stopMicWatch]);
+
   const teardown = useCallback(() => {
     mutedRef.current = false;
     setMuted(false);
@@ -334,6 +571,8 @@ export function useVoiceCall(opts: {
     recRef.current = null;
     stopDeepgramRef.current?.();
     stopDeepgramRef.current = null;
+    swapDeepgramRef.current = null;
+    stopMicWatch();
     streamRef.current?.getTracks().forEach((t) => t.stop());
     streamRef.current = null;
     stopAudio();
@@ -347,7 +586,7 @@ export function useVoiceCall(opts: {
     setSpeaking(false);
     setHeard("");
     setCaption("");
-  }, []);
+  }, [stopMicWatch]);
 
   const hangUp = useCallback(
     (reason: "user_hangup" | "agent_ended" | "error" = "user_hangup") => {
@@ -489,7 +728,7 @@ export function useVoiceCall(opts: {
     connectingRef.current = true;
     setStatus("connecting");
     try {
-      streamRef.current = await navigator.mediaDevices.getUserMedia({ audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true } });
+      streamRef.current = await navigator.mediaDevices.getUserMedia({ audio: MIC });
     } catch {
       connectingRef.current = false;
       setStatus("idle");
@@ -610,28 +849,32 @@ export function useVoiceCall(opts: {
         if (audioRef.current?.el === a.el) a.el.volume = 1; // just a noise: back to normal
       }, 1500);
     };
-    const stopDg = stream && sid ? await startDeepgram(sid, stream, onHeard, () => void (activeRef.current && startWebSpeech()), onSpeechStart) : null;
+    const dg = stream && sid ? await startDeepgram(sid, stream, onHeard, () => void (activeRef.current && startWebSpeech()), onSpeechStart) : null;
     if (cancelled()) {
       // Hung up while we were connecting: close everything we opened.
-      stopDg?.();
+      dg?.stop();
       connectingRef.current = false;
       return false;
     }
     connectingRef.current = false;
-    usingDeepgramRef.current = !!stopDg;
-    if (stopDg) stopDeepgramRef.current = stopDg;
+    usingDeepgramRef.current = !!dg;
+    if (dg) {
+      stopDeepgramRef.current = dg.stop;
+      swapDeepgramRef.current = dg.swap;
+    }
     else if (!startWebSpeech()) {
       teardown();
       setStatus("idle");
       optsRef.current.onMicDenied();
       return false;
     }
+    if (stream) startMicWatch(stream);
     waitingRef.current = true; // the agent greets first
     setStartedAt(Date.now());
     setStatus("active");
     setListening(true);
     return true;
-  }, [flushTurn, startRec, teardown]);
+  }, [flushTurn, startMicWatch, startRec, teardown]);
 
   // Greeting arrived (or failed): release the "waiting" hold.
   const greeted = useCallback(() => {
@@ -648,7 +891,9 @@ export function useVoiceCall(opts: {
     return () => window.removeEventListener("pagehide", onHide);
   }, []);
 
-  return { status, setStatus, speaking, listening, heard, caption, startedAt, accept, hangUp, speak, endAfterSpeaking, greeted, patience, muted, toggleMute };
+  // muted is on purpose: never nag about a mic they switched off themselves
+  const micTrouble = micTroubleRaw && !muted && status === "active";
+  return { status, setStatus, speaking, listening, heard, caption, startedAt, accept, hangUp, speak, endAfterSpeaking, greeted, patience, muted, toggleMute, micTrouble, micToast, inputId, swapInput };
 }
 
 const SHORT_FILLERS = ["hmm.", "mm, okay.", "oh, okay.", "yeah, hmm."];
