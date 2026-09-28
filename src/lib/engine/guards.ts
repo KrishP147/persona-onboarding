@@ -4,7 +4,7 @@ import { EVENT_MOVES, pick } from "../moves";
 import { type Ctx, emitAgentText, ensureCard, goodbyeLine, guard, msg, shortNeed } from "./context";
 import { CARD_ASK, NAME_ASK, SEND_REQUEST, SETUP_Q, gmailConsent, saidNow, userWrappingUp, RUSHED_NOW } from "./intents";
 import { runTool } from "./tools";
-import { ACCUSING, ASSUMING, NARRATION, STAGE_DIRECTION, CLAIMS_LINK, CLAIMS_SENT, GOODBYE, SENTENCE_BREAK, capSentences, cleanModelText } from "./text";
+import { ACCUSING, ASSUMING, NARRATION, STAGE_DIRECTION, CLAIMS_CONNECTED, CLAIMS_LINK, CLAIMS_SENT, GOODBYE, SENTENCE_BREAK, capSentences, cleanModelText } from "./text";
 
 // The gmail ask is written by code (one clear question, the reason, the reassurance, an easy no).
 export const GMAIL_ASK_MARK = "text you a link to connect your gmail";
@@ -370,6 +370,17 @@ export const GUARD_PIPELINE: GuardStep[] = [
       if (!ctx.sentEmail && !s.draft?.sent && SEND_REQUEST.test(saidNow(s)) && !CARD_ASK.test(saidNow(s)) && CLAIMS_SENT.test(e.text)) {
         e.fix("blocked a false 'sent' claim", s.draft && !s.draft.sent ? "i haven't sent it yet. want me to send the draft above as is?" : "i haven't sent anything. want me to write it up as a draft first?");
       }
+    },
+  },
+  {
+    name: "no-false-connected",
+    async run(e) {
+      // "tapped it" isn't a connection: until google says yes, it can't claim it's in their account.
+      if (e.s.slots.gmail.status === "filled") return;
+      const sentences = e.text.split(SENTENCE_BREAK);
+      const kept = sentences.filter((x) => !(CLAIMS_CONNECTED.test(x) && !x.trim().endsWith("?")));
+      if (kept.length === sentences.length) return;
+      e.fix("blocked a false 'connected' claim", kept.join(" ").trim() || "i don't see it connected yet. it can take a few seconds, or tap the card again.");
     },
   },
   {

@@ -155,6 +155,8 @@ async function main() {
   check("promises it can't keep are dropped", cant === "got it, next wednesday.", cant);
   const canCall = cleanModelText("i'll call you in a sec. i can't call the dentist from here yet, but here's a script.");
   check("calling the user and honest can'ts survive", canCall.includes("call you") && canCall.includes("can't call the dentist"), canCall);
+  const cal = cleanModelText("i can see your calendar once we connect it. i can read your email and draft replies.");
+  check("no calendar claims (no calendar tool)", !/calendar/.test(cal) && cal.includes("draft replies"), cal);
   const hits: string[] = [];
   cleanModelText("the system says i should wait. i'm calling dr. patel now. sure thing.", undefined, hits);
   check("dropped sentences are named as guards", hits.includes("leak filtered") && hits.includes("dropped unsupported claim"), hits.join(", "));
@@ -1039,6 +1041,8 @@ async function main() {
   said1("curious.");
   const frag = await runStep("gmail-by-the-book", "Makes sense. Connecting your gmail is the main thing, so I can actually help with your email. Sound useful?");
   check("a cut that would leave a fragment keeps the reply whole", /help with your email/.test(frag.text) && frag.guards.some((g) => g.startsWith("kept whole")), `${frag.text} ${frag.guards}`);
+  const earlyConn = await runStep("no-false-connected", "Good to go, I'm seeing your account now. What's your name?");
+  check("'connected' isn't claimed before gmail is", !/good to go|seeing your account/i.test(earlyConn.text) && earlyConn.text.includes("name"), earlyConn.text);
   said1("Exactly do I need to set up?");
   const setup = await runStep("gmail-by-the-book", "Just a couple things: your name, and connecting your gmail so I can help with email. And then we figure out what you want me working on.");
   check("'what do i need to set up?': gmail is the answer, never held", /connecting your gmail/.test(setup.text) && !setup.guards.includes("gmail pitch held for its own turn"), setup.text);
@@ -1062,7 +1066,7 @@ async function main() {
 
   // the guard pipeline runs in a fixed, named order (goodbye before hangup comes before the gmail rules, etc.)
   const order = GUARD_PIPELINE.map((g) => g.name);
-  check("guard pipeline order", order.join(",") === "avoid,narration,force-end,placing-call,goodbye-before-hangup,hang-up-after-goodbye,gmail-by-the-book,no-repeat-gmail-ask,no-third-question,no-repeat-name-ask,no-accusing-or-assuming,name-rate,no-false-sent,call-offer-and-link-claims,long-text-to-chat,link-said-aloud,no-repeat-questions", order.join(","));
+  check("guard pipeline order", order.join(",") === "avoid,narration,force-end,placing-call,goodbye-before-hangup,hang-up-after-goodbye,gmail-by-the-book,no-repeat-gmail-ask,no-third-question,no-repeat-name-ask,no-accusing-or-assuming,name-rate,no-false-sent,no-false-connected,call-offer-and-link-claims,long-text-to-chat,link-said-aloud,no-repeat-questions", order.join(","));
 
   // the intent table: every example it claims, it catches; every near miss, it doesn't
   for (const [name, d] of Object.entries(INTENTS)) {

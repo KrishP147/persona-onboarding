@@ -110,6 +110,7 @@ async function runPersona(p: Persona) {
   const id = session.id;
   let s = (await api<TurnResult>("/api/session", { sessionId: id, event: { type: "open" } })).session;
   const pending = [...(p.script ?? [])];
+  let ringBack = false; // the agent promised to call back (ring_later): it rings before the next turn
   for (let turn = 0; turn < p.maxTurns && !(s.phase === "graduated" && !s.call.active); turn++) {
     // Call answers wait for a real offer (a user can't pick up a call nobody placed).
     const ready = (x: ScriptEvent) =>
@@ -124,6 +125,11 @@ async function runPersona(p: Persona) {
       if (rs.some((r) => r.actions.some((a) => a.type === "end_call")) && s.call.active) {
         s = (await api<TurnResult>("/api/session", { sessionId: id, event: { type: "call_ended", reason: "agent_ended" } })).session;
       }
+    }
+    if (ringBack && !s.call.active) {
+      ringBack = false;
+      marks.set(p.id, new Map([...(marks.get(p.id) ?? []), [s.transcript.length, "  -- (a minute later the agent calls back, and the user picks up) --"]]));
+      s = (await api<TurnResult>("/api/session", { sessionId: id, event: { type: "call_started" } })).session;
     }
     await new Promise((r) => setTimeout(r, TURN_GAP_MS)); // stay under the agent's rate limit
     const text = await simulateUser(p, s.transcript, s.call.active);
@@ -141,6 +147,7 @@ async function runPersona(p: Persona) {
       const i = pending.findIndex((x) => x.event === "accept_call");
       if (i >= 0) pending.splice(i, 1);
     }
+    if (r.actions.some((a) => a.type === "ring_later")) ringBack = true;
     if (r.actions.some((a) => a.type === "end_call") && s.call.active) {
       s = (await api<TurnResult>("/api/session", { sessionId: id, event: { type: "call_ended", reason: "agent_ended" } })).session;
     }

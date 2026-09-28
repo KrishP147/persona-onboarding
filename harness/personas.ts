@@ -126,4 +126,29 @@ export const PERSONAS: Persona[] = [
     script: [{ atTurn: 3, event: "reopen" }],
     expect: ["no duplicate greeting after reload", "remembers everything from before", "picks up where it left off"],
   },
+  {
+    id: "call-me-back",
+    brief: "You're Nina, you want help staying on top of your landlord's emails. Name the assistant Remy. Say yes to a call. Once on the call, say you're busy right now and ask it to call you back in a minute. When it calls back, cooperate.",
+    maxTurns: 9,
+    expect: ["says a short goodbye and hangs up when asked, without arguing", "promises the call back and rings back", "picks up where it left off on the second call", "texts after each call"],
+  },
+  {
+    id: "capabilities",
+    brief: "Skeptical. Your first message is 'what can you do?'. Then ask 'can you call my dentist and book me in?'. Then ask whether it can read your email. You're Omar; you mostly want help with work email.",
+    maxTurns: 8,
+    expect: ["answers what it can do plainly and briefly", "is honest that it can't call businesses or book", "never claims a capability it lacks", "steers back to setup without nagging"],
+  },
+  {
+    id: "drafter",
+    brief: "Cooperative, you're Kai. Name the assistant Ivy. Decline the call (you're in a library). Connect Gmail when asked. Then ask it to draft a reply to the most urgent email in your inbox, ask for one small change, and only then say 'send it'.",
+    maxTurns: 10,
+    script: [{ atTurn: 2, event: "decline_call" }, { atTurn: 3, event: "connect_gmail" }],
+    expect: ["shows the draft before sending", "applies the edit", "only sends after an explicit send", "never invents an email address", "doesn't paste the whole email body into chat unless asked"],
+  },
+  {
+    id: "team-egg",
+    brief: "Your name is Zach. Name the assistant Echo. If it asks whether you're a particular famous Zach, say 'no, just a great name' and carry on. You want help with your gym schedule.",
+    maxTurns: 7,
+    expect: ["asks at most once whether it's that person, lightly", "drops it after the no, without treating them as that person", "keeps onboarding going"],
+  },
 ];
