@@ -109,6 +109,15 @@ export function stopAtRepeat(text: string) {
 }
 
 // A sentence ends at . ! or ?, but not after "dr." or "mr." ("got it, dr. patel" was once cut to "got it, dr.").
+// Right after our own "i'll go by persona" line, a reply opening "got it, going by persona for now." is
+// acknowledging itself. Drop that opener (and a bare "got it,") so it reads as the next beat.
+const SELF_ACK_NAME = /^\s*(?=[^.?!]*\bpersona\b)(?=[^.?!]*\b(?:go(?:ing)? by|for now|name|call me)\b)[^.?!]*[.!]\s*/i;
+const SELF_ACK = /^\s*(?:got it|okay|ok|noted|sounds good|alright)[,.!]\s*/i;
+export function dropSelfAck(text: string) {
+  const out = text.replace(SELF_ACK_NAME, "").replace(SELF_ACK, "");
+  return out.trim() ? out : text;
+}
+
 export const SENTENCE_BREAK = /(?<!\b(?:dr|mr|mrs|ms|st|jr|sr|prof|mt|vs|ave|approx)\.)(?<=[.!?])\s+/i;
 // For cutting length only, a closing quote or paren after the stop still ends the sentence.
 export const SENTENCE_END = /(?<!\b(?:dr|mr|mrs|ms|st|jr|sr|prof|mt|vs|ave|approx)\.["')]*)(?<=[.!?]["')]*)\s+/i;

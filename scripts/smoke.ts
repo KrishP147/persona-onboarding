@@ -2,6 +2,7 @@
 import { getSecret, loadSession, newSession, saveSession, setSecret, withSession } from "../src/lib/store";
 import { CLAIMS_LINK, GUARD_PIPELINE, dropAskedQuestions, fixCallTypos, makeGuardEnv, INTENTS, cleanModelText, cutRepeatQuestions, fence, fromEmailOnly, runTool, handleEvent, normQuestion, saysBye, softenGmailDemand, handleUserMessage, nowLine, parseTypedEmail, MAX_BUBBLES, emitAgentText } from "../src/lib/engine";
 import { computeDirective } from "../src/lib/policy";
+import { dropSelfAck } from "../src/lib/engine/text";
 import { KNOW_ASK, fixTypoInNeed, mergeGrowingUtterance, toTurns } from "../src/lib/engine/turn";
 import { chooseMove, crc32, pick } from "../src/lib/moves";
 import { readMood } from "../src/lib/mood";
@@ -543,6 +544,9 @@ async function main() {
   rxCheck.nameCheck = { value: "Explain", as: "confirm" };
   const rxNo = await handleUserMessage(rxCheck, "text", "no explain the message i replied to");
   check("'no, <a request>' to a name check isn't a bare no: no name re-ask", !/what do you want to call me\?/.test(said(rxNo)), said(rxNo));
+  // after our own "i'll go by persona" line, the next text can't acknowledge it (a real run: "got it, going by Persona for now.")
+  check("reply after the default-name line doesn't 'got it' itself", dropSelfAck("got it, going by Persona for now. mind if i give you a quick call? way faster than typing this all out.") === "mind if i give you a quick call? way faster than typing this all out.");
+  check("...but a real sentence about persona stays", dropSelfAck("persona can call places for you. want to try?") === "persona can call places for you. want to try?" && dropSelfAck("got it.") === "got it.");
   // quiet after the name question: it never offered a call, so the nudge can't say "no pressure on the call"
   const rxIdle = newSession();
   await handleEvent(rxIdle, { type: "open" });

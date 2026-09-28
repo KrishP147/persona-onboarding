@@ -12,7 +12,7 @@ import { webEnabled } from "../web";
 import { currentMeter, metered, percentile, recordTurn, type Meter } from "../usage";
 import { type Ctx, emitAgentText, ensureCard, goodbyeLine, guard, msg, outageLine } from "./context";
 import { CALL_NO, CARD_ASK, LAUGH_LEAD, CARD_WANT, CLEAR_BYE, DELEGATE, firstSentenceName, fixCallTypos, hintedAgentName, ownNameIn, DEMO_YES, GMAIL_TROUBLE, HOLD, INSULT_NAME, LAUGH, NAME_ASK, NAME_HINT, NEGATED_CALL, NOT_A_NAME, NO_CALLS, OFFERED_CALL, OWN_NAME, SEND_CMD, SEND_REQUEST, SENT_Q, SKIP_SETUP, STOP_TALKING, repliedElsewhere, THANKS, USER_BYE, WAITING_ON_THEM, WANTS_OUT, YES, asTurnBy, asksForLink, gmailConsent, lastUserText, saidNow, saysBye } from "./intents";
-import { cleanModelText, dropDraftEcho, fence, nowLine, parseTypedEmail } from "./text";
+import { cleanModelText, dropDraftEcho, dropSelfAck, fence, nowLine, parseTypedEmail } from "./text";
 import { GMAIL_ASK_MARK, GUARD_PIPELINE, type TurnOpts, makeGuardEnv, sealGoodbye } from "./guards";
 import { LOOKUP_TOOLS, MAX_TOOL_ROUNDS, TERMS_LINK, TOOLS, WEB_TOOLS, gifAllowed, makeGif, runTool, saveDraftTool, sendEmailTool } from "./tools";
 import { handleEvent } from "./events";
@@ -685,7 +685,7 @@ export async function handleUserMessageInner(
   const r = await turn(
     s,
     replyChannel,
-    [early?.note, linkNote ?? sawText, skippedName ? "They skipped naming you. You're going by Persona for now and a separate text right after yours tells them, so don't mention your name or ask for one. Just respond to what they said." : undefined].filter(Boolean).join(" ") || (interrupted ? "They talked over you mid-sentence. Drop what you were saying and respond to what they just said; don't repeat your cut-off line unless they ask." : undefined),
+    [early?.note, linkNote ?? sawText, skippedName ? "They skipped naming you. You're going by Persona for now and a separate text just before yours already told them, so don't mention your name, don't ask for one, and don't open with \"got it\" (that would be answering your own text). Just carry on." : undefined].filter(Boolean).join(" ") || (interrupted ? "They talked over you mid-sentence. Drop what you were saying and respond to what they just said; don't repeat your cut-off line unless they ask." : undefined),
     linkNote ? (channel === "voice" ? "okay, i'm texting you the link right now. it's the card that says connect your google account, tap it whenever you're ready." : "here you go, it's the card right there. signing in takes a few seconds.") : channel === "voice" ? "sorry, i missed that. say it one more time?" : "sorry, i lost my train of thought for a sec. can you say that again?",
     // A note about an interruption or a text mid-call still gets this turn's move (like the gmail offer).
     { soft: !linkNote },
@@ -702,6 +702,8 @@ export async function handleUserMessageInner(
     const ctx: Ctx = { s, channel: "text", actions: [], newMessages: [], move: EVENT_MOVES.defaultName };
     emitAgentText(ctx, SKIPPED_NAME_REPLY);
     const [m] = ctx.newMessages;
+    // the reply comes after that line: it can't acknowledge it ("got it, going by persona")
+    for (const x of r.newMessages) if (x.role === "agent" && (!x.kind || x.kind === "text")) x.text = dropSelfAck(x.text);
     const at = s.transcript.findIndex((x) => r.newMessages.includes(x) && x.role === "agent");
     s.transcript.splice(s.transcript.indexOf(m), 1);
     s.transcript.splice(at >= 0 ? at : s.transcript.length, 0, m);
@@ -767,7 +769,8 @@ export function nameAck(name: string) {
   return INSULT_NAME.test(name.trim()) ? `ouch, ${name.toLowerCase()}? harsh, but i'll wear it. ${name} it is.` : `${name} it is.`;
 }
 
-export const SKIPPED_NAME_REPLY = "i'll go by persona for now, rename me anytime";
+// confirms their call to skip it (not "got it": that reads as us acknowledging ourselves once the next text follows)
+export const SKIPPED_NAME_REPLY = "all good, no name needed. i'll go by persona for now, rename me anytime";
 
 // They didn't pick a name: go by "Persona" (a default they can change with one text) instead of stalling on it.
 export function defaultAgentName(s: Session) {
