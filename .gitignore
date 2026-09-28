@@ -46,3 +46,6 @@ next-env.d.ts
 /harness/runs
 /harness/e2e
 .dev.log
+
+# dev server log
+.start.log
