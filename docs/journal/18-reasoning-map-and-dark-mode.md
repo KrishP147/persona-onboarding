@@ -19,7 +19,7 @@ turning it on opens a map to the right of the phone, and the layout glides to fi
 - one node per agent reply: its move (the thing it was trying to do), a short framework tag, and the turn number. the checks that fired on that turn hang off it as small shield chips.
 - edges run turn to turn. the call is its own lane, shaded green, and the gmail link and the "gmail connected" event sit on the line as waypoints.
 - across the top, the onboarding milestones as a track: agent name, your name, call, what you need, gmail, graduated. reached ones are filled with the turn they happened on, a declined call is dashed, the rest are hollow. only turns that exist get nodes; the future is outlines.
-- click a node and a small panel opens inside the map with the quoted message, the move, the framework's one line reason, its source, the checks, and "how it decides" one step further down. the bubble it explains lights up in the phone.
+- click a node and a small panel opens inside the map with the quoted message, the move, the framework's one line reason, its source, the checks, and "decision process" one step further down. the bubble it explains lights up in the phone.
 - keyboard: nodes are focusable, arrows or j / k step between them, enter opens, escape closes the node and then the map.
 
 the map is sized to its content and only scrolls when it has to. when it does scroll to show an open node, it lands on a whole row and the top edge fades, so nothing looks sliced under the milestone track.

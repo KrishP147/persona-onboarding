@@ -66,6 +66,8 @@ export const EVENT_HANDLERS: { [K in SessionEvent["type"]]: EventHandler<K> } = 
   call_started: async ({ s, e, idle }) => {
     if (s.call.active) return idle();
     s.call = { active: true, startedAt: Date.now(), silenceStrikes: 0, byUser: !!e.byUser };
+    const callingBack = !e.byUser && !!s.callbackAt;
+    s.callbackAt = undefined;
     s.prePhase = s.phase;
     s.phase = "on_call";
     eventMsg(s, "Call started");
@@ -83,7 +85,9 @@ export const EVENT_HANDLERS: { [K in SessionEvent["type"]]: EventHandler<K> } = 
           : s.slots.helpNeed.status === "missing"
             ? pick(s, "greet-need", ["what's been taking up most of your time lately?", "what's been eating your week?", "what's the thing you keep putting off lately?"])
             : pick(s, "greet", ["how's it going?", "how's your day going?", "how are things?"]);
-      const line = e.byUser ? `hey${name ? ` ${name}` : ""}! ${next}` : `hey${name ? ` ${name}` : ""}, it's ${who}! ${next}`;
+      const line = callingBack
+        ? `hey${name ? ` ${name}` : ""}, it's ${who}, calling you back like i said. is now a better time?`
+        : e.byUser ? `hey${name ? ` ${name}` : ""}! ${next}` : `hey${name ? ` ${name}` : ""}, it's ${who}! ${next}`;
       // Right after hello, a quick "can you hear me?" (10s) catches a dead mic; after that, quiet is fine.
       ctx.actions.push({ type: "patience", ms: 10000 });
       emitAgentText(ctx, line);
@@ -119,6 +123,13 @@ export const EVENT_HANDLERS: { [K in SessionEvent["type"]]: EventHandler<K> } = 
     }
     const secs = Math.round(((s.call.endedAt ?? 0) - (s.call.startedAt ?? 0)) / 1000);
     eventMsg(s, `Call ended (${secs}s)`);
+    // They asked us to hang up and call back: the text says when, not "got cut off".
+    if (s.callbackAt && s.callbackAt > Date.now()) {
+      const mins = Math.max(1, Math.round((s.callbackAt - Date.now()) / 60_000));
+      const ctx: Ctx = { s, channel: "text", actions: [], newMessages: [], move: EVENT_MOVES.recap, guards: ["recap written by code (callback)"] };
+      emitAgentText(ctx, `talk soon. i'll call you back in ${mins === 1 ? "a minute" : `about ${mins} minutes`}, or text me if that's not a good time.`);
+      return { session: s, newMessages: ctx.newMessages, chips: computeDirective(s, "text").chips, actions: [] };
+    }
     // They hung up once things were settled (a bye, or our last line wasn't waiting on them): on purpose, not a drop.
     const lastVoice = s.transcript.findLast((m) => m.channel === "voice" && m.role !== "event");
     const onPurpose = e.reason === "user_hangup" && !!lastVoice && (lastVoice.role === "user" ? saysBye(lastVoice.text) : !/\?\s*$/.test(lastVoice.text.trim()));

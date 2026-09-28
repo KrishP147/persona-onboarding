@@ -443,7 +443,7 @@ function MilestoneTrack({ miles }: { miles: Milestone[] }) {
   );
 }
 
-// the open node: its message, move, framework, source, checks, and how it decides
+// the open node: its message, move, framework, source, checks, and decision process
 function NodeDetail({ t, how, setHow, metrics, onClose }: { t: Turn; how: boolean; setHow: (v: boolean) => void; metrics?: string | null; onClose: () => void }) {
   return (
     <div role="dialog" aria-label={`Turn ${t.n} detail`} className="rounded-[20px] bg-canvas border border-step-200 shadow-[0_18px_40px_-18px_rgba(19,21,21,.35)] px-4 pt-3 pb-3.5 sk-fade">
@@ -469,7 +469,7 @@ function NodeDetail({ t, how, setHow, metrics, onClose }: { t: Turn; how: boolea
       <Guards guards={t.guards} ink="var(--p-ink-mute)" mute="var(--p-ink-faint)" line="var(--p-step-200)" />
       <p className="mt-2 text-[12px] leading-4 text-ink-faint">traced: code picked this move before the model wrote a word. the wording is the model&apos;s.</p>
       <button onClick={() => setHow(!how)} aria-expanded={how} aria-controls={`rz-how-${t.m.id}`} className="mt-2 min-h-8 text-[13px] font-medium text-pblue flex items-center gap-1">
-        How it decides
+        Decision process
         <svg width="10" height="10" viewBox="0 0 10 10" className={`transition-transform duration-200 ${how ? "rotate-180" : ""}`} aria-hidden>
           <path d="M1.5 3.5 5 7l3.5-3.5" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
         </svg>

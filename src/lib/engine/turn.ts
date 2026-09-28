@@ -12,7 +12,7 @@ import { teamActive, teamLine, teamLineVoice, teamMatch, teamNote, teamYes, team
 
 import { currentMeter, metered, percentile, recordTurn, type Meter } from "../usage";
 import { type Ctx, emitAgentText, ensureCard, goodbyeLine, guard, msg, outageLine } from "./context";
-import { CALL_NO, CARD_ASK, LAUGH_LEAD, CARD_WANT, CLEAR_BYE, DELEGATE, firstSentenceName, fixCallTypos, hintedAgentName, ownNameIn, DEMO_YES, GMAIL_TROUBLE, HOLD, INSULT_NAME, LAUGH, NAME_ASK, NAME_HINT, NEGATED_CALL, NOT_A_NAME, NO_CALLS, OFFERED_CALL, OWN_NAME, SEND_CMD, SEND_REQUEST, SENT_Q, SKIP_SETUP, JUST_DO, SIGN_OFF, STOP_TALKING, repliedElsewhere, THANKS, USER_BYE, WAITING_ON_THEM, WANTS_OUT, YES, asTurnBy, asksForLink, gmailConsent, lastUserText, saidNow, saysBye } from "./intents";
+import { CALL_NO, CARD_ASK, LAUGH_LEAD, CARD_WANT, CLEAR_BYE, DELEGATE, firstSentenceName, fixCallTypos, hintedAgentName, ownNameIn, DEMO_YES, GMAIL_TROUBLE, HOLD, INSULT_NAME, LAUGH, NAME_ASK, NAME_HINT, NEGATED_CALL, NOT_A_NAME, NO_CALLS, OFFERED_CALL, OWN_NAME, SEND_CMD, SEND_REQUEST, SENT_Q, SKIP_SETUP, JUST_DO, SIGN_OFF, HANGUP_ASK, DONT_BYE, callbackIn, STOP_TALKING, repliedElsewhere, THANKS, USER_BYE, WAITING_ON_THEM, WANTS_OUT, YES, asTurnBy, asksForLink, gmailConsent, lastUserText, saidNow, saysBye } from "./intents";
 import { cleanModelText, dropDraftEcho, dropSelfAck, fence, nowLine, parseTypedEmail } from "./text";
 import { GMAIL_ASK_MARK, GUARD_PIPELINE, type TurnOpts, makeGuardEnv, sealGoodbye } from "./guards";
 import { LOOKUP_TOOLS, MAX_TOOL_ROUNDS, TERMS_LINK, TOOLS, WEB_TOOLS, gifAllowed, makeGif, runTool, saveDraftTool, sendEmailTool } from "./tools";
@@ -570,6 +570,21 @@ export async function handleUserMessageInner(
     }
     // "i'll let you know once it's connected": they're off doing something, so wait like after "hold on".
     s.call.holding = WAITING_ON_THEM.test(clean);
+    // "hang up and call me back in a few" / "i'm busy right now": do it. A short goodbye, hang up, ring back when
+    // asked. A run argued ("actually, i'll stay on"), pitched gmail, then filled the silence with "no rush".
+    if (s.call.active && HANGUP_ASK.test(clean) && !DONT_BYE.test(clean) && !/\b(not|isn'?t) (busy|a bad time)\b/i.test(clean)) {
+      const name = s.slots.userName.value?.toLowerCase();
+      const ms = callbackIn(clean);
+      const when = ms ? (ms < 90_000 ? "in a minute" : `in about ${Math.round(ms / 60_000)} minutes`) : null;
+      const back = /\b(call|ring) me back\b|\bcall back\b/i.test(clean);
+      const ctx: Ctx = { s, channel, actions: [], newMessages: [], move: EVENT_MOVES.recap };
+      emitAgentText(ctx, when ? `of course${name ? `, ${name}` : ""}. i'll call you back ${when}. talk soon!` : back ? `of course${name ? `, ${name}` : ""}. i'll text you, and we can talk whenever you're free.` : `no problem${name ? `, ${name}` : ""}, i'll let you go. talk soon!`);
+      guard(ctx, "hung up when asked");
+      s.callbackAt = ms ? Date.now() + ms : undefined;
+      ctx.actions.push({ type: "end_call", final: true });
+      if (ms) ctx.actions.push({ type: "ring_later", ms });
+      return { session: s, newMessages: [userMsg, ...ctx.newMessages], chips: computeDirective(s, channel).chips, actions: ctx.actions };
+    }
     // They said bye: say it back (always, and audibly), then hang up. No model, nothing to go wrong.
     if (saysBye(clean, CLEAR_BYE) && clean.split(/\s+/).length <= 12 && s.call.active) {
       const name = s.slots.userName.value;

@@ -6,7 +6,7 @@ import { getSecret } from "../store";
 import { GIF_MIN_GAP, GIF_MOODS, GIFS, gifUrl, type GifMood } from "../gifs";
 import { readPage, webSearch } from "../web";
 import { type Ctx, guard, msg, shortNeed } from "./context";
-import { CALL_OK, DELEGATE, EMAIL_RE, FEMININE, MASCULINE, NEGATED_CALL, SEND_HOLD, SEND_OK, YES, gmailConsent, lastUserText, fixCallTypos, saidNow, userWantsOut, userWrappingUp } from "./intents";
+import { CALL_OK, DELEGATE, HANGUP_ASK, EMAIL_RE, FEMININE, MASCULINE, NEGATED_CALL, SEND_HOLD, SEND_OK, YES, gmailConsent, lastUserText, fixCallTypos, saidNow, userWantsOut, userWrappingUp } from "./intents";
 import { cleanModelText, fence } from "./text";
 import { fromEmailOnly, rememberEmails } from "./guards";
 
@@ -336,7 +336,7 @@ export async function runTool(ctx: Ctx, name: string, input: Record<string, unkn
     }
     case "end_call":
       if (!s.call.active) return "not on a call";
-      if (!ctx.allowEnd && !userWrappingUp(s)) return "error: they haven't said bye. don't hang up; ask if there's anything else";
+      if (!ctx.allowEnd && !userWrappingUp(s) && !HANGUP_ASK.test(saidNow(s))) return "error: they haven't said bye. don't hang up; ask if there's anything else";
       ctx.actions.push({ type: "end_call" });
       return "hanging up after this message";
     case "graduate": {

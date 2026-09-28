@@ -106,6 +106,7 @@ export function useChat() {
   const busyRef = useRef(0); // requests in flight (sends, voice turns)
   const voiceTurnRef = useRef(0);
   const ringTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const callbackTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const clearRing = () => {
     if (ringTimerRef.current) clearTimeout(ringTimerRef.current);
     ringTimerRef.current = null;
@@ -252,7 +253,12 @@ export function useChat() {
       let spoken: Promise<unknown> = Promise.resolve();
       for (const a of ordered) {
         // a real call takes a moment to come through after "calling you now."
-        if (a.type === "start_call") {
+        if (a.type === "ring_later") {
+          if (callbackTimerRef.current) clearTimeout(callbackTimerRef.current);
+          callbackTimerRef.current = setTimeout(() => ringNow(0), a.ms);
+        }
+        if (a.type === "start_call") ringNow(3000);
+        function ringNow(delay: number) {
           clearRing();
           ringTimerRef.current = setTimeout(() => {
             call.setStatus((st) => (st === "idle" ? "ringing" : st));
@@ -263,7 +269,7 @@ export function useChat() {
                 return st === "ringing" ? "idle" : st;
               });
             }, 30000);
-          }, 3000);
+          }, delay);
         }
         if (a.type === "speak") spoken = call.speak(a.text);
         if (a.type === "end_call") call.endAfterSpeaking(!!a.final);

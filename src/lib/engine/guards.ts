@@ -2,7 +2,7 @@ import { type Channel, type InboxItem, type Move, type Session, type TurnResult 
 import { provider, quick } from "../llm";
 import { EVENT_MOVES, pick } from "../moves";
 import { type Ctx, emitAgentText, ensureCard, goodbyeLine, guard, msg, shortNeed } from "./context";
-import { CARD_ASK, NAME_ASK, SEND_REQUEST, SETUP_Q, gmailConsent, saidNow, userWrappingUp } from "./intents";
+import { CARD_ASK, NAME_ASK, SEND_REQUEST, SETUP_Q, gmailConsent, saidNow, userWrappingUp, RUSHED_NOW } from "./intents";
 import { runTool } from "./tools";
 import { ACCUSING, ASSUMING, NARRATION, STAGE_DIRECTION, CLAIMS_LINK, CLAIMS_SENT, GOODBYE, SENTENCE_BREAK, capSentences, cleanModelText } from "./text";
 
@@ -265,7 +265,10 @@ export const GUARD_PIPELINE: GuardStep[] = [
         // "what do i need to set up?": gmail is part of the answer, never held back.
         const raisedIt = /\b(gmail|email|inbox|link)\b/i.test(saidNow(s)) || SETUP_Q.test(saidNow(s));
         const help = e.text.split(SENTENCE_BREAK).filter((x) => !GMAIL_PITCH.test(x) && !(ctx.move?.id === "ask-gmail" && /\b(without your (ok|okay)|won.?t send)/i.test(x))).join(" ").trim();
-        if (ctx.move?.id === "ask-gmail") {
+        // In a rush ("i'm busy right now"): no ask at all this turn, just the help.
+        if (ctx.move?.id === "ask-gmail" && RUSHED_NOW.test(saidNow(s))) {
+          if (help && help !== e.text) e.trim("no gmail ask: they're in a rush", help);
+        } else if (ctx.move?.id === "ask-gmail") {
           // On a call: one sentence of help, then the ask, so the question is never cut off.
           const lead = channel === "voice" ? capSentences(help.replace(/\?[^?]*$/, "."), 1) : help;
           e.fix("gmail ask written by code", `${lead}${lead ? (channel === "voice" ? " " : "\n\n") : ""}${gmailAsk(s, channel)}`.trim());

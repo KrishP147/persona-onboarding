@@ -96,6 +96,7 @@ export interface Session {
   demoOffered?: boolean; // the sample inbox was offered (once) after google sign-in failed or stalled
   nameCheck?: { value: string; as: "user" | "agent" | "confirm" | "same" }; // "same": they said their name is ours, asked "so we have the same name?" // a bare name answered two open name questions: we leaned one way and asked which
   agentNameDefaulted?: boolean; // they skipped naming it: goes by "Persona" until they pick one
+  callbackAt?: number; // they asked us to hang up and call back: when (ms epoch)
   teamGuess?: string; // easter egg: the last persona team name we asked about (src/lib/team.ts)
   teamAsked?: string[]; // every team name we've asked about (zach -> julia -> zach asks twice, not three times)
   teamYes?: string[]; // ...the ones they said yes to
@@ -146,7 +147,8 @@ export type ClientAction =
   | { type: "graduate" }
   | { type: "show_know" } // they asked what we know: show the what-i-know card after this turn
   | { type: "patience"; ms: number }
-  | { type: "inbox_scan" }; // gmail just connected over text: ask for the inbox look next // user is doing a task (e.g. gmail sign-in): stretch the next silence window
+  | { type: "inbox_scan" }
+  | { type: "ring_later"; ms: number }; // they asked for a call back: ring again after ms (this page only) // gmail just connected over text: ask for the inbox look next // user is doing a task (e.g. gmail sign-in): stretch the next silence window
 
 // Server-side per-session numbers, cheap to keep: no extra model calls, bounded latency sample.
 export interface SessionMetrics {
