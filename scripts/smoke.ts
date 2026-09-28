@@ -477,6 +477,18 @@ async function main() {
   const tw3a = await handleUserMessage(tw3, "text", "my name is luna");
   const tw3b = await handleUserMessage(tw3, "text", "nah");
   check("'my name is <ours>' gets the check; 'nah' asks theirs", /same name\?/.test(said(tw3a)) && /what's your name\?/.test(said(tw3b)) && tw3.slots.userName.status !== "filled", `${said(tw3a)} || ${said(tw3b)}`);
+  // replay of a real run: declined the offer, later "you can call me sam. also, you can call my phone right now" -> ring
+  const cph = newSession();
+  await handleEvent(cph, { type: "open" });
+  await handleUserMessage(cph, "text", "persona");
+  await handleUserMessage(cph, "text", "no");
+  const cmR = await handleUserMessage(cph, "text", "My name? You can call me Sam. Also, you can call my phone right now if you want to.");
+  check("'you can call my phone right now' rings (after an earlier no)", cmR.actions.some((a) => a.type === "start_call"), said(cmR));
+  const cmName = newSession();
+  await handleEvent(cmName, { type: "open" });
+  await handleUserMessage(cmName, "text", "persona");
+  const cmN = await handleUserMessage(cmName, "text", "you can call me sam");
+  check("...but 'you can call me sam' alone is a name, no ring", !cmN.actions.some((a) => a.type === "start_call"), said(cmN));
   const yo = newSession();
   await handleEvent(yo, { type: "open" });
   await handleUserMessage(yo, "text", "yo");

@@ -581,7 +581,7 @@ export async function handleUserMessageInner(
   // Asking for a call is the answer; no need to confirm it back ("could we call?" -> ring).
   const callText = fixCallTypos(clean);
   const asksForCall =
-    /\b(call me(?=\s*($|[.!?,]|(now|back|please|pls|plz|asap|right now|real quick|quick|when|whenever|anytime|later|today|tomorrow|so|and|if|then)\b))|(can|could|should|shall) (we|you) (call|hop on a call|do a call)|let'?s (call|hop on a call|do a call)|give me a (call|ring)|ring me|phone me|hop on a (quick )?call)\b/i.test(callText) &&
+    /\b(call me(?=\s*($|[.!?,]|(now|back|please|pls|plz|asap|right now|real quick|quick|when|whenever|anytime|later|today|tomorrow|so|and|if|then)\b))|(can|could|should|shall) (we|you) (call|hop on a call|do a call)|let'?s (call|hop on a call|do a call)|give me a (call|ring)|ring me|phone me|hop on a (quick )?call|(you|u) (can|could|may) (call|ring|phone) (my (phone|cell|number)|me(?=\s*($|[.!?,]|(now|right now|back|anytime|whenever)\b)))|call my (phone|cell|number)|(feel free|go ahead) (to|and) (call|ring)( me| my (phone|cell))?)\b/i.test(callText) &&
     !NEGATED_CALL.test(callText);
   // A short yes ("sure", "yeah call me") is a yes; "yes but u aren't listening..." is not (it rang once).
   const saidYesToOffer = !!prevText && OFFERED_CALL.test(prevText.text) && YES.test(clean.replace(LAUGH_LEAD, "")) && !/\bbut\b/i.test(clean) && (clean.trim().split(/\s+/).length <= 4 || /\b(call|ring)\b/i.test(clean));
