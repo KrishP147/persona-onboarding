@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import { Inter, Roboto_Flex } from "next/font/google";
 import "./globals.css";
+import { THEME_SCRIPT } from "@/components/theme-script";
 
 // persona's fallback face (sf pro first on apple devices, see globals.css)
 const inter = Inter({ variable: "--font-inter", subsets: ["latin"] });
@@ -15,7 +16,11 @@ export const metadata: Metadata = {
 
 export default function RootLayout({ children }: LayoutProps<"/">) {
   return (
-    <html lang="en" className={`${inter.variable} ${roboto.variable} h-full antialiased`}>
+    // the inline script sets data-theme before paint, so html differs from the server render on purpose
+    <html lang="en" className={`${inter.variable} ${roboto.variable} h-full antialiased`} suppressHydrationWarning>
+      <head>
+        <script dangerouslySetInnerHTML={{ __html: THEME_SCRIPT }} />
+      </head>
       <body className="min-h-full flex flex-col">{children}</body>
     </html>
   );

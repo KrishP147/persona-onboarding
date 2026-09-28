@@ -4,14 +4,16 @@ import Link from "next/link";
 import { useEffect, useRef, type ReactNode } from "react";
 import { SKIN_IDS, type SkinId } from "./skins/types";
 import { MapGlyph } from "./why/ReasoningMap";
+import { Mark } from "@/components/landing/svgs";
+import { ThemeToggle } from "@/components/ThemeToggle";
 
 const LABEL: Record<SkinId, string> = { iphone: "iPhone", pixel: "Pixel", galaxy: "Galaxy" };
 
 export function Wordmark() {
   return (
     <Link href="/" className="flex items-center gap-2 text-ink" aria-label="Persona home">
-      {/* eslint-disable-next-line @next/next/no-img-element */}
-      <img src="/brand/persona-mark.svg" alt="" width={26} height={26} className="w-[26px] h-[26px]" />
+      {/* the mark in currentColor, so it flips with the theme */}
+      <Mark className="w-[22px] h-[22px]" />
       <span className="text-[20px] font-semibold tracking-[-0.2px]">Persona</span>
     </Link>
   );
@@ -51,7 +53,7 @@ export function PhonePicker({ value, onChange, size = "md" }: { value: SkinId | 
               onChange(next);
               refs.current[next]?.focus();
             }}
-            className={`flex items-center justify-center gap-1.5 rounded-full font-medium transition-[background-color,color,box-shadow] duration-150 ease-[var(--ease-press)] ${size === "lg" ? "flex-1 h-10 text-[15px]" : "h-8 px-3.5 text-[14px]"} ${on ? "bg-white text-ink shadow-[0_1px_2px_rgba(0,0,0,.08),0_2px_8px_-2px_rgba(0,0,0,.08)]" : "text-ink-mute hover:text-ink"}`}
+            className={`flex items-center justify-center gap-1.5 rounded-full font-medium transition-[background-color,color,box-shadow] duration-150 ease-[var(--ease-press)] ${size === "lg" ? "flex-1 h-10 text-[15px]" : "h-8 px-3.5 text-[14px]"} ${on ? "bg-canvas dark:bg-step-300 text-ink shadow-[0_1px_2px_rgba(0,0,0,.08),0_2px_8px_-2px_rgba(0,0,0,.08)]" : "text-ink-mute hover:text-ink"}`}
           >
             <Glyph id={id} />
             {LABEL[id]}
@@ -67,7 +69,7 @@ export function Pill({ children, onClick, pressed }: { children: ReactNode; onCl
     <button
       onClick={onClick}
       aria-pressed={pressed}
-      className="h-9 px-4 rounded-full border border-step-300 bg-white text-[14px] font-medium text-ink hover:bg-alt active:scale-[.98] transition-[background-color,transform] duration-150 ease-[var(--ease-press)]"
+      className="h-9 px-4 rounded-full border border-step-300 bg-canvas text-[14px] font-medium text-ink hover:bg-alt active:scale-[.98] transition-[background-color,transform] duration-150 ease-[var(--ease-press)]"
     >
       {children}
     </button>
@@ -82,12 +84,13 @@ export function TopBar({ skin, setSkin, pill, onRestart, mock }: { skin: SkinId 
         {mock && <span className="text-[12.5px] text-ink-mute bg-alt rounded-full px-2.5 py-0.5">mock mode</span>}
       </div>
       <PhonePicker value={skin} onChange={setSkin} />
-      <div className="flex justify-end gap-2">
+      <div className="flex justify-end items-center gap-2">
         {/* sm..lg: no margin beside the phone, so the reasoning pill lives here */}
         <span data-rz-pill className="lg:hidden">
           {pill}
         </span>
         <Pill onClick={onRestart}>Restart</Pill>
+        <ThemeToggle />
       </div>
     </nav>
   );
@@ -105,7 +108,7 @@ export function MenuSheet({ skin, setSkin, canReason, onReasoning, onRestart, on
   return (
     <div className="sm:hidden fixed inset-0 z-40 font-sans" role="dialog" aria-modal="true" aria-labelledby="menu-title">
       <button aria-label="Close menu" onClick={onClose} className="absolute inset-0 bg-black/30 sk-fade" />
-      <div className="absolute inset-x-2 bottom-2 max-h-[88dvh] overflow-y-auto rounded-[32px] bg-white text-ink px-5 pt-2 pb-[calc(env(safe-area-inset-bottom,0px)+20px)] shadow-[0_24px_70px_-20px_rgba(19,21,21,.35)] sk-sheet-ios">
+      <div className="absolute inset-x-2 bottom-2 max-h-[88dvh] overflow-y-auto rounded-[32px] bg-canvas text-ink px-5 pt-2 pb-[calc(env(safe-area-inset-bottom,0px)+20px)] shadow-[0_24px_70px_-20px_rgba(19,21,21,.35)] sk-sheet-ios">
         <div className="flex justify-center pb-2" aria-hidden>
           <span className="w-9 h-[5px] rounded-full bg-step-300" />
         </div>
@@ -132,7 +135,11 @@ export function MenuSheet({ skin, setSkin, canReason, onReasoning, onRestart, on
           </span>
           <span aria-hidden className="text-ink-mute">›</span>
         </button>
-        <button onClick={onRestart} className="mt-6 w-full h-12 rounded-full bg-ink text-white text-[16px] font-medium active:scale-[.99]">
+        <div className="mt-5 flex items-center justify-between">
+          <span className="text-[15px] font-medium">Appearance</span>
+          <ThemeToggle />
+        </div>
+        <button onClick={onRestart} className="mt-6 w-full h-12 rounded-full bg-ink text-canvas text-[16px] font-medium active:scale-[.99]">
           Restart conversation
         </button>
       </div>

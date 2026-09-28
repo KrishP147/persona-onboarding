@@ -83,7 +83,7 @@ function IntroDialog({ onClose }: { onClose: () => void }) {
         aria-modal="true"
         aria-labelledby="intro-title"
         aria-describedby="intro-desc"
-        className="relative w-full sm:w-[440px] max-h-[92dvh] overflow-y-auto bg-white rounded-t-[28px] sm:rounded-[28px] px-6 sm:px-7 pt-2 sm:pt-6 pb-[calc(env(safe-area-inset-bottom,0px)+24px)] sm:pb-7 shadow-[0_1px_2px_rgba(19,21,21,.03),0_24px_70px_-20px_rgba(19,21,21,.35)] sk-sheet-ios sm:[animation:sk-fade_250ms_ease-out]"
+        className="relative w-full sm:w-[440px] max-h-[92dvh] overflow-y-auto bg-canvas rounded-t-[28px] sm:rounded-[28px] px-6 sm:px-7 pt-2 sm:pt-6 pb-[calc(env(safe-area-inset-bottom,0px)+24px)] sm:pb-7 shadow-[0_1px_2px_rgba(19,21,21,.03),0_24px_70px_-20px_rgba(19,21,21,.35)] sk-sheet-ios sm:[animation:sk-fade_250ms_ease-out]"
       >
         <div className="sm:hidden flex justify-center pb-3" aria-hidden>
           <span className="w-9 h-[5px] rounded-full bg-step-300" />
@@ -126,7 +126,7 @@ function IntroDialog({ onClose }: { onClose: () => void }) {
         <button
           ref={primaryRef}
           onClick={onClose}
-          className="mt-6 w-full h-12 rounded-full bg-ink text-white text-[17px] font-medium hover:bg-black active:scale-[.99] transition-[background-color,transform] duration-150 ease-[var(--ease-press)] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-pblue"
+          className="mt-6 w-full h-12 rounded-full bg-ink text-canvas text-[17px] font-medium hover:opacity-90 active:scale-[.99] transition-[background-color,transform] duration-150 ease-[var(--ease-press)] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-pblue"
         >
           Start texting
         </button>
