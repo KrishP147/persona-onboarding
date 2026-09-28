@@ -65,6 +65,7 @@ export interface CallProps {
   onHold?: () => void;
   captions?: boolean; // live captions on the call screen (on by default)
   onCaptions?: () => void;
+  hint?: string; // shown under an incoming call (first call only): what answering needs
   onHide?: () => void;
   unread?: number;
 }
