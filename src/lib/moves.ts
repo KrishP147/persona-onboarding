@@ -73,6 +73,13 @@ export const MOVES = {
     instruction:
       "They're going along but not steering anywhere. Offer the next step as an easy yes question tied to what they told you, e.g. \"want to hear how i'd handle [their thing]?\" or \"want me to show you with [something of theirs]?\". One question, no pressure.",
   },
+  nameMe: {
+    id: "name-me",
+    label: "a light second try at a name, with a suggestion",
+    source: "cialdini (1984): commitment through a small yes; brown & levinson (1987): easy to decline",
+    instruction:
+      "Respond to what they said first. Then, lightly, since they never named you: suggest one name that fits what you've been doing together and ask if it works, e.g. \"btw, you never gave me a name. how about sage? or pick your own.\" One line, easy to ignore.",
+  },
   steerBack: {
     id: "steer-back",
     label: "help, then one light step back",
@@ -137,6 +144,12 @@ export function chooseMove(s: Session, channel: Channel, opts: { callFirst: bool
   const lastTwo = (s.movesUsed ?? []).slice(-2);
   const openSlots = (["agentName", "userName", "helpNeed", "gmail"] as const).some((k) => s.slots[k].status === "missing");
   if (opts.mayAsk && openSlots && lastTwo.length === 2 && lastTwo.every((m) => PURE_HELP.has(m))) return MOVES.steerBack;
+  // They skipped naming it: a few turns later, one light try with a suggestion (never on a call, at most twice).
+  if (channel === "text" && opts.mayAsk && s.slots.agentName.status === "missing" && s.slots.agentName.asks < 2 && !USER_LEADS.test(text)) {
+    const lastNameAsk = s.transcript.findLastIndex((m) => m.role === "agent" && (m.move?.id === "intro" || m.move?.id === "name-me"));
+    const turnsSince = s.transcript.slice(lastNameAsk + 1).filter((m) => m.role === "user").length;
+    if (turnsSince >= 3) return MOVES.nameMe;
+  }
   // The user leads. When they say what they want ("i want to use you for email"), go there now:
   // for email that's the gmail offer (the setup step that unlocks it), otherwise just help. No more digging.
   if (USER_LEADS.test(text) || ASKS_FOR_HELP.test(text)) {

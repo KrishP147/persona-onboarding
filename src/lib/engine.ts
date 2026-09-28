@@ -286,8 +286,15 @@ const GMAIL_ASK_MARK = "text you a link to connect your gmail";
 function gmailAsk(s: Session, channel: Channel = "text") {
   const need = shortNeed(s);
   // Out loud it's one short question (the voice cap is 3 sentences, and "paste an email here" makes no sense on a call).
-  if (channel === "voice") return `want me to ${GMAIL_ASK_MARK}, so i can actually help with ${need ?? "that"}?`;
-  return `want me to ${GMAIL_ASK_MARK}?${need ? ` then i can help with ${need} for real.` : ""} i never send anything without your ok. or you can just paste an email here.`;
+  // Gmail only "helps with" needs that involve email; otherwise say what it actually adds.
+  const emailish = !!need && /\b(e-?mails?|inbox|mail|recruiters?|replies|reply|applications?|newsletters?|invites?|messages?)\b/i.test(need);
+  if (channel === "voice") {
+    return emailish
+      ? `want me to ${GMAIL_ASK_MARK}, so i can actually help with ${need}?`
+      : `want me to ${GMAIL_ASK_MARK}? that way i can keep an eye on the emails that come with it, like confirmations and sign-ups.`;
+  }
+  const why = emailish ? ` then i can help with ${need} for real.` : " that way i can keep an eye on confirmations, sign-ups and anything that needs a reply.";
+  return `want me to ${GMAIL_ASK_MARK}?${why} i never send anything without your ok. or you can just paste an email here.`;
 }
 // Gmail pitches the model slips into other turns (help first, ask later).
 const GMAIL_PITCH = /\b(gmail|link|connect (your|my) (email|inbox|account)|read[- ]only|paste an email|without asking|pull up (your|the|those) (emails|inbox))\b/i;
@@ -787,7 +794,7 @@ async function turn(
   }
   // Ask bookkeeping: credit a question to the slot this turn's move was about (never the fallback line).
   const isQuestion = !usedFallback && text.includes("?");
-  const MOVE_SLOT: Record<string, SlotKey> = { discover: "helpNeed", dig: "helpNeed", offramp: "helpNeed", "ask-name": "userName", "ask-gmail": "gmail" };
+  const MOVE_SLOT: Record<string, SlotKey> = { "name-me": "agentName", discover: "helpNeed", dig: "helpNeed", offramp: "helpNeed", "ask-name": "userName", "ask-gmail": "gmail" };
   const moveSlot = ctx.move ? MOVE_SLOT[ctx.move.id] : undefined;
   recordAsk(s, isQuestion && moveSlot && s.slots[moveSlot].status === "missing" ? moveSlot : null, isQuestion);
   emitAgentText(ctx, text);
@@ -838,7 +845,8 @@ export async function handleUserMessage(
   clientId?: string,
   heardBefore?: string,
 ): Promise<TurnResult> {
-  const clean = text.slice(0, 4000);
+  // Curly apostrophes (phones type them) broke every "that's all" / "don't" check.
+  const clean = text.slice(0, 4000).replace(/[‘’]/g, "'");
   // They cut the agent off: its history should hold only what they actually heard, so it never
   // assumes they got the rest ("as i said...").
   if (interrupted && heardBefore !== undefined && channel === "voice") {
