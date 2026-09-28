@@ -4,7 +4,7 @@ import { EVENT_MOVES, pick } from "../moves";
 import { type Ctx, emitAgentText, ensureCard, goodbyeLine, guard, msg, shortNeed } from "./context";
 import { CARD_ASK, NAME_ASK, SEND_REQUEST, SETUP_Q, gmailConsent, saidNow, userWrappingUp, RUSHED_NOW } from "./intents";
 import { runTool } from "./tools";
-import { ACCUSING, ASSUMING, NARRATION, STAGE_DIRECTION, CLAIMS_LINK, CLAIMS_SENT, GOODBYE, SENTENCE_BREAK, capSentences, cleanModelText } from "./text";
+import { ACCUSING, ASSUMING, NARRATION, STAGE_DIRECTION, CLAIMS_CONNECTED, CLAIMS_LINK, CLAIMS_SENT, GOODBYE, SENTENCE_BREAK, capSentences, cleanModelText } from "./text";
 
 // The gmail ask is written by code (one clear question, the reason, the reassurance, an easy no).
 export const GMAIL_ASK_MARK = "text you a link to connect your gmail";
@@ -373,6 +373,18 @@ export const GUARD_PIPELINE: GuardStep[] = [
     },
   },
   {
+    name: "no-false-connected",
+    async run(e) {
+      // "tapped it" isn't a connection: until google says yes, it can't claim it's in their account.
+      if (e.s.slots.gmail.status === "filled") return;
+      const sentences = e.text.split(SENTENCE_BREAK);
+      // "let me know if it worked" / "once you sign in you're good to go" are conditions, not claims
+      const kept = sentences.filter((x) => !(CLAIMS_CONNECTED.test(x) && !x.trim().endsWith("?") && !/\b(if|once|when|after|as soon as)\b/i.test(x)));
+      if (kept.length === sentences.length) return;
+      e.fix("blocked a false 'connected' claim", kept.join(" ").trim() || "i don't see it connected yet. it can take a few seconds, or tap the card again.");
+    },
+  },
+  {
     name: "call-offer-and-link-claims",
     async run(e) {
       const { ctx, s, channel } = e;
@@ -391,7 +403,8 @@ export const GUARD_PIPELINE: GuardStep[] = [
           guard(ctx, "sent the link it said it sent");
         }
         // Never say it's sent when it isn't: drop the claim instead of sending a link they didn't ask for.
-        else e.fix("dropped a false 'link sent' claim", sentences.filter((x) => !(CLAIMS_LINK.test(x) && !x.trim().endsWith("?"))).join(" ").trim() || e.text);
+        // If the claim was the whole reply, ask instead (keeping it once let "the link's in your texts now" out with no link).
+        else e.fix("dropped a false 'link sent' claim", sentences.filter((x) => !(CLAIMS_LINK.test(x) && !x.trim().endsWith("?"))).join(" ").trim() || (channel === "voice" ? "want me to text you that link now?" : "want me to send you that link now?"));
       }
     },
   },

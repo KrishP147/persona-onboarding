@@ -6,7 +6,10 @@
 // so you can see the research working. Sources: docs/journal/03-principles.md, 05-research.md.
 import type { Channel, Move, Session } from "./types";
 import { INBOUND_OWN_TURNS, userTurnsThisCall } from "./policy";
-import { replyFocus, taskNow } from "./engine/intents";
+import { YES, replyFocus, taskNow } from "./engine/intents";
+
+// The agent offering to look through their mail or saved things ("i can pull up any recipes you've saved").
+export const ACCESS_PITCH = /\b(pull up|look (at|through)|dig (through|into)|go through|search|see|check)\b[^.?!]{0,40}\b(your|you'?ve)\b[^.?!]{0,40}\b(e-?mails?|inbox|saved|recipes?|receipts?|confirmations?|messages|subscriptions?)\b/i;
 
 export interface MoveDef extends Move {
   instruction: string;
@@ -193,6 +196,10 @@ export function chooseMove(s: Session, channel: Channel, opts: { callFirst: bool
   // A real task: do it (a run offered a call over "create a weather report..." and ignored it).
   if (taskNow(s)) return MOVES.follow;
   if (opts.callFirst && channel === "text") return MOVES.askCall;
+  // They said yes to looking at their stuff ("i can pull up recipes you've saved" / "yeah go for it"): that
+  // needs gmail, so this is the gmail turn (a run pitched it three times, each held back, never asking).
+  const prevAgent = [...s.transcript].reverse().find((m) => m.role === "agent" && (!m.kind || m.kind === "text"))?.text ?? "";
+  if (s.slots.gmail.status === "missing" && !used(s, "ask-gmail") && !linkOut(s) && YES.test(text) && ACCESS_PITCH.test(prevAgent)) return MOVES.askGmail;
   // Two turns of pure help with setup still open: help again, then one light step back toward what's
   // missing (a run went a whole meal plan without ever returning to the name or the call).
   const lastTwo = (s.movesUsed ?? []).slice(-2);

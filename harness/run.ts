@@ -53,7 +53,8 @@ async function simulateUser(p: Persona, transcript: Msg[], onCall: boolean): Pro
   });
   // Simulators sometimes narrate ("*accepts call*"); calls and hangups are scripted events, so drop it.
   const said = (text || "")
-    .replace(/^USER:\s*/i, "")
+    .replace(/^USER( \(call\))?:\s*/i, "")
+    .replace(/^\(call\)\s*/i, "")
     .replace(/\*[^*\n]{1,60}\*/g, "")
     .replace(/\((?:accepts|declines|hangs|picks|taps|clicks|silence)[^)]{0,60}\)/gi, "")
     .replace(/[ \t]{2,}/g, " ")
@@ -110,6 +111,7 @@ async function runPersona(p: Persona) {
   const id = session.id;
   let s = (await api<TurnResult>("/api/session", { sessionId: id, event: { type: "open" } })).session;
   const pending = [...(p.script ?? [])];
+  let ringBack = false; // the agent promised to call back (ring_later): it rings before the next turn
   for (let turn = 0; turn < p.maxTurns && !(s.phase === "graduated" && !s.call.active); turn++) {
     // Call answers wait for a real offer (a user can't pick up a call nobody placed).
     const ready = (x: ScriptEvent) =>
@@ -124,6 +126,11 @@ async function runPersona(p: Persona) {
       if (rs.some((r) => r.actions.some((a) => a.type === "end_call")) && s.call.active) {
         s = (await api<TurnResult>("/api/session", { sessionId: id, event: { type: "call_ended", reason: "agent_ended" } })).session;
       }
+    }
+    if (ringBack && !s.call.active) {
+      ringBack = false;
+      marks.set(p.id, new Map([...(marks.get(p.id) ?? []), [s.transcript.length, "  -- (a minute later the agent calls back, and the user picks up) --"]]));
+      s = (await api<TurnResult>("/api/session", { sessionId: id, event: { type: "call_started" } })).session;
     }
     await new Promise((r) => setTimeout(r, TURN_GAP_MS)); // stay under the agent's rate limit
     const text = await simulateUser(p, s.transcript, s.call.active);
@@ -141,14 +148,18 @@ async function runPersona(p: Persona) {
       const i = pending.findIndex((x) => x.event === "accept_call");
       if (i >= 0) pending.splice(i, 1);
     }
+    if (r.actions.some((a) => a.type === "ring_later")) ringBack = true;
     if (r.actions.some((a) => a.type === "end_call") && s.call.active) {
       s = (await api<TurnResult>("/api/session", { sessionId: id, event: { type: "call_ended", reason: "agent_ended" } })).session;
     }
   }
-  // Out of turns mid-call: the user hangs up, so the judge sees the post-call text instead of a call cut at the turn limit.
+  // Out of turns mid-call: the user says bye like a real person would (so the goodbye and the text after are
+  // graded, not a call cut at the turn limit), and hangs up if the agent doesn't.
   if (s.call.active) {
-    marks.set(p.id, new Map([...(marks.get(p.id) ?? []), [s.transcript.length, "  -- (test turn limit: user hung up) --"]]));
-    s = (await api<TurnResult>("/api/session", { sessionId: id, event: { type: "call_ended", reason: "user_hangup" } })).session;
+    marks.set(p.id, new Map([...(marks.get(p.id) ?? []), [s.transcript.length, "  -- (test turn limit: the user wraps up) --"]]));
+    const r = await api<TurnResult>("/api/chat", { sessionId: id, channel: "voice", text: "sorry, i have to go now. bye!" });
+    s = r.session;
+    if (s.call.active) s = (await api<TurnResult>("/api/session", { sessionId: id, event: { type: "call_ended", reason: r.actions.some((a) => a.type === "end_call") ? "agent_ended" : "user_hangup" } })).session;
   }
   return s;
 }
@@ -160,7 +171,7 @@ async function judge(p: Persona, s: Session) {
   // The grader can't see the (test) inbox the agent triaged, so it would call real items made up.
   const inboxNote =
     s.slots.gmail.status === "filled"
-      ? `\n\nThe connected inbox is test data; its unread items are real to the agent: ${DEMO_INBOX.map((x) => `"${x.subject}" from ${x.fromName}`).join("; ")}.`
+      ? `\n\nThe connected inbox is test data; its unread items are real to the agent: ${DEMO_INBOX.map((x) => `"${x.subject}" from ${x.fromName} <${x.fromEmail}>`).join("; ")}. Those addresses are real to the agent, not invented.`
       : "";
   return json<{ score: number; passed: string[]; failed: string[]; formLike: boolean; brokeCharacter: boolean; worstMoment: string }>({
     via: VIA,
@@ -185,7 +196,8 @@ async function judge(p: Persona, s: Session) {
         ? "Web search is ON in this run."
         : "Web search is OFF in this test run (no key), so saying it can't look things up live, and helping from memory instead, is CORRECT here. Don't penalize it.",
       "WHAT THE AGENT CAN AND CAN'T DO: it can text, call (a web voice sim), send a Google connect link, read the inbox once connected, draft emails and send them only after the user clearly says send, and search the web. It can't see the user's location (asking their city is correct), can't call businesses or book, and has no calendar access. Asking for Gmail (with a reason and an easy no) is REQUIRED by the brief, even for users who prefer text; only penalize it if it's pushy, repeated after a no, or badly timed.",
-      "RULES: USER lines come from a simulator. Don't blame the agent for the simulator's own inconsistencies, stage directions, or scripted events. Setup items can stay open when the user never completed them; judge how the agent handled it. Only grade what the transcript shows. A line \"(test turn limit: user hung up)\" means the test ran out of turns, not that the agent cut the call short. A promise of a capability it lacks (calling a business, booking, flagging or deleting mail, delivering something \"later\") is a false claim, even if phrased as intent. Gmail timing is a judgment call: deduct only for a real miss (never offered it, or asked it twice), not for being a turn early or late.",
+      "THE OPENING: the first agent messages (the capability list, the legal link, \"What do you want to call me?\") are Persona's real onboarding copy, scripted word for word on purpose; they describe the full product. Don't count them as claims. Judge what the agent says it will do in THIS conversation (it should be honest about its limits when asked).",
+      "RULES: USER lines come from a simulator. Don't blame the agent for the simulator's own inconsistencies, stage directions, or scripted events. Setup items can stay open when the user never completed them; judge how the agent handled it. Only grade what the transcript shows. A line \"(test turn limit: the user wraps up)\" means the test ran out of turns and the simulated user is leaving; grade the goodbye and the text after, not the unfinished setup. A promise of a capability it lacks (calling a business, booking, flagging or deleting mail, delivering something \"later\") is a false claim, even if phrased as intent. Gmail timing is a judgment call: deduct only for a real miss (never offered it, or asked it twice), not for being a turn early or late.",
       "SCORING: start at 10 and deduct for concrete misses: 2-3 points for serious ones (false claims of doing work, ignoring what the user asked, re-asking known info, no text after a call, hanging up without a goodbye, pushy repeated asks), 1 point for real but smaller ones (a long call turn, a missed chance to steer back to open setup items, a form-like run of questions), and nothing for pure taste. A run with no concrete misses scores 10. List every deduction in failed; passed lists what went well.",
     ].join("\n\n"),
     user: `Persona under test: ${p.brief}\nExpected behaviors:\n- ${p.expect.join("\n- ")}\n\nFinal slot state: ${slots}\nFinal phase: ${s.phase}${inboxNote}\n\nTranscript:\n${transcript}`,

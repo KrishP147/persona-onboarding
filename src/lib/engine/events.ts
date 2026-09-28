@@ -153,7 +153,7 @@ export const EVENT_HANDLERS: { [K in SessionEvent["type"]]: EventHandler<K> } = 
         })()
       : await turn(s, "text", `${RECAP_INSTRUCTION} ${how}${draftNote} Call lasted ${secs}s.${Object.keys(caught).length ? " A separate line after yours says what you caught from the call; don't repeat it." : ""}`, recapFallback(s, onPurpose ? "agent_ended" : e.reason), {
       move: EVENT_MOVES.recap,
-      avoid: e.reason === "agent_ended" || onPurpose ?/\b(cut off|dropped|lost you|got disconnected)\b/i : undefined,
+      avoid: e.reason === "agent_ended" || onPurpose ? /\b(cut off|dropped|lost you|got disconnected|still there|you there)\b/i : /\b(still there|you there)\b/i,
     });
     // A text always follows a call. If the model's recap got filtered to nothing, the code-written one goes out.
     const recaps = r.newMessages.filter((m) => m.role === "agent" && m.channel === "text" && !m.kind);
@@ -297,7 +297,7 @@ export const EVENT_HANDLERS: { [K in SessionEvent["type"]]: EventHandler<K> } = 
     return { session: s, newMessages: ctx.newMessages, chips: computeDirective(s, "text").chips, actions: [] };
   },
   mic_denied: async ({ s }) => {
-    eventMsg(s, "Microphone unavailable");
+    eventMsg(s, "Call ended: the microphone was blocked or unavailable");
     s.callOffers = MAX_CALL_OFFERS; // no mic: don't keep offering calls
     s.call = { ...s.call, active: false, endedReason: "error" };
     if (s.phase === "on_call" || s.phase === "call_offered") s.phase = "intro";
@@ -376,7 +376,7 @@ async function scanInbox(s: Session, inbox: InboxItem[], saidConnected = false, 
     if (t.interrupt) {
       const it = t.interrupt.item;
       (s.alerts ??= []).push({ id: it.id, category: t.interrupt.category!, reason: t.interrupt.reason, subject: it.subject, from: it.fromName, shownAt: Date.now(), outcome: "pending" });
-      inboxNote = `From their unread mail, ONE item is worth raising now: "${it.subject}" from ${it.fromName} (${it.snippet.slice(0, 120)}). Why it matters: ${t.interrupt.reason}. Mention just this one, say briefly why (the evidence), and offer one concrete thing you can do about it. Say the rest can wait for a digest. Don't list other emails.`;
+      inboxNote = `From their unread mail, ONE item is worth raising now: "${it.subject}" from ${it.fromName} <${it.fromEmail}> (${it.snippet.slice(0, 120)}). Why it matters: ${t.interrupt.reason}. Mention just this one, say briefly why (the evidence), and offer one concrete thing you can do about it. Say the rest can wait for a digest. Don't list other emails.`;
       fallback = `gmail's connected. one thing that looks like it can't wait: "${it.subject}" from ${it.fromName}. want me to draft a reply?`;
     } else {
       inboxNote = `Nothing in their unread mail looks urgent (no deadlines, money issues, or people waiting). Don't list emails or invent any. Just say it's connected and nothing needs them right now; you'll keep the rest for a digest.`;
@@ -387,6 +387,8 @@ async function scanInbox(s: Session, inbox: InboxItem[], saidConnected = false, 
     // "connected!" already went out (inbox_scan): straight to what's in there
     const demoSaid = demo ? " It's the demo inbox: say once, in a few words, that it's sample mail and nothing really gets sent." : "";
     const said = demoSaid + (saidConnected ? " You already told them it's connected and that you're looking; don't say that again, go straight to what you found." : "");
+    // a run "found" a dentist confirmation (with a phone number) that wasn't in the inbox
+    inboxNote += " Only mention emails that are really there: never invent an email, a sender, a phone number or an address. If they asked you to find something, search for it with the inbox tool; if it isn't there, say you didn't find it.";
     return turn(s, s.call.active ? "voice" : "text", `Their Gmail just connected. ${waiting}${said} ${inboxNote}`, saidConnected ? fallback.replace(/^gmail's connected\. /, "") : fallback, t.interrupt ? { move: EVENT_MOVES.interrupt } : {});
   }
 }

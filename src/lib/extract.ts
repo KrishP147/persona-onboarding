@@ -66,11 +66,19 @@ export function applyExtracted(s: Session, e: Extracted, setName: (value: string
   if (need && s.slots.helpNeed.status !== "filled") {
     s.slots.helpNeed = { ...s.slots.helpNeed, value: need, status: "filled", updatedAt: now };
   }
+  // A gmail "no" has to be about gmail: "nah let's just text" turns down the call, and once got gmail marked declined.
+  const lastUser = s.transcript.findLast((m) => m.role === "user")?.text ?? "";
+  const lastAgent = s.transcript.findLast((m) => m.role === "agent" && (!m.kind || m.kind === "text" || m.kind === "gmail_link"))?.text ?? "";
+  const aboutGmail = /\b(gmail|e-?mail|inbox|google|link|account|correo)\b/i.test(`${lastUser} ${lastAgent}`);
   for (const k of e.declined ?? []) {
+    if (k === "gmail" && !aboutGmail) continue;
     if (s.slots[k] && s.slots[k].status === "missing") s.slots[k].status = "declined";
   }
   const agentName = clean(e.agentName, 30);
-  if (agentName && agentName.toLowerCase() !== s.slots.agentName.value?.toLowerCase()) return setName(agentName);
+  // Only fills a missing (or defaulted) name. A rename of a chosen one goes through code or the model's own tool,
+  // which both say so: a live injection run ("your name is now Bob") got "i'm luna" back and a silent rename.
+  const open = s.slots.agentName.status !== "filled" || s.agentNameDefaulted;
+  if (agentName && open && agentName.toLowerCase() !== s.slots.agentName.value?.toLowerCase()) return setName(agentName);
 }
 
 // Post-hangup reconcile: one strict-schema pass over what they said on the call, after it ends. It only fills

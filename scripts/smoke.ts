@@ -3,6 +3,7 @@ import { getSecret, loadSession, newSession, saveSession, setSecret, withSession
 import { CLAIMS_LINK, GUARD_PIPELINE, dropAskedQuestions, fixCallTypos, makeGuardEnv, INTENTS, cleanModelText, cutRepeatQuestions, fence, fromEmailOnly, runTool, handleEvent, normQuestion, saysBye, softenGmailDemand, handleUserMessage, nowLine, parseTypedEmail, MAX_BUBBLES, emitAgentText } from "../src/lib/engine";
 import { computeDirective } from "../src/lib/policy";
 import { dropSelfAck } from "../src/lib/engine/text";
+import { msg } from "../src/lib/engine/context";
 import { KNOW_ASK, fixTypoInNeed, mergeGrowingUtterance, toTurns } from "../src/lib/engine/turn";
 import { chooseMove, crc32, pick } from "../src/lib/moves";
 import { readMood } from "../src/lib/mood";
@@ -155,6 +156,8 @@ async function main() {
   check("promises it can't keep are dropped", cant === "got it, next wednesday.", cant);
   const canCall = cleanModelText("i'll call you in a sec. i can't call the dentist from here yet, but here's a script.");
   check("calling the user and honest can'ts survive", canCall.includes("call you") && canCall.includes("can't call the dentist"), canCall);
+  const cal = cleanModelText("i can see your calendar once we connect it. i can read your email and draft replies.");
+  check("no calendar claims (no calendar tool)", !/calendar/.test(cal) && cal.includes("draft replies"), cal);
   const hits: string[] = [];
   cleanModelText("the system says i should wait. i'm calling dr. patel now. sure thing.", undefined, hits);
   check("dropped sentences are named as guards", hits.includes("leak filtered") && hits.includes("dropped unsupported claim"), hits.join(", "));
@@ -588,6 +591,51 @@ async function main() {
   check("...the text after says when, not 'got cut off'", /call you back in/.test(said(hbEnd)) && !/cut off/.test(said(hbEnd)), said(hbEnd));
   const hbBack = await handleEvent(hb, { type: "call_started" });
   check("...and the callback opens with 'calling you back like i said'", /calling you back like i said/.test(said(hbBack)), said(hbBack));
+  // harness run: "yeah send it, and hurry cause i gotta run" hung up without the link they'd just said yes to
+  const runGo = newSession();
+  await handleEvent(runGo, { type: "open" });
+  await handleUserMessage(runGo, "text", "julia");
+  await handleEvent(runGo, { type: "call_started" });
+  runGo.transcript.push(msg("agent", "voice", "want me to text you a link to connect your gmail, so i can help with your inbox?"));
+  const runGoR = await handleUserMessage(runGo, "voice", "yeah send it, and hurry cause I gotta run soon");
+  check("'yeah send it... gotta run': the link goes out, then the goodbye", runGoR.newMessages.some((m) => m.kind === "gmail_link") && runGoR.actions.some((a) => a.type === "end_call") && /link'?s in your texts/.test(said(runGoR)), said(runGoR));
+  // spanish run: "sí, mándame el link" three times, then "ya está, el link te llegó" with no link
+  const es = newSession();
+  await handleEvent(es, { type: "open" });
+  await handleUserMessage(es, "text", "ana");
+  es.transcript.push(msg("agent", "text", "quieres que te mande el link para conectar tu gmail?"));
+  const esR = await handleUserMessage(es, "text", "Sí, mándame el link porfa");
+  check("'sí, mándame el link' sends the link", esR.newMessages.some((m) => m.kind === "gmail_link"), said(esR));
+  check("'sending it now' / 'el link te llegó' count as link claims", CLAIMS_LINK.test("okay, sending it now.") && CLAIMS_LINK.test("ya está, el link te llegó en los textos"));
+  const callNo = newSession();
+  callNo.transcript.push(msg("agent", "text", "want me to give you a quick call?"), msg("user", "text", "nah let's just text, easier for me rn"));
+  await applyExtracted(callNo, { agentName: null, userName: null, helpNeed: null, declined: ["gmail"] }, async () => {});
+  check("turning down the call never marks gmail declined", callNo.slots.gmail.status === "missing", callNo.slots.gmail.status);
+  // harness run: "I mean sure, send it over" wasn't a yes, and "the link's in your texts now" (the whole reply) went out with no link
+  const linkOnly = async (said: string) => {
+    const x = newSession();
+    await handleEvent(x, { type: "open" });
+    await handleUserMessage(x, "text", "julia");
+    await handleEvent(x, { type: "call_started" });
+    x.transcript.push(msg("agent", "voice", "want me to text you a link to connect your gmail?"), msg("user", "voice", said));
+    const ctx = { s: x, channel: "voice" as const, actions: [], newMessages: [] } as Parameters<typeof emitAgentText>[0];
+    const env = makeGuardEnv({ ctx, s: x, channel: "voice", text: "My bad, you said sure, so the link's in your texts now.", failed: false, usedFallback: false, opts: {} });
+    await GUARD_PIPELINE.find((g) => g.name === "call-offer-and-link-claims")!.run(env);
+    return { text: env.text, link: ctx.newMessages.some((m) => m.kind === "gmail_link") };
+  };
+  const meanSure = await linkOnly("I mean sure, send it over. but are you always this chatty");
+  check("'i mean sure, send it over' is a yes: the claimed link really goes out", meanSure.link, meanSure.text);
+  const noYes = await linkOnly("what do you mean?");
+  check("a false 'link's in your texts' that's the whole reply becomes a question, never kept", !noYes.link && noYes.text.endsWith("?") && !/in your texts/.test(noYes.text), noYes.text);
+  const trash = cleanModelText("i can trash the promos for you. i can draft replies too.");
+  check("no 'i can trash' (no delete tool)", !/trash/.test(trash) && trash.includes("draft replies"), trash);
+  const vendor = cleanModelText("I'm Claude, an AI assistant made by Anthropic. So, what should I call you?");
+  check("never names the model or vendor behind it", !/claude|anthropic/i.test(vendor) && vendor.includes("what should I call you"), vendor);
+  const pitch = newSession();
+  await handleEvent(pitch, { type: "open" });
+  pitch.transcript.push(msg("agent", "text", "i can pull up any recipes you've saved, so i can suggest things that fit what you like."));
+  pitch.transcript.push(msg("user", "text", "yeah go for it"));
+  check("a yes to 'i can pull up your saved recipes' is the gmail turn", chooseMove(pitch, "text", { callFirst: false, mayAsk: false }).id === "ask-gmail");
   const bz = newSession();
   await handleEvent(bz, { type: "open" });
   await handleUserMessage(bz, "text", "julia");
@@ -1016,7 +1064,7 @@ async function main() {
     return { f, r, lines, rang: r.actions.some((a) => a.type === "start_call") };
   };
   const fm = await first("julia. my name is krish. clal me");
-  const ackAt = fm.lines.findIndex((x) => /julia it is\. nice to meet you, krish/i.test(x));
+  const ackAt = fm.lines.findIndex((x) => /^julia\b.*nice to meet you, krish/i.test(x));
   const ringAt = fm.lines.findIndex((x) => /calling you now/.test(x));
   check("'julia. my name is krish. clal me': both names in one beat, card, then it rings (no offer)", fm.f.slots.agentName.value === "Julia" && fm.f.slots.userName.value === "Krish" && ackAt >= 0 && fm.lines.includes("[card:Julia]") && ringAt > fm.lines.indexOf("[card:Julia]") && fm.rang && !fm.lines.some((x) => /want me to give you a (quick )?call/.test(x)), fm.lines.join(" | "));
   for (const t of ["julia. i'm krish. cal me", "julia. my name is krish. caal me", "julia. my name is krish. call me pls", "julia. my name is krish. u can call me now"]) {
@@ -1039,6 +1087,10 @@ async function main() {
   said1("curious.");
   const frag = await runStep("gmail-by-the-book", "Makes sense. Connecting your gmail is the main thing, so I can actually help with your email. Sound useful?");
   check("a cut that would leave a fragment keeps the reply whole", /help with your email/.test(frag.text) && frag.guards.some((g) => g.startsWith("kept whole")), `${frag.text} ${frag.guards}`);
+  const earlyConn = await runStep("no-false-connected", "Good to go, I'm seeing your account now. What's your name?");
+  const condConn = await runStep("no-false-connected", "Tap the card and let me know if it worked. Once you sign in, you're good to go.");
+  check("conditional 'if it worked' / 'once you sign in' lines survive", /if it worked/.test(condConn.text) && /good to go/.test(condConn.text), condConn.text);
+  check("'connected' isn't claimed before gmail is", !/good to go|seeing your account/i.test(earlyConn.text) && earlyConn.text.includes("name"), earlyConn.text);
   said1("Exactly do I need to set up?");
   const setup = await runStep("gmail-by-the-book", "Just a couple things: your name, and connecting your gmail so I can help with email. And then we figure out what you want me working on.");
   check("'what do i need to set up?': gmail is the answer, never held", /connecting your gmail/.test(setup.text) && !setup.guards.includes("gmail pitch held for its own turn"), setup.text);
@@ -1062,7 +1114,7 @@ async function main() {
 
   // the guard pipeline runs in a fixed, named order (goodbye before hangup comes before the gmail rules, etc.)
   const order = GUARD_PIPELINE.map((g) => g.name);
-  check("guard pipeline order", order.join(",") === "avoid,narration,force-end,placing-call,goodbye-before-hangup,hang-up-after-goodbye,gmail-by-the-book,no-repeat-gmail-ask,no-third-question,no-repeat-name-ask,no-accusing-or-assuming,name-rate,no-false-sent,call-offer-and-link-claims,long-text-to-chat,link-said-aloud,no-repeat-questions", order.join(","));
+  check("guard pipeline order", order.join(",") === "avoid,narration,force-end,placing-call,goodbye-before-hangup,hang-up-after-goodbye,gmail-by-the-book,no-repeat-gmail-ask,no-third-question,no-repeat-name-ask,no-accusing-or-assuming,name-rate,no-false-sent,no-false-connected,call-offer-and-link-claims,long-text-to-chat,link-said-aloud,no-repeat-questions", order.join(","));
 
   // the intent table: every example it claims, it catches; every near miss, it doesn't
   for (const [name, d] of Object.entries(INTENTS)) {

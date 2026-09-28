@@ -55,7 +55,7 @@ export function userWrappingUp(s: Session) {
 }
 
 // The gmail link goes out only after a yes: they asked for it, or said yes to our question about it.
-export const WANTS_LINK = /\b(send|text|give|drop|shoot)\b[^.?!]{0,25}\blink\b|\b(connect|hook up|link|conectar|vincular|connecter|enlace|lien)\b[^.?!]{0,20}\b(gmail|email|e-?mail|inbox|google|correo|cuenta)\b/i;
+export const WANTS_LINK = /\b(send|text|give|drop|shoot|m[aá]nd(a|ame|amelo)|env[ií](a|ame|amelo)|p[aá]same|envoie)\b[^.?!]{0,25}\b(link|enlace|lien)\b|\b(connect|hook up|link|conectar|vincular|connecter|enlace|lien)\b[^.?!]{0,20}\b(gmail|email|e-?mail|inbox|google|correo|cuenta)\b/i;
 // Our last message brought up the link (asked, or offered "i'll send you a link"), so a yes means yes to it.
 export const ASKED_LINK = /\b(link|gmail|connect your)\b/i;
 // "send me the link" counts unless that same sentence says not to ("i don't have to worry about..."
@@ -91,7 +91,7 @@ export const AGREE = /\b(that'?d be (great|good|nice|awesome|perfect|amazing)|th
 // They're asking what setup involves ("what do i need to set up?", "how does this work?").
 export const SETUP_Q = /\b(set ?up|what do (i|you) need|what('?s| is) (next|left)|how does (this|it) work|what('?s| is) involved|what are the steps)\b/i;
 export const STOP_TALKING = /^\s*(ok(ay)?,? )?(stop( talking| it)?|shh+|hush|quiet|be quiet|enough|stop stop|zip it)[.! ]*$/i;
-export const YES = /^\s*((oh|ah|um+|uh+|well|hmm+|haha)[,.!]?\s+)?(yes|yeah|yea|ye|ya|yep|yup|sure|ok(ay)?|do it|please|go ahead|let'?s do it|sounds good|perfect)\b/i;
+export const YES = /^\s*((oh|ah|um+|uh+|well|hmm+|haha|i mean|honestly|alright|so)[,.!]?\s+)?(yes|yeah|yea|ye|ya|yep|yup|sure|ok(ay)?|do it|please|go ahead|let'?s do it|sounds good|perfect|si|dale|claro|vale|oui|sim)\b|^\s*sí(?![a-z])/i;
 
 export function lastUserText(s: Session) {
   return [...s.transcript].reverse().find((m) => m.role === "user")?.text ?? "";

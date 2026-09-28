@@ -11,7 +11,7 @@ import { webEnabled } from "../web";
 import { teamActive, teamLine, teamLineVoice, teamMatch, teamNote, teamYes, teamYesVoice } from "../team";
 
 import { currentMeter, metered, percentile, recordTurn, type Meter } from "../usage";
-import { type Ctx, emitAgentText, ensureCard, goodbyeLine, guard, msg, outageLine } from "./context";
+import { type Ctx, cardLine, emitAgentText, ensureCard, goodbyeLine, guard, msg, outageLine } from "./context";
 import { CALL_NO, CARD_ASK, LAUGH_LEAD, CARD_WANT, CLEAR_BYE, DELEGATE, firstSentenceName, fixCallTypos, hintedAgentName, ownNameIn, DEMO_YES, GMAIL_TROUBLE, HOLD, INSULT_NAME, LAUGH, NAME_ASK, NAME_HINT, NEGATED_CALL, NOT_A_NAME, NO_CALLS, OFFERED_CALL, OWN_NAME, SEND_CMD, SEND_REQUEST, SENT_Q, SKIP_SETUP, JUST_DO, SIGN_OFF, HANGUP_ASK, DONT_BYE, callbackIn, STOP_TALKING, repliedElsewhere, THANKS, USER_BYE, WAITING_ON_THEM, WANTS_OUT, YES, asTurnBy, asksForLink, gmailConsent, lastUserText, saidNow, saysBye } from "./intents";
 import { cleanModelText, dropDraftEcho, dropSelfAck, fence, nowLine, parseTypedEmail } from "./text";
 import { GMAIL_ASK_MARK, GUARD_PIPELINE, type TurnOpts, makeGuardEnv, sealGoodbye } from "./guards";
@@ -578,7 +578,14 @@ export async function handleUserMessageInner(
       const when = ms ? (ms < 90_000 ? "in a minute" : `in about ${Math.round(ms / 60_000)} minutes`) : null;
       const back = /\b(call|ring) me back\b|\bcall back\b/i.test(clean);
       const ctx: Ctx = { s, channel, actions: [], newMessages: [], move: EVENT_MOVES.recap };
-      emitAgentText(ctx, when ? `of course${name ? `, ${name}` : ""}. i'll call you back ${when}. talk soon!` : back ? `of course${name ? `, ${name}` : ""}. i'll text you, and we can talk whenever you're free.` : `no problem${name ? `, ${name}` : ""}, i'll let you go. talk soon!`);
+      // "yeah send it, and hurry cause i gotta run": the yes to the link still counts, so it goes out first.
+      const linkNow = s.slots.gmail.status === "missing" && gmailConsent(s) && !s.transcript.some((m) => m.kind === "gmail_link");
+      if (linkNow) {
+        await runTool(ctx, "send_gmail_link", {});
+        guard(ctx, "sent the link they said yes to before letting them go");
+      }
+      if (linkNow && !when && !back) emitAgentText(ctx, `the link's in your texts${name ? `, ${name}` : ""}. go, i'll text you. talk soon!`);
+      else emitAgentText(ctx, when ? `of course${name ? `, ${name}` : ""}. i'll call you back ${when}. talk soon!` : back ? `of course${name ? `, ${name}` : ""}. i'll text you, and we can talk whenever you're free.` : `no problem${name ? `, ${name}` : ""}, i'll let you go. talk soon!`);
       guard(ctx, "hung up when asked");
       s.callbackAt = ms ? Date.now() + ms : undefined;
       ctx.actions.push({ type: "end_call", final: true });
@@ -823,7 +830,7 @@ export async function handleUserMessageInner(
     s,
     replyChannel,
     [early?.note, linkNote ?? sawText, skippedName ? "They skipped naming you. You're going by Persona for now and a separate text just before yours already told them, so don't mention your name, don't ask for one, and don't open with \"got it\" (that would be answering your own text). Just carry on." : undefined].filter(Boolean).join(" ") || (interrupted ? "They talked over you mid-sentence. Drop what you were saying and respond to what they just said; don't repeat your cut-off line unless they ask." : undefined),
-    linkNote ? (channel === "voice" ? "okay, i'm texting you the link right now. it's the card that says connect your google account, tap it whenever you're ready." : "here you go, it's the card right there. signing in takes a few seconds.") : channel === "voice" ? "sorry, i missed that. say it one more time?" : "sorry, i lost my train of thought for a sec. can you say that again?",
+    linkNote ? (channel === "voice" ? "okay, i'm texting you the link right now. it's the card that says connect your google account, tap it whenever you're ready." : "here you go, it's the card right there. signing in takes a few seconds.") : HOLD.test(lastUserText(s)) || WAITING_ON_THEM.test(lastUserText(s)) ? "take your time, i'm here." : channel === "voice" ? "sorry, i missed that. say it one more time?" : "sorry, i lost my train of thought for a sec. can you say that again?",
     // A note about an interruption or a text mid-call still gets this turn's move (like the gmail offer).
     { soft: !linkNote },
   );
@@ -895,7 +902,7 @@ export async function nameFirst(s: Session, channel: Channel, text: string, hear
   const theirs = s.slots.userName.status !== "filled" ? (e?.userName?.trim() || ownNameIn(text)) : null;
   const meet = theirs && theirs.toLowerCase() !== value.toLowerCase() ? theirs.replace(/^\p{L}/u, (c) => c.toUpperCase()) : null;
   if (meet) s.slots.userName = { ...s.slots.userName, value: meet, status: "filled", source: channel, updatedAt: Date.now() };
-  const ack = msg("agent", "text", `${nameAck(value)}${meet ? ` nice to meet you, ${meet.toLowerCase()}.` : ""} here's my contact card so you know it's me.`);
+  const ack = msg("agent", "text", `${nameAck(value)}${meet ? ` nice to meet you, ${meet.toLowerCase()}.` : ""} ${cardLine(value)}`);
   s.transcript.push(ack);
   const msgs = [ack];
   if (ctx.newCard) {
@@ -906,8 +913,11 @@ export async function nameFirst(s: Session, channel: Channel, text: string, hear
 }
 
 export function nameAck(name: string) {
-  return INSULT_NAME.test(name.trim()) ? `ouch, ${name.toLowerCase()}? harsh, but i'll wear it. ${name} it is.` : `${name} it is.`;
+  return INSULT_NAME.test(name.trim()) ? `ouch, ${name.toLowerCase()}? harsh, but i'll wear it. ${name} it is.` : NAME_ACKS[nameSeed(name) % NAME_ACKS.length](name);
 }
+// A few ways to take a name, picked by the name itself (same name, same line), so it isn't one template every time.
+const NAME_ACKS = [(n: string) => `${n} it is.`, (n: string) => `${n}. i like it.`, (n: string) => `${n}, love it.`];
+export const nameSeed = (name: string) => [...name.toLowerCase()].reduce((a, c) => a + c.charCodeAt(0), 0);
 
 // confirms their call to skip it (not "got it": that reads as us acknowledging ourselves once the next text follows)
 export const SKIPPED_NAME_REPLY = "all good, no name needed. i'll go by persona for now, rename me anytime";

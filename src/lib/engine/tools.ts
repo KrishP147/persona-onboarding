@@ -312,7 +312,7 @@ export async function runTool(ctx: Ctx, name: string, input: Record<string, unkn
       if (!items.length) return `no messages match "${query}".`;
       rememberEmails(s, items);
       return items
-        .map((m, i) => `${i + 1}. ${new Date(m.date).toLocaleDateString("en-US", { month: "short", day: "numeric" })} ${fence("email_content", `from ${m.fromName} | ${m.subject || "(no subject)"} | ${m.snippet.slice(0, 140)}`)}`)
+        .map((m, i) => `${i + 1}. ${new Date(m.date).toLocaleDateString("en-US", { month: "short", day: "numeric" })} ${fence("email_content", `from ${m.fromName} <${m.fromEmail}> | ${m.subject || "(no subject)"} | ${m.snippet.slice(0, 140)}`)}`)
         .join("\n");
     }
     case "save_draft":

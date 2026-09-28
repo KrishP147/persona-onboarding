@@ -65,13 +65,14 @@ export function PhonePicker({ value, onChange, size = "md" }: { value: SkinId | 
   );
 }
 
-// Restart asks in place: the first tap arms it ("tap again: clears the chat"), a second within 4s does it.
+// Restart asks in place: the first tap arms it ("tap again: clears the chat"), a second within 8s does it.
+// (4s was too short for testers that screenshot between taps: it had already disarmed.)
 // A browser confirm() box was easy to miss and automated testers dismiss it silently.
 export function useArmed(action: () => void): [boolean, () => void] {
   const [armed, setArmed] = useState(false);
   useEffect(() => {
     if (!armed) return;
-    const t = setTimeout(() => setArmed(false), 4000);
+    const t = setTimeout(() => setArmed(false), 8000);
     return () => clearTimeout(t);
   }, [armed]);
   return [armed, () => (armed ? action() : setArmed(true))];

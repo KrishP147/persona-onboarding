@@ -140,13 +140,16 @@ export function eventMsg(s: Session, text: string): Msg {
   return m;
 }
 
+const CARD_LINES = ["here's my contact card so you know it's me.", "saving you my contact card, so you'll know it's me.", "here's my card, so my texts and calls show up as me."];
+export const cardLine = (name: string) => CARD_LINES[[...name.toLowerCase()].reduce((a, c) => a + c.charCodeAt(0), 0) % CARD_LINES.length];
+
 // The contact card always comes before the first call (so the incoming call shows who it is), even when
 // the name is still the "Persona" default. Returns true if it sent one now.
 export function ensureCard(ctx: Ctx): boolean {
   const { s } = ctx;
   const name = s.slots.agentName.value;
   if (!name || s.transcript.some((m) => m.kind === "contact_card")) return false;
-  const line = msg("agent", "text", "here's my contact card so you know it's me.");
+  const line = msg("agent", "text", cardLine(name));
   const card = msg("agent", "text", name, { kind: "contact_card" });
   s.transcript.push(line, card);
   ctx.newMessages.push(line, card);
