@@ -40,4 +40,4 @@ n = 126 sessions that sent at least one message. another 64 only opened the page
 | graduated early (skipped the rest) | 10 |
 | $ per session (where metered) | $0.0085 over 1 |
 
-the fixes above shipped after almost all of these sessions, so their effect will show in `pnpm funnel --since <deploy time>`, not here.
+the fixes above shipped after almost all of these sessions, so their effect shows in [FUNNEL-after-fixes.md](FUNNEL-after-fixes.md) (`pnpm funnel --since <iso date>`), not here.
