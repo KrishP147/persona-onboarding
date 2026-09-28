@@ -158,6 +158,80 @@ html[data-theme="dark"] .sk-ios {
   background: var(--ios-sent);
 }
 
+/* pixel: google messages (m3 expressive chat, aug 2025) + pixel phone. dark = measured off the
+   user's own pixel (dynamic color, purple-gray seed); light = google's gm3 baseline (the scheme
+   google apps use without a wallpaper seed), mapped onto the same roles the dark screenshots show:
+   app bar, received bubble and composer pill share surfaceContainer; thread = surface */
+.sk-gm {
+  --gm-app: #f0f4f9; /* surfaceContainer: status bar, app bar, screen ground */
+  --gm-surface: #ffffff; /* surface: thread, composer strip */
+  --gm-ink: #1f1f1f; /* onSurface */
+  --gm-mute: #444746; /* onSurfaceVariant: icons, placeholder, stamps */
+  --gm-recv: #f0f4f9;
+  --gm-recv-ink: #1f1f1f;
+  --gm-sent: #0b57d0; /* primary; m3e light sent = primary + onPrimary */
+  --gm-sent-ink: #ffffff;
+  --gm-primary: #0b57d0;
+  --gm-on-primary: #ffffff;
+  --gm-fab: #d3e3fd; /* primaryContainer */
+  --gm-fab-ink: #041e49;
+  --gm-high: #e9eef6; /* surfaceContainerHigh: banners, notice, reaction pill */
+  --gm-line: rgba(31, 31, 31, 0.12);
+  --gm-track: rgba(31, 31, 31, 0.1);
+  --gm-hover: rgba(31, 31, 31, 0.08);
+  --gm-error: #b3261e;
+  --gm-err-bg: #f9dedc;
+  --gm-err-ink: #410e0b;
+  --gm-rec: #b3261e;
+  --gm-rec-ink: #ffffff;
+  --gm-green: #146c2e;
+  --gm-unknown: #fcc934; /* default contact avatar, measured */
+  --gm-unknown-ink: #1f1f23;
+  /* pixel phone */
+  --gm-call-bg: #f8fafd;
+  --gm-call-panel: #e9eef6;
+  --gm-call-btn: #ffffff;
+  --gm-call-on: #0b57d0;
+  --gm-call-on-ink: #ffffff;
+  --gm-cookie: #d3e3fd;
+  --gm-cookie-live: #a8c7fa;
+  --gm-end: #ed665a; /* measured (dark); same red in light, no light capture */
+  --gm-end-ink: #1f1f1f;
+  --gm-answer: #5aba75;
+  --gm-answer-ink: #1f1f1f;
+}
+html[data-theme="dark"] .sk-gm {
+  --gm-app: #1f1f23; /* measured */
+  --gm-surface: #131317; /* measured */
+  --gm-ink: #e3e2e7; /* measured */
+  --gm-mute: #c5c6d0; /* measured */
+  --gm-recv: #1f1f23; /* measured */
+  --gm-recv-ink: #e3e2e7; /* measured */
+  --gm-sent: #394668; /* measured */
+  --gm-sent-ink: #ffffff; /* measured */
+  --gm-primary: #b7c4f2; /* est: primary tone 80 of the measured seed */
+  --gm-on-primary: #202f55;
+  --gm-fab: #513f66; /* measured: tertiaryContainer */
+  --gm-fab-ink: #efdbff; /* measured */
+  --gm-high: #2a2a2e;
+  --gm-line: rgba(255, 255, 255, 0.12);
+  --gm-track: rgba(255, 255, 255, 0.14);
+  --gm-hover: rgba(255, 255, 255, 0.1);
+  --gm-error: #f2b8b5;
+  --gm-err-bg: #601410;
+  --gm-err-ink: #ffdad6;
+  --gm-rec: #8c1d18;
+  --gm-rec-ink: #ffdad6;
+  --gm-green: #6dd58c;
+  --gm-call-bg: #131317;
+  --gm-call-panel: #1f1f23;
+  --gm-call-btn: #0e0e12; /* the ref's off buttons sit darker than the panel */
+  --gm-call-on: #d9e0fa;
+  --gm-call-on-ink: #202f55;
+  --gm-cookie: #2e3446;
+  --gm-cookie-live: #3f4a6a;
+}
+
 /* status bar + home area: the real safe areas on a phone, the mock ones in a frame */
 .phone-screen {
   --sb: env(safe-area-inset-top, 0px);

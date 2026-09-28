@@ -131,26 +131,27 @@ avatar: circle with gray gradient `linear-gradient(#A5ABB8,#858994)` + white per
 
 ---
 
-## A2. Google Messages skin (Android 16, M3 Expressive) - dark default, light listed
+## A2. Google Messages skin (Android 16, M3 Expressive) - light + dark, follows the page theme
 
-colors = Google's default (non-dynamic) blue scheme [est: aligned with GM3 baseline tokens]. For "dynamic color" mode derive from a seed via Material Color Utilities (`@material/material-color-utilities`, `themeFromSourceColor`).
+dark = measured off the user's own Pixel (dynamic color, purple-gray seed); light = Google's GM3 baseline scheme (what Google apps show with no wallpaper seed). full table + reasoning in "fidelity pass > pixel" below. role rule (from the real screenshots): app bar, received bubble and composer pill share surfaceContainer; the thread is surface; light sent = primary + onPrimary, dark sent = primaryContainer + onPrimaryContainer.
 
-| token | dark | light |
+| token | dark (measured) | light (GM3 baseline) |
 |---|---|---|
-| app bg (behind thread container) | #1B1B1F -> use **#111318** | #F8F9FF [est] |
-| thread container (rounded top) | **#1D2024** | #FFFFFF [est] |
-| sent bubble | **#004A77** (text #C2E7FF) | **#D3E3FD** (text #041E49) [est] |
-| received bubble | **#2B2F36** (text #E3E3E3) | **#E9EEF6** (text #1F1F1F) [est] |
-| primary (send FAB, links) | #A8C7FA on #062E6F | #0B57D0 on #FFFFFF [est] |
-| secondary text | #C4C7C5 | #444746 [est] |
-| error/decline | #F2B8B5 | #B3261E [est; M3 baseline error] |
+| app bar / screen ground | **#1F1F23** | #F0F4F9 |
+| thread container (rounded top) | **#131317** | #FFFFFF |
+| sent bubble | **#394668** (text #FFFFFF) | **#0B57D0** (text #FFFFFF) |
+| received bubble | **#1F1F23** (text #E3E2E7) | **#F0F4F9** (text #1F1F1F) |
+| primary (send button, links) | #B7C4F2 on #202F55 [est] | #0B57D0 on #FFFFFF |
+| secondary text, icons, placeholder | **#C5C6D0** | #444746 |
+| voice button | **#513F66** (glyph #EFDBFF) | #D3E3FD (glyph #041E49) |
+| error | #F2B8B5 | #B3261E |
 
 ### typography
 font stack: `"Google Sans Text", "Google Sans", "Roboto Flex", Roboto, system-ui, sans-serif`. Google Sans is not licensed for web embedding; ship **Roboto Flex** (Google Fonts) or **"Google Sans Flex"** only if licensed. [est]
 
 | use | size/leading | weight |
 |---|---|---|
-| bubble text | **16/22** [est] | 400 |
+| bubble text | **16/24** (the user's phone shows ~18: pinch-zoomed chat text; we keep the default) | 400 |
 | header name | 22/28 (title-large) [est] | 400 (500 in M3E) |
 | date separator | 12/16 [est] | 500 |
 | timestamp/status | 12/16 [est] | 400 |
@@ -162,18 +163,18 @@ font stack: `"Google Sans Text", "Google Sans", "Roboto Flex", Roboto, system-ui
 | avatar | **40** circle (bigger since 2026 per 9to5Google) left 56 [src size change; value est] |
 | name | 22/28, one line ellipsis; subtitle none by default (optional "RCS" chip) [est] |
 | right | phone 24, videocam 24, more_vert 24, each 48 target [src 9to5Google] |
-| thread container | below app bar, `border-radius: 28px 28px 0 0` (M3 extra-large) [src "container with curved corners at the top"; radius est] |
+| thread container | below app bar, `border-radius: 20px 20px 0 0` (measured ~52 px at 1080 = 20 dp) |
 | wallpaper | solid colors (bubbly wallpaper removed) unless Chat theme set [src 9to5Google] |
 
 ### bubbles
 | prop | value [est] |
 |---|---|
-| padding | **10px 14px** (single-line height 42) |
+| padding | **9px 16px** (single-line height 42; measured 41.5) |
 | outer radius | **20**; grouped inner corner **4** |
 | grouping corners (sent, right side) | single: 20/20/20/20. first: TL20 TR20 BR4 BL20. middle: TL20 TR4 BR4 BL20. last: TL20 TR4 BR20 BL20. mirror for received (left side) |
-| gap grouped / between groups | **2** / **12** |
-| max width | **~78%** (304 at 390) |
-| side inset | 16 (sent); received has 32 avatar at left 12 + 8 gap on the last bubble of each group (avatar only on last) |
+| gap grouped / between groups | **3** / **16** (measured) |
+| max width | **~82%** of the thread width (measured 851 of 1038 px) |
+| side inset | **8** both sides (measured 21 px at 1080); 1:1 threads show no avatar beside received bubbles |
 | tails | none |
 | timestamps | hidden; swipe-left reveals per-message times; tap bubble shows "9:41 AM" under it [src swipe gesture 2026] |
 | date separator | centered `Today • 9:41 AM`, or `Sat, Sep 20 • 8:02 PM` [est format] |
@@ -185,9 +186,9 @@ font stack: `"Google Sans Text", "Google Sans", "Roboto Flex", Roboto, system-ui
 | element | value |
 |---|---|
 | plus | circle **40** outside/at left of field, `add` icon 24, bg surface-container-high [src ordering; size est] |
-| field | pill, height **48**, radius 24, bg #2B2F36 dark / #E9EEF6 light; placeholder **"RCS message"** or **"Text message"** (an experiment showed "(RCS)"/"(Text)") [src Android Police/9to5Google] |
+| field | pill, height **52** (measured), full radius, bg = received bubble color; placeholder **"RCS message"** or **"Text message"** (an experiment showed "(RCS)"/"(Text)") [src Android Police/9to5Google] |
 | inside right | emoji/sticker (add_reaction) 24 + gallery (image) 24 [src] |
-| mic -> send | separate circle **48** right of field, filled primary container; mic icon, morphs to send (arrow/paper-plane) when text present, 150 ms scale+fade [src behavior; size est] |
+| mic -> send | separate circle **52** right of field (measured), gap 8, filled tertiaryContainer in the user's scheme (#513F66); mic icon, morphs to send (arrow/paper-plane) when text present, 150 ms scale+fade [src behavior; size est] |
 | bottom padding | 8 above gesture area (24) [est] |
 | plus menu | pill-shaped monochrome containers in a grid (Gallery, Camera, GIFs, Stickers, Files, Location, Contacts, Schedule send...) [src 9to5Google] |
 
@@ -200,16 +201,15 @@ font stack: `"Google Sans Text", "Google Sans", "Roboto Flex", Roboto, system-ui
 | missed call | not native; use centered row with `phone_missed` 16 icon in error color + "Missed call · 9:41 AM" 12/16 |
 
 ### unknown number
-avatar: 40 circle, tonal color (M3 palette picked by hash of number, e.g. #7FCFFF bg w/ #003549 person glyph dark mode) with default `person` glyph [est]. header shows number `+1 416-555-0134` [est]. banner card above composer, radius 16: "Unknown sender" + **Report spam** / **Not spam** tonal buttons; links disabled until marked safe [est; long-standing GM behavior]. **sim:** card keeps only working actions: **Add contact** (the contact card's save) and **Dismiss**.
+avatar: 40 circle, **#FCC934** yellow with a dark `person` glyph (measured, user's screenshot 195145). header shows number `+1 416-555-0134` [est]. banner card above composer, radius 16: "Unknown sender" + **Report spam** / **Not spam** tonal buttons; links disabled until marked safe [est; long-standing GM behavior]. **sim:** card keeps only working actions: **Add contact** (the contact card's save) and **Dismiss**.
 
 ### Pixel Phone call screen (M3E)
 | element | spec |
 |---|---|
 | avatar | M3E **"scalloped"/cookie shape** that slowly rotates (~20 s/rev) , dia ~ 120, top ~ 180 [src shape+rotation Android Police/9to5Google; dims est] |
-| text | name 36/44 Google Sans, number/label "Mobile" 16 secondary; "Incoming call" 14 above name [est] |
-| answer | rounded call button centered at bottom (~ y -120), dia 72, green #1E8E3E / #6DD58C dark; swipe up = answer, swipe down = decline; user option for horizontal swipe or single tap [src Android Police] |
-| decline | **pill-shaped** red button (not round) when tap mode, ~ 128x72, radius 36 [src pill; dims est] |
-| in-call | buttons **oval** (~ 96x64) that morph to rounded-square on press; extra controls in a popup menu above; end call red pill 96x64 [src] |
+| text | status line above the name (in-call: call glyph + timer), name 36-40, "Mobile +1 ..." 16 secondary below, then the photo [src 9to5google renders] |
+| answer | swipe mode: pill track with a white cookie knob. tap mode: two ovals ~84x68, Decline #ED665A left / Answer #5ABA75 right, dark glyphs, labels 16 below (measured, 9to5google). **sim: tap mode** |
+| in-call | controls sit in a rounded-top panel (surfaceContainer); buttons **oval 80x64** (measured) darker than the panel, rounded-square + light fill when on; labels 14 below; end call **pill 168x64** #ED665A, dark glyph |
 | bottom | "Message" text button (reply with SMS) [est] |
 
 ---
@@ -408,6 +408,63 @@ sources
 - macrumors dark screenshots: https://www.macrumors.com/guide/ios-26-messages-app/ (images.macrumors.com/article-new/2025/06/messages-live-translation.jpg, 2025/07/ios-26-messages-select-copy-paste.jpg)
 - 9to5mac typing indicator: https://9to5mac.com/2026/01/12/ios-26s-messages-app-adds-five-great-new-group-chat-features/
 
+### pixel (Google Messages, M3 Expressive + Pixel Phone)
+
+vars: `.sk-gm` on the chat screen root, the status bar and the call screen root, `--gm-*`. follows the page theme (was dark only, with generic GM3 dark values). references: the user's own Pixel screenshots (Google Messages dark, dynamic color from a purple-gray wallpaper; measured pixel-exact from PNG), 9to5google light + dark thread renders (blue dynamic scheme) and Pixel Phone captures (dark in-call, dark tap-to-answer, light incoming photo).
+
+**light choice.** there is no real light capture of the user's scheme. we use Google's **GM3 baseline** (the blue `--gm3-sys-color-*` set Google apps use when no wallpaper seed applies), not the purple M3 baseline (#6750A4), because that is what Google Messages itself falls back to. roles copied from the dark screenshots and the 9to5google light render: header = received bubble = composer pill (surfaceContainer, one step darker than the thread), thread = surface, sent = primary with white text. so light and dark share structure but not hue: dark is the user's purple-gray scheme, light is Google blue.
+
+diff -> fix
+
+| what differed | fix |
+|---|---|
+| dark only, with GM3 baseline dark values (#111318 app, #2B2F36 received, #004A77 sent with #C2E7FF text) | all colors moved to `--gm-*`; dark = the user's measured scheme, light = GM3 baseline |
+| app bar darker than the thread (inverted) | app bar surfaceContainer (#1F1F23), thread surface (#131317), like the real app |
+| gesture bar forced white on pixel | follows the theme (`DeviceFrame` in Phone.tsx); the pixel call phone is no longer forced dark, its status bar follows too |
+| thread radius 28, side inset 16, bubble max 78% | 20, 8, 82% (measured) |
+| bubble padding 10/14, leading 22, gaps 2 / 12 | 9/16, leading 24, gaps 3 / 16 (measured) |
+| composer pill 48 and voice button 48 in sent blue, strip in container color | 52 + 52 (measured), voice button tertiaryContainer #513F66 with #EFDBFF glyph, strip = thread surface; icons + placeholder onSurfaceVariant |
+| unknown avatar light blue #7FCFFF | yellow #FCC934 (measured) |
+| receipt dot 6 px off the corner | sits on the bubble's bottom-right corner (-4), ring in the thread color |
+| call: "Call" label above the photo, name, timer below; dark gradient; buttons 96x64; red pill 96x64 white glyph; tap-answer pills with labels inside | status line (call glyph + timer) above the name, "Mobile +1 ..." below, then the cookie photo; controls in a rounded-top surfaceContainer panel; buttons 80x64 darker than the panel; end pill 168x64 #ED665A with a dark glyph; incoming = two 84x68 ovals with labels below (measured). button rows keep their structure |
+
+left, and why
+
+- **chat text size**: the user's phone renders bubble text ~18 (pinch-zoomed chat text). we keep the app default 16.
+- dark primary (send button, "seen" receipt, contact Save) is **estimated** (#B7C4F2, primary tone 80 of the measured seed); none of the screenshots show it.
+- the composer does not float over the thread (the real one lets bubbles scroll under it); a solid strip in the thread color reads the same when not scrolling.
+- 3-button nav in the user's screenshots; our frame shows the gesture bar (Pixel default).
+- call: the real in-call row has Keypad / Mute / Speaker / More and an Audio Emoji bar; we keep only working controls. swipe-to-answer track not built (tap mode). the call-end red is the dark measurement in both themes (no light in-call capture).
+- the "Tap to load preview" link card, scroll-to-bottom FAB and smart-reply chips are not modelled.
+- Google Sans is not web-licensed; Roboto Flex fallback sets ~5% wider.
+
+colors
+
+| token | light (GM3 baseline) | dark (measured unless est) | role |
+|---|---|---|---|
+| `--gm-app` | #F0F4F9 | #1F1F23 | surfaceContainer: status bar, app bar |
+| `--gm-surface` | #FFFFFF | #131317 | surface: thread, composer strip |
+| `--gm-recv` / `-ink` | #F0F4F9 / #1F1F1F | #1F1F23 / #E3E2E7 | received bubble, composer pill |
+| `--gm-sent` / `-ink` | #0B57D0 / #FFFFFF | #394668 / #FFFFFF | light primary; dark primaryContainer |
+| `--gm-ink` | #1F1F1F | #E3E2E7 | onSurface |
+| `--gm-mute` | #444746 | #C5C6D0 | onSurfaceVariant: icons, placeholder, stamps |
+| `--gm-primary` / `on-` | #0B57D0 / #FFFFFF | #B7C4F2 / #202F55 (est) | send button, links, seen receipt |
+| `--gm-fab` / `-ink` | #D3E3FD / #041E49 | #513F66 / #EFDBFF | voice button (light primaryContainer; dark tertiaryContainer) |
+| `--gm-high` | #E9EEF6 | #2A2A2E (est) | banners, unknown notice, reaction pill |
+| `--gm-unknown` | #FCC934 | #FCC934 | default contact avatar |
+| `--gm-error`, `--gm-err-bg`/`-ink` | #B3261E, #F9DEDC/#410E0B | #F2B8B5, #601410/#FFDAD6 | M3 error roles |
+| `--gm-call-bg` / `-panel` / `-btn` | #F8FAFD / #E9EEF6 / #FFFFFF | #131317 / #1F1F23 / #0E0E12 | call ground, control panel, off buttons |
+| `--gm-call-on` / `-ink` | #0B57D0 / #FFFFFF | #D9E0FA / #202F55 (est) | toggled button |
+| `--gm-end`, `--gm-answer` | #ED665A, #5ABA75 | same | measured (9to5google dark), dark glyphs |
+
+sources
+
+- user's Pixel screenshots: `persona context/Screenshot_20260926-195145.png`, `-203314.png`, `-203331.png` (not in repo)
+- Google Messages M3E chat redesign (light + dark renders): https://9to5google.com/2025/08/26/google-messages-chat-redesign/
+- 2026 read-receipt circle: https://9to5google.com/2026/09/07/new-google-messages-features/
+- Pixel Phone M3E (in-call, incoming, light photo): https://9to5google.com/2025/08/21/google-phone-material-3-expressive-redesign/ , https://9to5google.com/2025/06/19/google-phone-material-3-expressive/
+- GM3 baseline tokens (`--gm3-sys-color-*`, as served by Google web apps; e.g. surface-container-high #E9EEF6): https://material-web.dev/theming/color/ , https://m3.material.io/styles/color/roles
+
 ---
 
 ## sources
@@ -442,6 +499,6 @@ sources
 
 ## open gaps (verify with screenshots)
 - iMessage: dark received gray (derived, not measured); sent gradient endpoints; unlocked incoming call (no capture).
-- all Google Messages hexes (depend on dynamic color) and bubble radii.
+- Google Messages: dark primary (send button, seen receipt) estimated; light values are GM3 baseline, not a real baseline-light capture; typing indicator not captured; light in-call not captured.
 - all Samsung Messages values incl. current placeholder string.
 - call-screen button sizes on all three.
