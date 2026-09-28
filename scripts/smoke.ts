@@ -4,6 +4,9 @@ import { cleanModelText, handleEvent, handleUserMessage, nowLine, parseTypedEmai
 import { readMood } from "../src/lib/mood";
 import { DEMO_INBOX, scoreItem } from "../src/lib/triage";
 import type { TurnResult } from "../src/lib/types";
+import { POST as DemoPOST } from "../src/app/api/auth/google/demo/route";
+import { GET as StartGET } from "../src/app/api/auth/google/start/route";
+import { popupPage } from "../src/app/api/auth/google/popup";
 
 delete process.env.ANTHROPIC_API_KEY;
 let fails = 0;
@@ -233,6 +236,41 @@ async function main() {
   check("real name after a default-free hi still lands", shortHi.slots.agentName.value === "Luna", shortHi.slots.agentName.value ?? "");
   const renamed = await handleUserMessage(skip, "text", "actually call you max");
   check("default name can be renamed later", skip.slots.agentName.value === "Max", `${skip.slots.agentName.value} | ${said(renamed)}`);
+
+  // gmail is never a dead end: the demo inbox, offered once after a failed or denied sign-in
+  const gf = newSession();
+  await handleEvent(gf, { type: "open" });
+  const denied = await handleEvent(gf, { type: "gmail_failed", error: "access_denied" });
+  check("denied sign-in: demo inbox offered, no blame", /demo inbox/.test(said(denied)) && !/\byou\b[^.?]*\b(wrong|failed|didn'?t)\b/i.test(said(denied)), said(denied));
+  const yesDemo = await handleUserMessage(gf, "text", "sure");
+  check("yes to the demo inbox connects it", gf.slots.gmail.status === "filled" && gf.gmailEmail === "demo.user@gmail.com", said(yesDemo));
+  const late = await handleEvent(gf, { type: "gmail_failed", error: "access_denied" });
+  check("a failure after the demo connected is ignored", late.newMessages.length === 0);
+  const gf2 = newSession();
+  await handleEvent(gf2, { type: "gmail_failed", error: "exchange_failed" });
+  const again2 = await handleEvent(gf2, { type: "gmail_failed", error: "exchange_failed" });
+  check("demo inbox offered only once", !/demo inbox/.test(said(again2)), said(again2));
+  const gt = newSession();
+  gt.transcript.push({ id: "l1", role: "agent", channel: "text", text: "Connect your Google account", ts: Date.now(), kind: "gmail_link" });
+  const trouble = await handleUserMessage(gt, "text", "it says access blocked??");
+  check("google's access-blocked wall: demo inbox offered", /demo inbox/.test(said(trouble)) && gt.demoOffered === true, said(trouble));
+  const gi = newSession();
+  gi.transcript.push({ id: "l2", role: "agent", channel: "text", text: "Connect your Google account", ts: Date.now() - 60000, kind: "gmail_link" }, { id: "t2", role: "agent", channel: "text", text: "tap it whenever", ts: Date.now() - 60000 });
+  const waitIdle = await handleEvent(gi, { type: "text_idle" });
+  check("idle while the link is out mentions the demo inbox", /demo inbox/.test(said(waitIdle)), said(waitIdle));
+  process.env.GOOGLE_CLIENT_ID ||= "x";
+  process.env.GOOGLE_CLIENT_SECRET ||= "y";
+  const gd = newSession();
+  await saveSession(gd);
+  const demoPost = await DemoPOST(new Request("http://x/api/auth/google/demo", { method: "POST", body: new URLSearchParams({ s: gd.id }) }));
+  const gdAfter = await loadSession(gd.id);
+  check("demo route works even with a real client configured", demoPost.status === 200 && gdAfter?.gmailVerified?.demo === true, String(demoPost.status));
+  const page = await popupPage({ title: "Google didn't connect", result: { ok: false, error: "access_denied" }, sessionId: "abc123", demo: true }).text();
+  check("failed popup offers the demo and waits for a choice", page.includes("Use a demo inbox instead") && page.includes("pagehide") && !page.includes("window.close(); } } catch"), page.slice(0, 80));
+  process.env.GOOGLE_CLIENT_ID ||= "x";
+  process.env.GOOGLE_CLIENT_SECRET ||= "y";
+  const start = await (await StartGET(new Request("http://x/api/auth/google/start?s=abc123"))).text();
+  check("start: google sign-in first, demo inbox second", start.indexOf("Sign in with Google") >= 0 && start.indexOf("Sign in with Google") < start.indexOf("demo inbox"), start.slice(0, 80));
 
   console.log(fails ? `\n${fails} failed` : "\nall passed");
   process.exit(fails ? 1 : 0);

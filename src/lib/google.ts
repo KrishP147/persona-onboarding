@@ -1,4 +1,6 @@
 import type { InboxItem } from "./types";
+import type { Session } from "./types";
+import { DEMO_INBOX } from "./triage";
 
 // Minimal Google OAuth (authorization code flow) without extra deps.
 // We read the email, the unread count, and headers + previews of recent unread mail once
@@ -140,4 +142,10 @@ export function saveDraft(accessToken: string, d: Draft, draftId?: string) {
 
 export function sendDraft(accessToken: string, draftId: string) {
   return gmailPost<{ id: string }>(accessToken, "drafts/send", { id: draftId });
+}
+
+export const DEMO_EMAIL = "demo.user@gmail.com";
+// The sample inbox, verified the same way the oauth callback verifies a real one (consumed by gmail_connected).
+export function connectDemo(s: Session) {
+  s.gmailVerified = { email: DEMO_EMAIL, unread: 14, demo: true, inbox: DEMO_INBOX };
 }

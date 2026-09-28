@@ -10,18 +10,19 @@ export async function GET(req: Request) {
   jar.delete("g_oauth");
 
   if (!nonce || !sessionId || url.searchParams.get("state") !== nonce) {
-    return popupPage({ title: "That link expired", body: "<p>Close this and tap the link again.</p>", result: { ok: false, error: "state_mismatch" } });
+    return popupPage({ title: "That link expired", body: "<p>Close this and tap the link again, or try a sample inbox.</p>", result: { ok: false, error: "state_mismatch" }, sessionId: sessionId || undefined, demo: true });
   }
   const error = url.searchParams.get("error");
   const code = url.searchParams.get("code");
   if (error || !code) {
     // access_denied = the user cancelled on Google's screen. Not a failure worth alarming anyone over.
-    return popupPage({ title: "No worries", body: "<p>You can connect anytime.</p>", result: { ok: false, error: error ?? "no_code" }, sessionId });
+    // Not a gcp test user lands here too, so offer the sample inbox rather than a dead end.
+    return popupPage({ title: "Google didn't connect", body: "<p>No worries, you can connect anytime. Want to see how it works with sample emails?</p>", result: { ok: false, error: error ?? "no_code" }, sessionId, demo: true });
   }
   try {
     const tok = await exchangeCode(req, code);
     if (!tok.scope?.includes("gmail.readonly")) {
-      return popupPage({ title: "Almost", body: "<p>Gmail access wasn't granted, so it isn't connected. That's okay.</p>", result: { ok: false, error: "scope_not_granted" }, sessionId });
+      return popupPage({ title: "Almost", body: "<p>Gmail access wasn't granted, so it isn't connected. That's okay.</p>", result: { ok: false, error: "scope_not_granted" }, sessionId, demo: true });
     }
     const who = await fetchIdentity(tok.access_token);
     // Kept server side only (never in the session the browser receives), for reading their inbox on request.
@@ -35,6 +36,6 @@ export async function GET(req: Request) {
     return popupPage({ title: "Connected", body: `<p>${who.email}</p>`, result: { ok: true }, sessionId });
   } catch (e) {
     console.error("google callback failed", e);
-    return popupPage({ title: "That didn't go through", body: "<p>It's optional, you can try again anytime.</p>", result: { ok: false, error: "exchange_failed" }, sessionId });
+    return popupPage({ title: "That didn't go through", body: "<p>It's optional, you can try again anytime.</p>", result: { ok: false, error: "exchange_failed" }, sessionId, demo: true });
   }
 }

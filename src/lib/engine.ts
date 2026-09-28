@@ -5,7 +5,7 @@ import { RECAP_INSTRUCTION, SYSTEM_PROMPT } from "./prompt";
 import { mockReply } from "./mock";
 import { provider, quick, runToolLoop, type Part, type ToolDef, type Turn } from "./llm";
 import { DEMO_INBOX, recordOutcome, triageInbox } from "./triage";
-import { readInbox, saveDraft, sendDraft } from "./google";
+import { connectDemo, readInbox, saveDraft, sendDraft } from "./google";
 import { getSecret } from "./store";
 import { EVENT_MOVES, chooseMove, markUsed } from "./moves";
 import { GIF_MIN_GAP, GIF_MOODS, GIFS, gifUrl, type GifMood } from "./gifs";
@@ -1009,6 +1009,21 @@ async function handleUserMessageInner(
     recordAsk(s, null);
     return { session: s, newMessages: [userMsg, ...(early?.msgs ?? []), ...ctx.newMessages], chips: computeDirective(s, channel).chips, actions: ctx.actions };
   }
+  // Google sign-in isn't working for them (not an approved test account, an error page): offer the sample inbox once.
+  if (s.slots.gmail.status === "missing" && !s.demoOffered && GMAIL_TROUBLE.test(clean) && s.transcript.some((m) => m.kind === "gmail_link")) {
+    s.demoOffered = true;
+    const ctx: Ctx = { s, channel: s.call.active ? "voice" : channel, actions: [], newMessages: [], move: EVENT_MOVES.honest };
+    emitAgentText(ctx, `ah, google only lets approved test accounts in during this trial, that's on us. ${DEMO_ASK}`);
+    recordAsk(s, null, true);
+    return { session: s, newMessages: [userMsg, ...(early?.msgs ?? []), ...ctx.newMessages], chips: computeDirective(s, channel).chips, actions: ctx.actions };
+  }
+  // Yes to the demo inbox: connect it now, the same way a real sign-in lands.
+  if (s.slots.gmail.status === "missing" && prevAgent?.text.includes(DEMO_MARK) && DEMO_YES.test(clean) && !/\b(no|nah|nope|not|don'?t)\b/i.test(clean)) {
+    connectDemo(s);
+    const r = await handleEvent(s, { type: "gmail_connected" });
+    r.newMessages.unshift(userMsg, ...(early?.msgs ?? []));
+    return r;
+  }
   // They said yes to the link: send it now (not left to the model), then let the reply mention it.
   let linkSent: Msg[] = [];
   let linkNote: string | undefined;
@@ -1140,6 +1155,16 @@ function eventMsg(s: Session, text: string): Msg {
   return m;
 }
 
+// Last line of defense: whatever path hung up, a spoken goodbye went out first.
+function sealGoodbye(s: Session, r: TurnResult): TurnResult {
+  if (!r.actions.some((a) => a.type === "end_call")) return r;
+  if (r.newMessages.some((m) => m.role === "agent" && m.channel === "voice" && GOODBYE.test(m.text))) return r;
+  const ctx: Ctx = { s, channel: "voice", actions: [], newMessages: [], move: EVENT_MOVES.recap };
+  emitAgentText(ctx, goodbyeLine(s));
+  r.newMessages.push(...ctx.newMessages);
+  return r;
+}
+
 export async function handleEvent(s: Session, e: SessionEvent): Promise<TurnResult> {
   const start = s.transcript.length;
   const r = sealGoodbye(s, await handleEventInner(s, e));
@@ -1155,16 +1180,6 @@ async function handleEventInner(s: Session, e: SessionEvent): Promise<TurnResult
   switch (e.type) {
     case "open": {
       if (s.transcript.length > 0) return idle(); // resume after refresh: no duplicate greeting
-// Last line of defense: whatever path hung up, a spoken goodbye went out first.
-function sealGoodbye(s: Session, r: TurnResult): TurnResult {
-  if (!r.actions.some((a) => a.type === "end_call")) return r;
-  if (r.newMessages.some((m) => m.role === "agent" && m.channel === "voice" && GOODBYE.test(m.text))) return r;
-  const ctx: Ctx = { s, channel: "voice", actions: [], newMessages: [], move: EVENT_MOVES.recap };
-  emitAgentText(ctx, goodbyeLine(s));
-  r.newMessages.push(...ctx.newMessages);
-  return r;
-}
-
       // Scripted, like Persona's real first text: who it is, what it does, the legal line, then the one ask.
       const intro = [
         msg("agent", "text", "Hey! I'm your new personal assistant"),
@@ -1244,6 +1259,12 @@ function sealGoodbye(s: Session, r: TurnResult): TurnResult {
         const ctx: Ctx = { s, channel: "text", actions: [], newMessages: [], move: EVENT_MOVES.recap };
         emitAgentText(ctx, recapFallback(s, e.reason));
         r.newMessages.push(...ctx.newMessages);
+      } else if (recaps.length > 1) {
+        // Exactly one recap text: extra bubbles fold into the first.
+        recaps[0].text = recaps.map((m) => m.text).join(" ");
+        const extra = new Set(recaps.slice(1));
+        r.newMessages = r.newMessages.filter((m) => !extra.has(m));
+        s.transcript = s.transcript.filter((m) => !extra.has(m));
       }
       return r;
     }
@@ -1259,12 +1280,6 @@ function sealGoodbye(s: Session, r: TurnResult): TurnResult {
         ctx.actions.push({ type: "end_call" });
         return { session: s, newMessages: ctx.newMessages, chips: computeDirective(s, "voice").chips, actions: ctx.actions };
       }
-      } else if (recaps.length > 1) {
-        // Exactly one recap text: extra bubbles fold into the first.
-        recaps[0].text = recaps.map((m) => m.text).join(" ");
-        const extra = new Set(recaps.slice(1));
-        r.newMessages = r.newMessages.filter((m) => !extra.has(m));
-        s.transcript = s.transcript.filter((m) => !extra.has(m));
       // When the conversation has just run out, pick it back up gently instead of "still there?".
       const line = !heardThemThisCall(s)
         ? "hello? can you hear me okay?"
@@ -1311,7 +1326,10 @@ function sealGoodbye(s: Session, r: TurnResult): TurnResult {
       }
       // The link is sitting in their texts: they may be mid sign-in. Give room, no question.
       if (linkPending(s)) {
-        emitAgentText(ctx, "no rush on the google sign in btw. the card's right up there whenever you're ready");
+        // Google blocks non-test accounts on its own page and never reports back, so the way out is offered here.
+        const demo = !s.demoOffered;
+        s.demoOffered = true;
+        emitAgentText(ctx, demo ? `no rush on the google sign in btw. if google gives you trouble, i can use a ${DEMO_MARK} instead` : "no rush on the google sign in btw. the card's right up there whenever you're ready");
         recordAsk(s, null);
         return { session: s, newMessages: ctx.newMessages, chips: computeDirective(s, "text").chips, actions: [] };
       }
@@ -1382,8 +1400,17 @@ function sealGoodbye(s: Session, r: TurnResult): TurnResult {
       return turn(s, s.call.active ? "voice" : "text", `Their Gmail just connected. ${waiting} ${inboxNote}`, fallback, t.interrupt ? { move: EVENT_MOVES.interrupt } : {});
     }
     case "gmail_failed": {
+      if (s.slots.gmail.status === "filled") return idle(); // they picked the demo inbox in the popup instead
       const cancelled = /access_denied|cancel/i.test(e.error);
       eventMsg(s, cancelled ? "Gmail connection cancelled" : "Gmail connection didn't finish");
+      // Never a dead end: the first time, offer the sample inbox (a denied sign-in is often google's test-user wall, not a no).
+      if (!s.demoOffered) {
+        s.demoOffered = true;
+        const ctx: Ctx = { s, channel: s.call.active ? "voice" : "text", actions: [], newMessages: [], move: EVENT_MOVES.honest };
+        emitAgentText(ctx, `${cancelled ? "no worries, gmail's optional." : "hm, that didn't go through, my bad."} ${DEMO_ASK}`);
+        recordAsk(s, null, true);
+        return { session: s, newMessages: ctx.newMessages, chips: computeDirective(s, ctx.channel).chips, actions: ctx.actions };
+      }
       return turn(
         s,
         s.call.active ? "voice" : "text",
@@ -1579,3 +1606,9 @@ function defaultAgentName(s: Session) {
 }
 // "lol ok" / "haha sure": the laugh is a reaction, the rest is the answer.
 const LAUGH_LEAD = new RegExp(`^\\s*${LAUGH_TOKEN}[!., ]+`, "iu");
+
+// The sample inbox, for anyone google's sign-in won't let in (only approved test accounts during the trial).
+const DEMO_MARK = "demo inbox";
+const DEMO_ASK = `want to try it with a ${DEMO_MARK} instead? sample emails, same idea`;
+const DEMO_YES = /\b(yes|yeah|yep|yup|ya|sure|ok(ay)?|k|do it|go ahead|let'?s|please|pls|demo|try it|fine|alright|sounds good)\b/i;
+const GMAIL_TROUBLE = /\b(access blocked|blocked|not verified|unverified|403|access denied|test users?|won'?t let me|can'?t (sign|log) ?in|(doesn'?t|didn'?t|isn'?t|not) work(ing)?|error)\b/i;
