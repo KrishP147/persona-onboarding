@@ -19,8 +19,12 @@ const MOVE_SLOT: Partial<Record<string, SlotKey>> = {
 // same preference order as src/lib/policy.ts ORDER.text (that file doesn't export it; duplicated here)
 const ORDER_TEXT: SlotKey[] = ["agentName", "helpNeed", "userName", "gmail"];
 
+// name ideas: the persona team (one per session, so it doesn't change under them)
+const NAME_IDEAS = ["zach", "tanay", "julia", "aarav", "mac", "jason", "yasser"];
+const nameIdea = (id = "") => NAME_IDEAS[[...id].reduce((h, c) => (h * 31 + c.charCodeAt(0)) >>> 0, 7) % NAME_IDEAS.length];
+
 const EXAMPLE: Record<SlotKey, string> = {
-  agentName: "e.g. call you nova",
+  agentName: "e.g. call you zach",
   userName: "e.g. call me sam",
   helpNeed: "e.g. my inbox is a mess",
   gmail: "e.g. sure, send the link",
@@ -62,5 +66,5 @@ export function useStuckHint({ enabled, messages, session, draft, busy }: StuckH
   if (!show) return undefined;
   const slot = openSlot(session, last?.move?.id);
   // a leading 💡 so it reads as a hint, not something already typed
-  return slot ? `💡 ${EXAMPLE[slot]}` : undefined;
+  return slot ? `💡 ${slot === "agentName" ? `e.g. call you ${nameIdea(session?.id)}` : EXAMPLE[slot]}` : undefined;
 }

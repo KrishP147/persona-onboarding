@@ -65,7 +65,7 @@ export function gmailConsent(s: Session) {
 }
 
 // A clear "skip setup" (not every "skip"): skip this / all of this / the setup / the rest / ahead.
-export const SKIP_SETUP = /\b(skip (all (of )?)?(this|that|it|setup|the setup|the rest|ahead|the questions)|(forget|no more|enough) (the )?(setup|questions)|stop asking (me )?questions)\b/i;
+export const SKIP_SETUP = /\b(skip (all (of )?)?(this|that|it|setup|the setup|the rest|ahead|the questions)|(forget|no more|enough) (the )?(setup|questions)|stop asking (me )?questions|(just )?let me in|get me in|let me (just )?(use|try) (it|you|this|the app))\b/i;
 // "no just do what i asked": they already said what they want; setup is in the way. That's a graduation.
 export const JUST_DO = /\b(just (do|answer|get to) (it|that|this|what i (asked|said|wanted))|(do|answer) what i (asked|said)|(no|nah)[,.]? just (do|help|answer)( (it|me|that))?)\b/i;
 // A real task in their message ("create a report on the weather in ottawa..."): do it, don't pitch a call over it.
