@@ -1,32 +1,50 @@
 @import "tailwindcss";
 
+/* persona site tokens, lifted from yourpersona.com (see docs/design/persona-site.md).
+   the site chrome uses these; the phone skins keep their own os colors. */
 :root {
-  --background: #ffffff;
-  --foreground: #171717;
+  --p-canvas: #ffffff;
+  --p-alt: #f5f5f7; /* cards, section wash */
+  --p-step-200: #ededf0;
+  --p-step-300: #d2d2d7; /* hairlines */
+  --p-ink: #1d1d1f; /* headings + body */
+  --p-ink-mute: #6e6e73; /* secondary text */
+  --p-ink-faint: #8e8e93;
+  --p-black: #070707;
+  --p-blue: #0a84ff; /* ios system blue, the only accent */
+  --p-blue-card: #2e7cf6; /* card headline blue */
+  --p-green: #34c759; /* imessage app icon */
+  --p-warm: #f7f7f5; /* /start page ground */
+  --p-hairline-warm: #e5e5e1;
+  --ease-house: cubic-bezier(0.16, 1, 0.3, 1);
+  --ease-press: cubic-bezier(0.32, 0.72, 0, 1);
 }
 
 @theme inline {
-  --color-background: var(--background);
-  --color-foreground: var(--foreground);
-  --font-sans: var(--font-geist-sans);
-  --font-mono: var(--font-geist-mono);
-}
-
-@media (prefers-color-scheme: dark) {
-  :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
-  }
+  --color-canvas: var(--p-canvas);
+  --color-alt: var(--p-alt);
+  --color-step-200: var(--p-step-200);
+  --color-step-300: var(--p-step-300);
+  --color-ink: var(--p-ink);
+  --color-ink-mute: var(--p-ink-mute);
+  --color-ink-faint: var(--p-ink-faint);
+  --color-pblue: var(--p-blue);
+  --color-pgreen: var(--p-green);
+  --color-warm: var(--p-warm);
+  /* same stack persona ships: sf on apple devices, inter everywhere else */
+  --font-sans: -apple-system, BlinkMacSystemFont, "SF Pro Display", "SF Pro Text", var(--font-inter), "Helvetica Neue", Arial, sans-serif;
+  --font-display: var(--font-sans);
+  --ease-house: var(--ease-house);
 }
 
 body {
-  background: var(--background);
-  color: var(--foreground);
-  font-family: Arial, Helvetica, sans-serif;
+  background: var(--p-canvas);
+  color: var(--p-ink);
+  font-family: var(--font-sans);
+  -webkit-font-smoothing: antialiased;
 }
 
-/* phone-like thread scrollbar */
 * {
   scrollbar-width: thin;
-  scrollbar-color: #3a3b42 transparent;
+  scrollbar-color: #c7c7cc transparent;
 }

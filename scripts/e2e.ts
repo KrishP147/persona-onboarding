@@ -48,7 +48,7 @@ async function main() {
   page.on("console", (m) => m.type() === "error" && errors.push(m.text()));
   page.on("pageerror", (e) => errors.push(String(e)));
 
-  await page.goto(BASE, { waitUntil: "networkidle2" });
+  await page.goto(`${BASE}/chat`, { waitUntil: "networkidle2" });
   check("intro asks for a name", await bodyHas(page, "what do you want to call me?", 20000));
   check("intro has the legal link", await bodyHas(page, "yourpersona.com/legal", 1000));
   await snap(page, "intro");
