@@ -137,3 +137,49 @@ export const NO_CALLS = /\b(don'?t|do not|dont|pls don'?t|please don'?t|never) (
 export const INSULT_NAME = /^(ugly|idiot|stupid|dumb|dummy|loser|trash|garbage|moron|clown|useless|lame|jerk|butthead|poopy?|bitch|asshole|dumbass)$/i;
 export const DEMO_YES = /\b(yes|yeah|yep|yup|ya|sure|ok(ay)?|k|do it|go ahead|let'?s|please|pls|demo|try it|fine|alright|sounds good)\b/i;
 export const GMAIL_TROUBLE = /\b(access blocked|blocked|not verified|unverified|403|access denied|test users?|won'?t let me|can'?t (sign|log) ?in|(doesn'?t|didn'?t|isn'?t|not) work(ing)?|error)\b/i;
+
+// Every intent pattern in one table: what it means, lines it must catch, and near misses it must not.
+// Smoke tests every example, so changing a pattern shows exactly which real phrasing it breaks.
+export interface IntentDef {
+  re: RegExp;
+  means: string;
+  says: string[];
+  notSays: string[];
+}
+export const INTENTS: Record<string, IntentDef> = {
+  HOLD: { re: HOLD, means: "they need a moment", says: ["hold on a sec", "brb", "give me a minute"], notSays: ["i'll hold the door", "wait for me at the cafe"] },
+  FEMININE: { re: FEMININE, means: "a name that sounds feminine (voice pick)", says: ["julia", "Nova"], notSays: ["max", "julia roberts"] },
+  MASCULINE: { re: MASCULINE, means: "a name that sounds masculine (voice pick)", says: ["max", "Jarvis"], notSays: ["julia", "maximus"] },
+  LAUGH: { re: LAUGH, means: "the whole message is laughter", says: ["haha", "lol lol", "😂"], notSays: ["haha that's funny", "hello"] },
+  THANKS: { re: THANKS, means: "the whole message is thanks", says: ["thanks!", "thank you", "ty"], notSays: ["thanks, can you check my inbox?"] },
+  CLEAR_BYE: { re: CLEAR_BYE, means: "a goodbye clear enough to hang up with no model", says: ["bye", "gotta go", "talk soon"], notSays: ["i'm good", "later i need help with email"] },
+  WANTS_OUT: { re: WANTS_OUT, means: "they want out of setup", says: ["skip", "stop asking me stuff", "just help me"], notSays: ["my name is kate", "help with my calendar"] },
+  USER_BYE: { re: USER_BYE, means: "they're wrapping up", says: ["ok bye", "that's all", "catch you later"], notSays: ["i'll do it later", "what can you do?"] },
+  DONT_BYE: { re: DONT_BYE, means: "the opposite of a bye", says: ["don't hang up", "i'm not done", "no need to go yet"], notSays: ["ok bye", "don't forget my list"] },
+  CALLBACK: { re: CALLBACK, means: "asks for a callback, not a goodbye", says: ["call me back later", "ring me tomorrow"], notSays: ["call me krish", "you can call me anytime"] },
+  WANTS_LINK: { re: WANTS_LINK, means: "asks for the gmail connect link", says: ["send me the link", "connect my gmail", "conectar mi correo"], notSays: ["what's a link?", "my email is full"] },
+  ASKED_LINK: { re: ASKED_LINK, means: "our message brought up the link", says: ["want me to text you a link?", "connect your google account"], notSays: ["what should i call you?"] },
+  SKIP_SETUP: { re: SKIP_SETUP, means: "a clear skip of setup", says: ["skip this", "no more questions", "stop asking me questions"], notSays: ["skip the gym today", "i skipped lunch"] },
+  SKIP_OFFER: { re: SKIP_OFFER, means: "our offer to skip ahead", says: ["want to skip the rest?", "want to jump right in?"], notSays: ["what should i call you?"] },
+  YES: { re: YES, means: "a yes at the start", says: ["yes", "oh, yeah sure", "sounds good"], notSays: ["no", "maybe yes", "haha"] },
+  CALL_OK: { re: CALL_OK, means: "ok to ring them", says: ["sure", "call me", "k"], notSays: ["haha", "hmm"] },
+  DELEGATE: { re: DELEGATE, means: "they hand us the choice", says: ["you pick", "idk", "surprise me"], notSays: ["luna", "i pick luna"] },
+  CALL_NO: { re: CALL_NO, means: "no to a call", says: ["nah", "text is fine", "don't call"], notSays: ["sure", "yes call me"] },
+  OFFERED_CALL: { re: OFFERED_CALL, means: "our message offered a call", says: ["want me to give you a quick call?"], notSays: ["i'll call you in a sec.", "what's up?"] },
+  NEGATED_CALL: { re: NEGATED_CALL, means: "a call mentioned only to refuse it", says: ["please don't call me", "i didn't want you to call"], notSays: ["call me", "can you call me?"] },
+  SEND_REQUEST: { re: SEND_REQUEST, means: "they asked for something to be sent", says: ["send it", "email her", "forward that"], notSays: ["what's up", "looks good"] },
+  NAME_ASK: { re: NAME_ASK, means: "our message asks for our own name", says: ["what do you want to call me?", "what should i go by?"], notSays: ["what should i call you?"] },
+  NOT_A_NAME: { re: NOT_A_NAME, means: "a command or reaction, never a name", says: ["send", "idk", "haha"], notSays: ["luna", "max"] },
+  OWN_NAME: { re: OWN_NAME, means: "they gave their own name", says: ["i'm dana", "hey, my name is krish", "call me sam"], notSays: ["luna", "i'm tired of email today"] },
+  EMAIL_RE: { re: EMAIL_RE, means: "a bare email address", says: ["a@b.com"], notSays: ["a@b", "email me at a@b.com"] },
+  SEND_OK: { re: SEND_OK, means: "a yes to sending", says: ["send it", "looks good", "yep"], notSays: ["hmm", "nice"] },
+  SEND_HOLD: { re: SEND_HOLD, means: "hold off on sending", says: ["wait", "change the subject", "not yet"], notSays: ["send it", "looks great"] },
+  NAME_HINT: { re: NAME_HINT, means: "naming the assistant inside a longer message", says: ["i'll call you nova", "your name is max"], notSays: ["call me sam", "what's my name"] },
+  SEND_CMD: { re: SEND_CMD, means: "the whole message is a send command", says: ["send", "ok, send it", "go ahead and send it"], notSays: ["send it to bob instead", "don't send"] },
+  SENT_Q: { re: SENT_Q, means: "asks whether it was sent", says: ["did you send it?", "was it sent"], notSays: ["send it"] },
+  WAITING_ON_THEM: { re: WAITING_ON_THEM, means: "they'll come back once done", says: ["i'll let you know", "once it's connected"], notSays: ["let me know", "it's connected"] },
+  NO_CALLS: { re: NO_CALLS, means: "no calls at all", says: ["don't call me", "text only", "i hate phone calls"], notSays: ["call me", "can you call me later?"] },
+  INSULT_NAME: { re: INSULT_NAME, means: "a rude name for the assistant", says: ["ugly", "dumbass"], notSays: ["luna", "ugly betty"] },
+  DEMO_YES: { re: DEMO_YES, means: "yes to the demo inbox", says: ["sure", "try it", "demo please"], notSays: ["no thanks"] },
+  GMAIL_TROUBLE: { re: GMAIL_TROUBLE, means: "google sign-in isn't working for them", says: ["it says access blocked", "can't sign in", "it's not working"], notSays: ["connected!", "done"] },
+};
