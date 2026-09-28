@@ -34,6 +34,7 @@ jobs:
       - run: pnpm -s typecheck
       - run: pnpm -s lint
       - run: pnpm -s smoke
+      - run: pnpm -s injection
       # seeded random event sequences, invariants checked after every step (keyless, ~5s)
       - run: pnpm -s fuzz 2000 42
 
