@@ -4,7 +4,7 @@ import Link from "next/link";
 import { Mark } from "@/components/landing/svgs";
 
 export const metadata: Metadata = {
-  title: "Persona",
+  title: "Persona (trial demo)",
   description: "Start texting your Persona.",
   robots: { index: false, follow: false },
 };
@@ -65,8 +65,9 @@ export default function Start() {
         </a>
       </div>
       <Link href="/" className="mt-[22px] text-[13px] text-[#86868b] no-underline">
-        Back to yourpersona.com
+        Back
       </Link>
+      <p className="text-[12.5px] text-[#86868b]">A trial demo by Krish for Persona, not the real product.</p>
     </main>
   );
 }

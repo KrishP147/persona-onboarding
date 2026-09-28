@@ -8,7 +8,7 @@ import { Wordmark } from "@/components/landing/svgs";
 import "@/components/landing/landing.css";
 
 export const metadata: Metadata = {
-  title: "Persona",
+  title: "Persona (trial demo)",
   description: "Your personal intelligence. Text your Persona, right here on the web.",
 };
 
@@ -29,6 +29,8 @@ const SEALS = [
 function Hero() {
   return (
     <section className="relative w-full overflow-x-hidden bg-white text-[#070707]">
+      {/* this page mirrors persona's site for a trial; say so up top, not just in the footer */}
+      <p className="px-5 pt-3 text-center font-sans text-[12.5px] tracking-[0.005em] text-[#6e6e73]">A trial demo by Krish for Persona, not the real product.</p>
       <div className="mx-auto flex w-full flex-col items-center gap-8 px-5 pb-12 pt-10 sm:pt-14 lg:w-max lg:-translate-x-[76px] lg:flex-row lg:gap-[69px] lg:px-0 lg:py-[102px]">
         <div className="order-2 w-full max-w-[596px] lg:order-1 lg:w-[596.443px] lg:max-w-none lg:translate-y-[40px]">
           <HeroPhone />
@@ -51,12 +53,12 @@ function Hero() {
                 <img src="/brand/imessage.svg" alt="" width={24} height={24} draggable={false} className="size-[24px] shrink-0" />
                 <span className="whitespace-nowrap font-sans text-[18px] font-[590] leading-none tracking-[-0.18px] text-black">Get Started</span>
               </Link>
-              <a
-                href="https://app.yourpersona.com/"
+              <Link
+                href="/chat"
                 className="mt-[6px] px-3 py-[10px] font-sans text-[14px] font-medium tracking-[-0.005em] text-[#6e6e73] transition-colors duration-200 hover:text-[#1d1d1f]"
               >
-                Log in to the dashboard
-              </a>
+                Try it in your browser
+              </Link>
             </div>
           </div>
         </div>
@@ -195,7 +197,7 @@ function Footer() {
               <br />
               Made in Miami, USA.
               <br />
-              Web preview.
+              A trial demo by Krish for Persona, not the real product.
             </p>
           </div>
           <div>
