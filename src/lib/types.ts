@@ -46,6 +46,7 @@ export interface Msg {
   attachments?: Attachment[];
   move?: Move; // which research-backed move produced this agent message (shown in the side panel)
   guards?: string[]; // safety nets in code that changed this reply this turn (shown in "why it said that")
+  discarded?: boolean; // an email draft they threw away (the card shows it as one muted line)
 }
 
 export interface Move {
@@ -136,6 +137,7 @@ export type ClientAction =
   | { type: "end_call"; final?: boolean } // final: hang up even if they talk over the goodbye
   | { type: "speak"; text: string }
   | { type: "graduate" }
+  | { type: "show_know" } // they asked what we know: show the what-i-know card after this turn
   | { type: "patience"; ms: number }; // user is doing a task (e.g. gmail sign-in): stretch the next silence window
 
 // Server-side per-session numbers, cheap to keep: no extra model calls, bounded latency sample.

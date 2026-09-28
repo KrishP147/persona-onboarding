@@ -66,8 +66,9 @@ export function goodbyeLine(s: Session) {
 export function recapFallback(s: Session, reason: string) {
   const need = shortNeed(s);
   const keep = need ? ` i'll keep ${need} in mind.` : "";
-  if (reason === "user_hangup" || reason === "error") return `got cut off, no worries.${keep} text me whenever.`;
-  return `thanks for the chat!${keep} text or call me anytime.`;
+  const d = s.draft && !s.draft.sent ? ` your email${s.draft.to ? ` to ${s.draft.to}` : ""} is still a draft, just say the word to send it.` : "";
+  if (reason === "user_hangup" || reason === "error") return `got cut off, no worries.${d || keep} text me whenever.`;
+  return `thanks for the chat!${d || keep} text or call me anytime.`;
 }
 
 export function emitAgentText(ctx: Ctx, raw: string) {

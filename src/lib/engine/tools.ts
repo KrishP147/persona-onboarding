@@ -1,4 +1,4 @@
-import { type Session, type SlotKey, type VoiceStyle } from "../types";
+import { type Msg, type Session, type SlotKey, type VoiceStyle } from "../types";
 import { provider, quick, type ToolDef } from "../llm";
 import { DEMO_INBOX } from "../triage";
 import { readInbox, saveDraft, sendDraft } from "../google";
@@ -79,6 +79,11 @@ export const TOOLS: ToolDef[] = [
     },
   },
   {
+    name: "show_draft",
+    description: "Bring the unsent email draft back to the bottom of the chat, when they want to get back to it (\"yeah let's finish that email\"). Don't paste it yourself.",
+    schema: NO_ARGS,
+  },
+  {
     name: "send_email",
     description:
       "Send the draft you last showed them, exactly as shown. Only after they clearly said to send it (\"send it\", \"yes send\"). If they asked for changes, save_draft again first and get a fresh yes.",
@@ -122,7 +127,7 @@ export const TOOLS: ToolDef[] = [
   {
     name: "send_gif",
     description:
-      "Rarely, over text only: send a GIF instead of a short reply, when your whole answer would just be okay / yes / no / nice / haha / on it. Don't add text that says the same thing.",
+      "Rarely: send a GIF instead of a short reply, when your whole answer would just be okay / yes / no / nice / haha / on it, or when they ask for one (on a call it goes to the chat right away). Don't add text that says the same thing.",
     schema: {
       type: "object",
       properties: { mood: { type: "string", enum: [...GIF_MOODS] } },
@@ -285,13 +290,14 @@ export async function runTool(ctx: Ctx, name: string, input: Record<string, unkn
       return "link sent to their texts";
     }
     case "send_gif": {
-      if (ctx.channel !== "text") return "error: gifs only over text";
+      // on a call it lands in the chat right away (promising one "after we hang up" was never kept)
       if (!gifAllowed(s)) return "error: not now, too soon for another gif. reply in words";
       const mood = String(input.mood) as GifMood;
       if (!GIFS[mood]) return "error: unknown mood";
       const gif = makeGif(s, mood);
       ctx.newMessages.push(gif);
       s.transcript.push(gif);
+      if (ctx.channel === "voice") return "gif is in the chat now. say so in a few words";
       return "gif sent. that's your whole reply unless you have something new to add";
     }
     case "read_inbox": {
@@ -313,6 +319,8 @@ export async function runTool(ctx: Ctx, name: string, input: Record<string, unkn
       return saveDraftTool(ctx, input);
     case "send_email":
       return sendEmailTool(ctx);
+    case "show_draft":
+      return showDraftTool(ctx);
     case "web_search":
       return webSearch(String(input.query ?? "").trim() || "news", Math.min(Math.max(Number(input.count ?? 5) || 5, 1), 8));
     case "read_page":
@@ -396,6 +404,19 @@ export async function saveDraftTool(ctx: Ctx, input: Record<string, unknown>): P
     d.threadId = last.threadId;
   }
   if (d.to && !EMAIL_RE.test(d.to)) return `error: "${d.to}" isn't an email address. ask them for it, or save with an empty "to"`;
+  // Never an address nobody gave (the model once mailed an address it made up): they said or typed it, we sent to it, or it's in their inbox.
+  let notes = "";
+  if (d.to && !knownAddress(s, d.to)) {
+    notes += ` "${d.to}" isn't an address they gave you, so "to" was left empty: ask them for it.`;
+    d.to = "";
+  }
+  // "the link i sent": the one they typed in the chat (a call's history window can miss it).
+  const link = lastTypedLink(s);
+  if (link) d.body = d.body.replace(/\[[^\]]*\b(link|url)\b[^\]]*\]/gi, link);
+  // They named the subject: say so if the draft didn't use it.
+  const asked = askedSubject(s);
+  if (asked && !d.subject) d.subject = asked;
+  else if (asked && !d.subject.toLowerCase().includes(asked.toLowerCase())) notes += ` they said the subject should be "${asked}"; if that's still what they want, save again with it.`;
   // Connected or not, the draft always shows as one clean message in the chat.
   const access: GmailAccess = s.slots.gmail.status === "filled" ? await gmailAccess(s) : { error: "" };
   let id: string | undefined;
@@ -417,9 +438,91 @@ export async function saveDraftTool(ctx: Ctx, input: Record<string, unknown>): P
   // Editing one that already went out makes a second email, not a fix to the first: say so.
   if (last && !followUp && sameEmail(d, last)) {
     s.draft.dupWarnedAt = s.transcript.length;
-    return `${where}. HEADS UP: this email already went to ${last.to}. tell them plainly it was already sent, so sending this would be a second copy (a correction), and ask if they still want it sent. never say it was sent`;
+    return `${where}. HEADS UP: this email already went to ${last.to}. tell them plainly it was already sent, so sending this would be a second copy (a correction), and ask if they still want it sent. never say it was sent.${notes}`;
   }
-  return `${where}. don't repeat the draft. ask if they want to send it${d.to ? "" : " (and who to)"} or change anything. never say it was sent`;
+  return `${where}. it shows as a draft card they can expand, edit, send or discard: don't paste or read out the email unless they ask. ask if they want to send it${d.to ? "" : " (and who to)"} or change anything. never say it was sent.${notes}`;
+}
+
+const addrNorm = (t: string) =>
+  t
+    .toLowerCase()
+    .replace(/\s+at\s+/g, "@")
+    .replace(/\s+dot\s+/g, ".")
+    .replace(/[^a-z0-9@._+-]/g, "");
+
+// An address counts only if it came from them (said or typed), from our last send, or from their inbox.
+export function knownAddress(s: Session, to: string) {
+  const want = addrNorm(to);
+  if (!want) return false;
+  if (s.lastSent && addrNorm(s.lastSent.to) === want) return true;
+  if (s.draft?.to && addrNorm(s.draft.to) === want) return true;
+  if (s.gmailVerified?.inbox?.some((i) => addrNorm(i.fromEmail) === want)) return true;
+  if (s.emailSeen?.some((t) => addrNorm(t).includes(want))) return true;
+  return s.transcript.some((m) => m.role === "user" && addrNorm(m.text).includes(want));
+}
+
+const URL_RE = /\bhttps?:\/\/[^\s<>"]+|\bwww\.[^\s<>"]+/i;
+export function lastTypedLink(s: Session) {
+  const m = s.transcript.findLast((x) => x.role === "user" && x.channel === "text" && URL_RE.test(x.text));
+  return m?.text.match(URL_RE)?.[0].replace(/[.,;:!?)]+$/, "") ?? null;
+}
+
+// "make the subject X" / "X should be the subject", since the last email went out (never "don't make the subject X").
+const SUBJECT_SAID = /\bsubject(?: line)?(?:(?: of (?:this|the|that) email)(?: (?:should be|is|to be|to|be|as))?| (?:should be|should say|is|to be|will be|as)|\s*:)\s*["“']?([^"”.?!\n]{2,80})/i;
+const SUBJECT_AFTER = /["“']?([^"”.?!\n,]{2,60}?)["”']? should be the subject\b/i;
+export function askedSubject(s: Session): string | null {
+  const from = s.lastSent?.at ?? 0;
+  const said = s.transcript.slice(from).filter((m) => m.role === "user").slice(-12);
+  for (const m of [...said].reverse()) {
+    for (const sentence of m.text.split(/(?<=[.!?])\s+/).reverse()) {
+      if (/\b(don'?t|do not|not)\b[^.!?]{0,20}\bsubject\b/i.test(sentence)) continue;
+      const got = (sentence.match(SUBJECT_AFTER)?.[1] ?? sentence.match(SUBJECT_SAID)?.[1])?.trim().replace(/^(like|say|be),?\s+/i, "");
+      if (got && got.split(/\s+/).length <= 10) return got;
+    }
+  }
+  return null;
+}
+
+// Back to an unsent draft ("yeah let's finish that email"): the same draft again, as the newest message.
+export function showDraftTool(ctx: Ctx): string {
+  const { s } = ctx;
+  const d = s.draft;
+  if (!d || d.sent) return "error: there's no unsent draft. write one with save_draft";
+  const shown = msg("agent", "text", `to: ${d.to || "(who's it going to?)"}\nsubject: ${d.subject || "(no subject)"}\n\n${d.body}`);
+  ctx.newMessages.push(shown);
+  s.transcript.push(shown);
+  ctx.shownDraft = shown.text;
+  d.shownAt = s.transcript.length;
+  return "the draft card is back at the bottom of the chat. don't repeat it; ask what they want to change, or if it's ready to send";
+}
+
+// Edited in place on the draft card: same draft, new words (and the gmail copy follows).
+export async function editDraft(s: Session, e: { to: string; subject: string; body: string }): Promise<Msg | null> {
+  const d = s.draft;
+  if (!d || d.sent) return null;
+  const to = e.to.trim().slice(0, 200);
+  if (to && !EMAIL_RE.test(to)) return null;
+  Object.assign(d, { to, subject: e.subject.trim().slice(0, 200), body: e.body.trim().slice(0, 5000) });
+  if (s.slots.gmail.status === "filled") {
+    const access = await gmailAccess(s);
+    if ("token" in access) {
+      const r = await saveDraft(access.token, d, d.id);
+      if (r.ok) d.id = r.value.id;
+    }
+  }
+  const m = s.transcript[d.shownAt - 1];
+  if (!m) return null;
+  m.text = `to: ${d.to || "(who's it going to?)"}\nsubject: ${d.subject || "(no subject)"}\n\n${d.body}`;
+  return m;
+}
+
+export function discardDraft(s: Session): Msg | null {
+  const d = s.draft;
+  if (!d || d.sent) return null;
+  const m = s.transcript[d.shownAt - 1] ?? null;
+  if (m) m.discarded = true;
+  s.draft = undefined;
+  return m;
 }
 
 export async function sendEmailTool(ctx: Ctx): Promise<string> {

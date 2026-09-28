@@ -68,6 +68,11 @@ export async function generate(ctx: Ctx, extraInstruction?: string): Promise<str
   if (s.lastSent && (!s.draft || s.draft.sent || !s.draft.to)) {
     state += `\nLAST EMAIL SENT: to ${s.lastSent.to}, "${s.lastSent.subject}". If they mean the same person ("him", "her", "them", "again"), use that address in save_draft; don't ask for it. A reply or follow up on it: save_draft with follow_up true (same thread). If they want to edit that one, it's already sent: say so, a new version would be a second email.`;
   }
+  // What they typed in the chat can fall out of the history window (a long call's lines push it out): links and
+  // addresses always stay in view, and on a call so do their last few texts.
+  const typed = s.transcript.filter((m) => m.role === "user" && m.channel === "text");
+  const keep = [...new Set([...typed.filter((m) => /https?:\/\/|www\.|\S@\S/.test(m.text)).slice(-4), ...(s.call.active ? typed.slice(-3) : [])])];
+  if (keep.length) state += `\nTHEY TYPED IN THE CHAT (recent; "the link i sent" means these): ${keep.map((m) => JSON.stringify(m.text.slice(0, 240))).join(", ")}`;
   if (extraInstruction) state += `\n\nINSTRUCTION: ${extraInstruction}`;
   if (!extraInstruction || ctx.softInstruction) {
     // One research-backed move per turn, chosen in code, so the principles actually get applied.
@@ -201,8 +206,12 @@ export async function captureAgentName(s: Session, channel: Channel, text: strin
 export async function handleUserMessage(...args: Parameters<typeof handleUserMessageInner>): Promise<TurnResult> {
   const [r, meter] = await metered(async () => sealGoodbye(args[0], await asTurnBy(args[0], "user", () => handleUserMessageInner(...args))));
   noteMetrics(args[0], meter);
+  // "what do you know about me": the what-i-know card answers it (it's never shown unasked after setup).
+  if (args[1] === "text" && KNOW_ASK.test(args[2])) r.actions = [...(r.actions ?? []), { type: "show_know" }];
   return r;
 }
+
+export const KNOW_ASK = /\bwhat (do|did|have) you (know|remember|got|saved|learned)( so far)? (about|on|of) me\b|\bwhat('?s| is) (my profile|saved about me)\b|\bshow me what you know\b/i;
 
 // Fold one turn's meter into the session's running numbers (and the dev ledger for `pnpm metrics`).
 export function noteMetrics(s: Session, m: Meter) {
