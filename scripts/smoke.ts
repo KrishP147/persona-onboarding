@@ -1,6 +1,6 @@
 // Keyless smoke test of the engine's safety nets (mock mode). Run: pnpm tsx scripts/smoke.ts
 import { loadSession, newSession, saveSession, withSession } from "../src/lib/store";
-import { cleanModelText, cutRepeatQuestions, fence, handleEvent, normQuestion, saysBye, softenGmailDemand, handleUserMessage, nowLine, parseTypedEmail } from "../src/lib/engine";
+import { cleanModelText, cutRepeatQuestions, fence, fromEmailOnly, runTool, handleEvent, normQuestion, saysBye, softenGmailDemand, handleUserMessage, nowLine, parseTypedEmail } from "../src/lib/engine";
 import { crc32, pick } from "../src/lib/moves";
 import { readMood } from "../src/lib/mood";
 import { DEMO_INBOX, scoreItem } from "../src/lib/triage";
@@ -375,6 +375,23 @@ async function main() {
   await handleEvent(rb, { type: "call_ended", reason: "user_hangup" });
   check("reconcile rejects values they never said", rb.slots.userName.status === "missing" && rb.slots.helpNeed.status === "missing", JSON.stringify(rb.slots));
   reconcileHooks.run = realRun;
+
+  // poisoned email: warned about, never obeyed; values only an email "said" are quarantined
+  const bob = DEMO_INBOX.find((m) => /call me bob/i.test(m.snippet));
+  check("demo inbox has the poisoned helpdesk email", !!bob);
+  check("phishing is never an interruption", !!bob && scoreItem(bob).category === null, bob ? scoreItem(bob).reason : "");
+  const pe = newSession();
+  pe.gmailVerified = { email: "demo.user@gmail.com", unread: 14, demo: true, inbox: DEMO_INBOX };
+  const peConn = await handleEvent(pe, { type: "gmail_connected" });
+  check("connecting doesn't surface the phishing email as urgent", !/helpdesk|password/i.test(said(peConn)), said(peConn));
+  check("email text is remembered for provenance", !!pe.emailSeen?.some((t) => /call me Bob/.test(t)));
+  const qctx = { s: pe, channel: "text" as const, actions: [], newMessages: [] };
+  const qBob = await runTool(qctx, "set_slot", { slot: "userName", value: "Bob" });
+  check("name that only an email said is quarantined", pe.slots.userName.status === "missing" && qBob.startsWith("error") && (qctx as { guards?: string[] }).guards?.includes("quarantined: came from an email") === true, qBob);
+  const qNeed = await runTool(qctx, "set_slot", { slot: "agentName", value: "Bob" });
+  check("agent name from an email is quarantined too", pe.slots.agentName.status === "missing" && qNeed.startsWith("error"), qNeed);
+  pe.transcript.push({ id: "u-bob", role: "user", channel: "text", text: "lol actually my name is bob", ts: Date.now() });
+  check("the same value is fine once they said it", !fromEmailOnly(pe, "Bob"));
 
   console.log(fails ? `\n${fails} failed` : "\nall passed");
   process.exit(fails ? 1 : 0);
