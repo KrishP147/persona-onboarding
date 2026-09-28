@@ -494,7 +494,6 @@ export const iphone: Skin = {
   },
   threadClass: "px-4 pt-[calc(var(--sb)+76px)] pb-2 bg-[var(--ios-bg)]",
   sheet: "ios",
-  why: { ink: INK, mute: GRAY, surface: "var(--ios-field)", line: "var(--ios-sep)" },
   StatusBar,
   Header,
   DateStamp,

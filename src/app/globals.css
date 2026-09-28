@@ -232,6 +232,74 @@ html[data-theme="dark"] .sk-gm {
   --gm-cookie-live: #3f4a6a;
 }
 
+/* galaxy: samsung messages + samsung phone, one ui 8. light = measured off samsung's own
+   screenshots (sammobile bubble emoji settings page, sammy fans one ui 8.5 thread); dark = the
+   how2shout photo (hue only, camera-shifted) + one ui dark grounds. low confidence on received
+   bubble fills in both themes: no clean screenshot shows one */
+.sk-sam {
+  --sam-bg: #fcfcfc; /* measured, one ui 8.5 thread */
+  --sam-ink: #111111;
+  --sam-mute: #7b7b7b; /* dates, receipts, times */
+  --sam-icon: #3d3d3f; /* header + composer glyphs */
+  --sam-accent: #387afe; /* measured: one ui switch / link blue */
+  --sam-sent: #3b7cf2; /* measured, bubble emoji screenshot */
+  --sam-sent-ink: #ffffff;
+  --sam-recv: #eeeef0; /* est: one ui list-card gray */
+  --sam-recv-ink: #111111;
+  --sam-card: #eeeef0; /* rich cards, link cards, contact card */
+  --sam-field: #f0f0f2; /* composer pill, measured #f2f2f2 */
+  --sam-placeholder: #9a9a9f;
+  --sam-send-off: #c9ccd1;
+  --sam-line: rgba(0, 0, 0, 0.08);
+  --sam-hover: rgba(0, 0, 0, 0.05);
+  --sam-red: #e5372f;
+  --sam-green: #2fb65a;
+  --sam-fail: #e59148; /* measured: failed-send "!" */
+  --sam-unknown: #e3e8f0;
+  --sam-unknown-ink: #a3acba;
+  --sam-chip: #ffffff; /* reaction pill */
+  --sam-chip-rim: #e3e3e3;
+  --sam-info-ink: #3c3c43;
+  --sam-err-bg: #fdecec;
+  --sam-err-ink: #b3261e;
+  --sam-knob: rgba(255, 255, 255, 0.25); /* voice note inside a sent (blue) bubble */
+  --sam-knob-recv: rgba(0, 0, 0, 0.1);
+  /* samsung phone: dark in both themes (the call screen paints the call background, not the app
+     theme); panel + end measured off sammyguru's one ui 8 capture. not flipped below */
+  --sam-call-bg: linear-gradient(172deg, #0f0c17 0%, #1d1a2e 30%, #3a2f4f 58%, #5a4a66 80%, #7b7483 100%);
+  --sam-call-panel: rgba(44, 48, 56, 0.92); /* #2c3038 */
+  --sam-call-pill: rgba(255, 255, 255, 0.14);
+  --sam-end: #dc3c34;
+  --sam-answer: #34b359;
+}
+html[data-theme="dark"] .sk-sam {
+  --sam-bg: #000000; /* one ui dark: true black */
+  --sam-ink: #fafafa;
+  --sam-mute: #8e8e93;
+  --sam-icon: #e3e3e6;
+  --sam-accent: #5b95ff;
+  --sam-sent: #3a82f0; /* photo reads #3a86ec-#3c87ee */
+  --sam-sent-ink: #ffffff;
+  --sam-recv: #33363c; /* est: photo reads a cool mid-dark gray (#424e62 camera-shifted) */
+  --sam-recv-ink: #fafafa;
+  --sam-card: #1f2024;
+  --sam-field: #1c1c1e;
+  --sam-placeholder: #7c7c82;
+  --sam-send-off: #3a3a3e;
+  --sam-line: rgba(255, 255, 255, 0.1);
+  --sam-hover: rgba(255, 255, 255, 0.08);
+  --sam-red: #ff5a52;
+  --sam-green: #4cd07a;
+  --sam-unknown: #3a3f48;
+  --sam-unknown-ink: #8a93a3;
+  --sam-chip: #33363c;
+  --sam-chip-rim: #3a3a3e;
+  --sam-info-ink: rgba(250, 250, 250, 0.75);
+  --sam-err-bg: #3a1715;
+  --sam-err-ink: #ff8a80;
+  --sam-knob-recv: rgba(255, 255, 255, 0.14);
+}
+
 /* status bar + home area: the real safe areas on a phone, the mock ones in a frame */
 .phone-screen {
   --sb: env(safe-area-inset-top, 0px);

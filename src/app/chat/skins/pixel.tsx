@@ -509,7 +509,6 @@ export const pixel: Skin = {
   },
   threadClass: "px-2 pb-3 rounded-t-[20px] bg-[var(--gm-surface)]",
   sheet: "m3",
-  why: { ink: C.ink, mute: C.mute, surface: C.high, line: "var(--gm-line)" },
   StatusBar,
   Header,
   DateStamp,

@@ -87,7 +87,6 @@ export interface Skin {
   screen: { className: string; style?: CSSProperties };
   threadClass: string; // scroll area
   sheet: "ios" | "m3";
-  why: { ink: string; mute: string; surface: string; line: string }; // colors for the in-phone why affordance + sheet
   StatusBar: FC<{ dark?: boolean }>;
   Header: FC<HeaderProps>;
   DateStamp: FC<{ ts: number; first: boolean }>;

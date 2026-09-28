@@ -214,7 +214,9 @@ avatar: 40 circle, **#FCC934** yellow with a dark `person` glyph (measured, user
 
 ---
 
-## A3. Samsung Messages skin (One UI 8) - light
+## A3. Samsung Messages skin (One UI 8) - light + dark, follows the page theme
+
+> first-draft estimates. the fidelity pass below (### galaxy) replaced several of them with measured values: sent bubble is saturated blue with white text in both themes (not pale blue), thread ground #FCFCFC, the header is a flat app bar (no floating pills), the in-call controls are icon + label in a dark panel. read that section first.
 
 | token | light | dark [for completeness] |
 |---|---|---|
@@ -465,6 +467,68 @@ sources
 - Pixel Phone M3E (in-call, incoming, light photo): https://9to5google.com/2025/08/21/google-phone-material-3-expressive-redesign/ , https://9to5google.com/2025/06/19/google-phone-material-3-expressive/
 - GM3 baseline tokens (`--gm3-sys-color-*`, as served by Google web apps; e.g. surface-container-high #E9EEF6): https://material-web.dev/theming/color/ , https://m3.material.io/styles/color/roles
 
+### galaxy (Samsung Messages + Samsung Phone, One UI 8)
+
+vars: `.sk-sam` on the chat screen root, the status bar and the call screen root, `--sam-*`. follows the page theme (was light only). the call screen does not flip: it is dark in both themes, like the real call background.
+
+**Samsung Messages is discontinued in the US.** samsung.com/us lists it as discontinued; Galaxy S25 and later ship Google Messages only, and One UI 9 lets it be removed. a real US Galaxy user today most likely runs Google Messages with One UI theming. we keep this skin as **the One UI look** (Samsung Messages as it still ships outside the US and on older Galaxy phones), because it is the one skin that reads as "Samsung" at a glance; the Pixel skin already covers Google Messages.
+
+references are the weakest of the three: no clean One UI 8 thread screenshot (light or dark) was found on SamMobile, Sammy Fans, SammyGuru, Android Authority or Samsung support. what we have: a Sammy Fans One UI 8.5 thread (low res, light), Samsung's own Galaxy S24 promo photo (light thread, sent bubble), a SamMobile screenshot of the One UI "Bubble emoji" settings page (a real sent-bubble render + send button, pixel-clean), a how2shout photo of a Galaxy running Samsung Messages dark (camera-shifted colors, layout reliable), and SammyGuru's One UI 8 / 8.5 in-call captures.
+
+diff -> fix
+
+| what differed | fix |
+|---|---|
+| light only; colors hardcoded in `C` and tailwind literals | all colors moved to `--sam-*`; dark block under `html[data-theme="dark"]`; status bar + gesture bar read on the ground (Phone.tsx already follows the theme for the chat phone; the call phone stays forced dark) |
+| sent bubble pale blue #D2E3FC with dark text | saturated blue **#3B7CF2** with white text (measured, SamMobile bubble-emoji render; the S24 promo and the dark photo agree on hue) |
+| thread ground #F6F6F8 with white received bubbles | ground **#FCFCFC** (measured, 8.5 thread), received bubble light gray #EEEEF0 (est) |
+| header: floating white pills (back, avatar + name, call, more) over a gradient fade | flat app bar on the thread ground: chevron, avatar 34, bold name + ▾, call, ⋮ (8.5 thread, S24 promo, dark photo all show it flat). the number under the name is dropped (the real header shows only the name) |
+| "Read" receipt in accent blue | gray, "Read" stacked over the time, left of the last sent bubble (dark photo) |
+| date separator 600 weight | regular weight, gray |
+| composer pill white with a shadow on gray | pill #F0F0F2 (measured #F2F2F2), no shadow; send circle takes the sent blue |
+| cards and banners white | `--sam-card` (received gray in light, #1F2024 in dark), radius 20 |
+| call: avatar 96, name 32 semibold, blue-gray gradient; round translucent buttons; end red #F14B4B | status line (call glyph + timer/state) on top, name **40 bold**, "Mobile +1 ..." under it, avatar only for a saved contact (the real screen shows a photo only when the contact has one); controls are icon + label (no circles) inside a rounded **#2C3038** panel (r 28) with the **#DC3C34** end circle inside (measured, SammyGuru). muted = white rounded tile. background = wallpaper-like dark gradient (#0F0C17 top to a purple glow, measured off the same capture). button rows keep their structure |
+| incoming: no labels | green answer left, red decline right, labels under each (One UI order) |
+
+left, and why
+
+- composer layout: the real one has gallery, camera and + outside the field, no placeholder, and a voice waveform button that turns into send. ours keeps +, placeholder "Enter message", emoji + mic inside and a send circle (composer internals are shared with another lane; the placeholder text is theirs).
+- received bubble fills (#EEEEF0 light, #33363C dark) are **estimates**: no clean screenshot of a received bubble exists in our refs; the dark photo only gives a camera-shifted cool gray.
+- the in-call row shows only working controls (Messages, Mute; Hold lands from another lane). the real panel has Add call / Video call / Bluetooth / Speaker / Mute / Keypad, and a "Call assist" pill above it.
+- incoming call is tap mode (One UI supports "replace swipe with single tap"); the swipe arcs are not built. no light-mode call capture exists; the call stays dark.
+- One UI Sans is not web-licensed; the SamsungOne stack falls back to Inter.
+- One UI 8.5 grouped-corner shaping and exact bubble radius are unmeasured; we keep 22 with 6 on the grouped side.
+
+colors
+
+| token | light | dark | role |
+|---|---|---|---|
+| `--sam-bg` | #FCFCFC (measured) | #000000 | thread ground, app bar |
+| `--sam-ink` | #111111 | #FAFAFA | text |
+| `--sam-mute` | #7B7B7B | #8E8E93 | dates, times, receipts, typing dots |
+| `--sam-icon` | #3D3D3F | #E3E3E6 | header + composer glyphs |
+| `--sam-sent` / `-ink` | #3B7CF2 (measured) / #FFFFFF | #3A82F0 (photo hue) / #FFFFFF | sent bubble, send button |
+| `--sam-recv` / `-ink` | #EEEEF0 (est) / #111111 | #33363C (est) / #FAFAFA | received bubble |
+| `--sam-card` | #EEEEF0 | #1F2024 | link, contact and rich cards, banners |
+| `--sam-field` | #F0F0F2 (measured #F2F2F2) | #1C1C1E | composer pill |
+| `--sam-accent` | #387AFE (measured switch blue) | #5B95FF | links, Save, rich-card actions |
+| `--sam-red` / `--sam-green` | #E5372F / #2FB65A | #FF5A52 / #4CD07A | danger, declined, saved |
+| `--sam-unknown` / `-ink` | #E3E8F0 / #A3ACBA | #3A3F48 / #8A93A3 | unknown avatar |
+| `--sam-call-bg` | #0F0C17 -> #3A2F4F -> #7B7483 gradient | same | call ground (measured, not flipped) |
+| `--sam-call-panel` | #2C3038 @ 92% | same | in-call control panel (measured) |
+| `--sam-end` / `--sam-answer` | #DC3C34 (measured) / #34B359 | same | end / decline, answer |
+
+sources
+
+- Samsung Messages discontinued (US): https://www.samsung.com/us/apps/samsung-messages/
+- One UI 8.5 Messages thread (light, low res): https://www.sammyfans.com/2025/11/14/samsung-messages-ui-redesigned-in-one-ui-8-5/ (img wp-content/uploads/2025/11/one-ui-8-5-samsung-messages-img.jpg)
+- Galaxy S24 Messages promo photo: https://www.sammyfans.com/2024/12/06/samsung-messages-app-gets-a-fresh-look-with-one-ui-7/ (img wp-content/uploads/2024/01/galaxy-s24-plus-messages-img.jpg)
+- One UI bubble-emoji settings screenshot (sent bubble + send button): https://www.sammobile.com/news/samsung-messages-new-feature-makes-texting-more-fun/ (img wp-content/uploads/2025/08/Samsung-Message-Bubble-Emoji.jpeg)
+- Samsung Messages dark (photo): https://www.how2shout.com/apps/google-messages-vs-samsung-messages.html
+- Samsung Phone in-call, One UI 8 dark + 8.5 squircle buttons: https://sammyguru.com/one-ui-8-5-in-call-screen-visual-changes/
+- One UI 8.5 call screening / auto answer screens: https://www.sammobile.com/news/one-ui-8-5-filter-unwanted-calls-detailed-look/
+- tap-to-answer option: https://www.sammyfans.com/2026/07/12/one-ui-tip-respond-calls-and-alarms-with-tap-instead-of-swipe/
+
 ---
 
 ## sources
@@ -500,5 +564,5 @@ sources
 ## open gaps (verify with screenshots)
 - iMessage: dark received gray (derived, not measured); sent gradient endpoints; unlocked incoming call (no capture).
 - Google Messages: dark primary (send button, seen receipt) estimated; light values are GM3 baseline, not a real baseline-light capture; typing indicator not captured; light in-call not captured.
-- all Samsung Messages values incl. current placeholder string.
+- Samsung Messages: received bubble fills (both themes) estimated; no clean One UI 8 thread screenshot; incoming call and light call not captured; current placeholder string.
 - call-screen button sizes on all three.
