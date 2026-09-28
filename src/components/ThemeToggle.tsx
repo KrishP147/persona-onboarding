@@ -36,6 +36,11 @@ function subscribePref(cb: () => void) {
 
 export function useThemePref(): [ThemePref, (p: ThemePref) => void] {
   const pref = useSyncExternalStore(subscribePref, readPref, () => "system" as ThemePref);
+  // re-assert after mount: if react ever re-renders <html> (a hydration mismatch anywhere on the
+  // page), the attribute the pre-paint script set is dropped and the page falls back to light
+  useEffect(() => {
+    apply(pref);
+  }, [pref]);
   const set = useCallback((p: ThemePref) => {
     try {
       if (p === "system") localStorage.removeItem(THEME_KEY);
