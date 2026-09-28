@@ -9,7 +9,7 @@ import { POST as DemoPOST } from "../src/app/api/auth/google/demo/route";
 import { GET as StartGET } from "../src/app/api/auth/google/start/route";
 import { popupPage } from "../src/app/api/auth/google/popup";
 import { keyterms } from "../src/lib/voice";
-import { reconcileHooks } from "../src/lib/extract";
+import { applyExtracted, reconcileHooks } from "../src/lib/extract";
 import { costOf, metered, percentile, recordUsage } from "../src/lib/usage";
 import { GET as SessionGET } from "../src/app/api/session/route";
 
@@ -421,6 +421,42 @@ async function main() {
   ga.call.active = true;
   await handleEvent(ga, { type: "call_ended", reason: "user_hangup" });
   check("graduatedAt set once, as an iso time", ga.phase === "graduated" && !!firstAt && !Number.isNaN(Date.parse(firstAt)) && ga.graduatedAt === firstAt, String(firstAt));
+
+  // contact card before every first call (regression: a defaulted "persona" name swallowed the rename and the card)
+  const flow = async (idleFirst: boolean, ...lines: string[]) => {
+    const f = newSession();
+    await handleEvent(f, { type: "open" });
+    if (idleFirst) {
+      f.transcript[f.transcript.length - 1].ts -= 60000;
+      await handleEvent(f, { type: "text_idle" });
+    }
+    const all: string[] = [];
+    let last: TurnResult | undefined;
+    for (const l of lines) {
+      last = await handleUserMessage(f, "text", l);
+      all.push(...last.newMessages.filter((m) => m.role === "agent").map((m) => (m.kind === "contact_card" ? `[card:${m.text}]` : m.text)));
+    }
+    const cardAt = all.findIndex((x) => x.startsWith("[card:"));
+    const callAt = all.findIndex((x) => /calling you now/.test(x));
+    return { f, all, cardAt, callAt, rang: !!last?.actions.some((a) => a.type === "start_call") };
+  };
+  const p1 = await flow(true, "hey you can be julia. im krish. call me");
+  check("prod replay: default name, then 'you can be julia ... call me' -> ack + card, then call", p1.f.slots.agentName.value === "Julia" && p1.all.includes("[card:Julia]") && p1.cardAt < p1.callAt && p1.rang, p1.all.join(" | "));
+  const p2 = await flow(false, "luna", "i'm krish", "call me");
+  check("name, own name, 'call me': card came before the call", p2.cardAt >= 0 && p2.cardAt < p2.callAt && p2.rang, p2.all.join(" | "));
+  const p3 = await flow(false, "call you luna, i'm krish, call me");
+  check("name + call in one message: ack + card, then call", p3.all.includes("[card:Luna]") && p3.cardAt < p3.callAt && p3.rang, p3.all.join(" | "));
+  const p4 = await flow(false, "call me", "luna");
+  check("call before naming: a late name still names it, with the card", p4.f.slots.agentName.value === "Luna" && p4.all.includes("[card:Luna]"), p4.all.join(" | "));
+  const p5 = await flow(true, "call me");
+  check("default name then a call: the card still comes first", p5.all.includes("[card:Persona]") && p5.cardAt < p5.callAt && p5.rang, p5.all.join(" | "));
+  const p6 = await flow(false, "luna", "send me the contact card");
+  const cards = p6.f.transcript.filter((m) => m.kind === "contact_card");
+  check("'send me the contact card' re-posts it (no email draft talk, one card)", cards.length === 1 && p6.all.at(-1) === "[card:Luna]" && !/draft/.test(p6.all.join(" ")), p6.all.join(" | "));
+  const swap = newSession();
+  swap.slots.agentName = { ...swap.slots.agentName, value: "Julia", status: "filled" };
+  await applyExtracted(swap, { agentName: null, userName: "Julia", helpNeed: null, declined: [] }, async () => {});
+  check("'hi julia' never makes the user julia", swap.slots.userName.value !== "Julia", String(swap.slots.userName.value));
 
   // the guard pipeline runs in a fixed, named order (goodbye before hangup comes before the gmail rules, etc.)
   const order = GUARD_PIPELINE.map((g) => g.name);

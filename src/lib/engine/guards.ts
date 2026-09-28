@@ -1,8 +1,8 @@
 import { type Channel, type InboxItem, type Move, type Session, type TurnResult } from "../types";
 import { provider, quick } from "../llm";
 import { EVENT_MOVES } from "../moves";
-import { type Ctx, emitAgentText, goodbyeLine, guard, msg, shortNeed } from "./context";
-import { NAME_ASK, SEND_REQUEST, gmailConsent, saidNow, userWrappingUp } from "./intents";
+import { type Ctx, emitAgentText, ensureCard, goodbyeLine, guard, msg, shortNeed } from "./context";
+import { CARD_ASK, NAME_ASK, SEND_REQUEST, gmailConsent, saidNow, userWrappingUp } from "./intents";
 import { runTool } from "./tools";
 import { CLAIMS_LINK, CLAIMS_SENT, GOODBYE, SENTENCE_BREAK, capSentences, cleanModelText } from "./text";
 
@@ -169,6 +169,7 @@ export const GUARD_PIPELINE: GuardStep[] = [
       // Placing a call: the e.text is just the heads up; the talking happens on the call.
       if (channel === "text" && ctx.actions.some((a) => a.type === "start_call")) {
         e.text = "calling you now.";
+        ensureCard(ctx);
         ctx.move = EVENT_MOVES.callNow;
       }
     },
@@ -257,7 +258,7 @@ export const GUARD_PIPELINE: GuardStep[] = [
     async run(e) {
       const { ctx, s } = e;
       // "sent!" only if send_email actually went out this turn.
-      if (!ctx.sentEmail && !s.draft?.sent && SEND_REQUEST.test(saidNow(s)) && CLAIMS_SENT.test(e.text)) {
+      if (!ctx.sentEmail && !s.draft?.sent && SEND_REQUEST.test(saidNow(s)) && !CARD_ASK.test(saidNow(s)) && CLAIMS_SENT.test(e.text)) {
         e.fix("blocked a false 'sent' claim", s.draft && !s.draft.sent ? "i haven't sent it yet. want me to send the draft above as is?" : "i haven't sent anything. want me to write it up as a draft first?");
       }
     },

@@ -213,6 +213,7 @@ export async function runTool(ctx: Ctx, name: string, input: Record<string, unkn
       s.slots[slot] = { ...s.slots[slot], value, status: "filled", source: ctx.channel, updatedAt: Date.now() };
       if (s.lastAskedSlot === slot) s.lastAskedSlot = undefined;
       if (slot === "agentName") {
+        s.agentNameDefaulted = false;
         // Picking the voice runs alongside the reply instead of in front of it.
         const onCall = s.call.active;
         (ctx.pending ??= []).push(

@@ -56,7 +56,9 @@ const clean = (v: string | null, max: number) => (v ? v.trim().replace(/^["']|["
 export function applyExtracted(s: Session, e: Extracted, setName: (value: string) => Promise<void>): Promise<void> | void {
   const now = Date.now();
   const userName = clean(e.userName, 40);
-  if (userName && userName.toLowerCase() !== s.slots.userName.value?.toLowerCase()) {
+  // "hi, julia" on the call greets the assistant: its own name is never theirs.
+  const isAgents = (n: string) => [s.slots.agentName.value, e.agentName].some((a) => a && a.toLowerCase() === n.toLowerCase());
+  if (userName && !isAgents(userName) && userName.toLowerCase() !== s.slots.userName.value?.toLowerCase()) {
     s.slots.userName = { ...s.slots.userName, value: userName, status: "filled", updatedAt: now };
     if (s.lastAskedSlot === "userName") s.lastAskedSlot = undefined;
   }

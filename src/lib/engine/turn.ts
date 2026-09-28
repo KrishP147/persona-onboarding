@@ -10,8 +10,8 @@ import { applyExtracted, extract } from "../extract";
 import { webEnabled } from "../web";
 
 import { currentMeter, metered, percentile, recordTurn, type Meter } from "../usage";
-import { type Ctx, emitAgentText, goodbyeLine, guard, msg, outageLine } from "./context";
-import { CALL_NO, CLEAR_BYE, DELEGATE, DEMO_YES, GMAIL_TROUBLE, HOLD, INSULT_NAME, LAUGH, NAME_ASK, NAME_HINT, NEGATED_CALL, NOT_A_NAME, NO_CALLS, OFFERED_CALL, OWN_NAME, SEND_CMD, SEND_REQUEST, SENT_Q, SKIP_SETUP, THANKS, USER_BYE, WAITING_ON_THEM, WANTS_OUT, YES, asTurnBy, asksForLink, gmailConsent, lastUserText, saidNow, saysBye } from "./intents";
+import { type Ctx, emitAgentText, ensureCard, goodbyeLine, guard, msg, outageLine } from "./context";
+import { CALL_NO, CARD_ASK, CARD_WANT, CLEAR_BYE, DELEGATE, hintedAgentName, DEMO_YES, GMAIL_TROUBLE, HOLD, INSULT_NAME, LAUGH, NAME_ASK, NAME_HINT, NEGATED_CALL, NOT_A_NAME, NO_CALLS, OFFERED_CALL, OWN_NAME, SEND_CMD, SEND_REQUEST, SENT_Q, SKIP_SETUP, THANKS, USER_BYE, WAITING_ON_THEM, WANTS_OUT, YES, asTurnBy, asksForLink, gmailConsent, lastUserText, saidNow, saysBye } from "./intents";
 import { LAUGH_LEAD, cleanModelText, dropDraftEcho, fence, nowLine, parseTypedEmail } from "./text";
 import { GMAIL_ASK_MARK, GUARD_PIPELINE, type GuardEnv, type TurnOpts, rememberQuestions, sealGoodbye } from "./guards";
 import { LOOKUP_TOOLS, MAX_TOOL_ROUNDS, TERMS_LINK, TOOLS, WEB_TOOLS, gifAllowed, makeGif, runTool, saveDraftTool, sendEmailTool } from "./tools";
@@ -182,8 +182,9 @@ export async function turn(
 export async function captureAgentName(s: Session, channel: Channel, text: string): Promise<{ card?: Msg; pending: Promise<void>[] } | undefined> {
   if (channel !== "text" || s.slots.agentName.status !== "missing" || s.lastAskedSlot !== "agentName") return;
   // Only as the direct answer to the name question: a later "send" or "help" is never a name.
-  const prevAgent = [...s.transcript].slice(0, -1).reverse().find((m) => m.role === "agent" && (!m.kind || m.kind === "text"));
-  if (!prevAgent || !NAME_ASK.test(prevAgent.text)) return;
+  // The name question was asked in the last couple of exchanges ("call me" first, then "luna" still answers it).
+  const askIdx = s.transcript.findLastIndex((m) => m.role === "agent" && NAME_ASK.test(m.text));
+  if (askIdx < 0 || s.transcript.slice(askIdx + 1).filter((m) => m.role === "user").length > 2) return;
   const own = text.trim().match(OWN_NAME);
   if (own) {
     if (s.slots.userName.status !== "filled") {
@@ -308,6 +309,25 @@ export async function handleUserMessageInner(
     await Promise.all(named.pending);
     return { session: s, newMessages: [userMsg, ...(early?.msgs ?? []), ...ctx.newMessages], chips: computeDirective(s, channel).chips, actions: [] };
   }
+  // "send me the contact card" / "it's not there": post it again, in code (the model once claimed it had,
+  // then offered to draft an email). The old card moves down instead of duplicating (one card per session).
+  if (CARD_ASK.test(clean) && CARD_WANT.test(clean) && s.slots.agentName.value) {
+    const ctx: Ctx = { s, channel: "text", actions: [], newMessages: [], move: EVENT_MOVES.honest };
+    s.transcript = s.transcript.filter((m) => m.kind !== "contact_card");
+    const card = msg("agent", "text", s.slots.agentName.value, { kind: "contact_card" });
+    emitAgentText(ctx, "here it is. tap it to save me so you know it's me when i call.");
+    s.transcript.push(card);
+    ctx.newMessages.push(card);
+    guard(ctx, "contact card resent in code");
+    const spoken: Msg[] = [];
+    if (s.call.active && channel === "voice") {
+      const v: Ctx = { s, channel: "voice", actions: [], newMessages: [] };
+      emitAgentText(v, "just sent my contact card to our texts.");
+      spoken.push(...v.newMessages);
+    }
+    recordAsk(s, null);
+    return { session: s, newMessages: [userMsg, ...(early?.msgs ?? []), ...ctx.newMessages, ...spoken], chips: computeDirective(s, channel).chips, actions: [] };
+  }
   // They said yes to our call offer: ring now, the way persona does ("calling you now."), no model needed.
   const prevText = [...s.transcript].slice(0, -1).reverse().find((m) => m.role === "agent" && (!m.kind || m.kind === "text"));
   // Asking for a call is the answer; no need to confirm it back ("could we call?" -> ring).
@@ -326,6 +346,7 @@ export async function handleUserMessageInner(
       const hadName = s.slots.userName.status === "filled";
       if (e) await applyExtracted(s, { ...e, agentName: null }, async () => {});
       const name = !hadName && s.slots.userName.status === "filled" ? s.slots.userName.value : null;
+      ensureCard(ctx);
       emitAgentText(ctx, name ? `nice to meet you ${name}! calling you now.` : "calling you now.");
       return { session: s, newMessages: [userMsg, ...(early?.msgs ?? []), ...ctx.newMessages], chips: computeDirective(s, channel).chips, actions: ctx.actions };
     }
@@ -490,7 +511,7 @@ export async function handleUserMessageInner(
   await Promise.all(named?.pending ?? []);
   const e = await heard;
   // Only rename the assistant from the extractor when they clearly meant to (answering the ask, or "call you X").
-  const meantAgentName = s.lastAskedSlot === "agentName" || /\b(call (you|yourself)|your name|name you|rename)\b/i.test(clean);
+  const meantAgentName = s.lastAskedSlot === "agentName" || /\b(call (you|yourself)|your name|name you|rename)\b/i.test(clean) || NAME_HINT.test(clean);
   await applyExtracted(s, meantAgentName ? e : { ...e, agentName: null }, async (value) => {
     const ctx: Ctx = { s, channel, actions: [], newMessages: [] };
     await runTool(ctx, "set_slot", { slot: "agentName", value });
@@ -505,10 +526,11 @@ export async function handleUserMessageInner(
 }
 
 export async function nameFirst(s: Session, channel: Channel, text: string, heard: ReturnType<typeof extract>): Promise<{ msgs: Msg[]; note: string } | null> {
-  if (channel !== "text" || s.call.active || s.slots.agentName.status !== "missing") return null;
+  // The "Persona" default is a placeholder: naming it for real goes through here too (ack + card before anything else).
+  if (channel !== "text" || s.call.active || (s.slots.agentName.status !== "missing" && !s.agentNameDefaulted)) return null;
   if (s.lastAskedSlot !== "agentName" && !NAME_HINT.test(text)) return null;
   const e = await heard.catch(() => null);
-  const value = e?.agentName?.trim().replace(/\b\p{L}/gu, (c) => c.toUpperCase());
+  const value = (e?.agentName ?? hintedAgentName(text))?.trim().replace(/\b\p{L}/gu, (c) => c.toUpperCase());
   if (!value || value.length > 30) return null;
   const ctx: Ctx = { s, channel, actions: [], newMessages: [] };
   if ((await runTool(ctx, "set_slot", { slot: "agentName", value })).startsWith("error")) return null;

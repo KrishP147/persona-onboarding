@@ -122,7 +122,17 @@ export const SEND_HOLD = /\b(don'?t|do not|not yet|wait|hold|change|edit|fix|but
 
 // They named the assistant inside a longer message ("call you nova, can you check my email?").
 // Answer the name first, with the contact card, before the link or the rest of the reply.
-export const NAME_HINT = /\b(call (you|yourself)|your name('?s| is| will be)|name you|i'?ll call you|you'?re|you are|go by)\b/i;
+export const NAME_HINT = /\b(call (you|yourself)|your name('?s| is| will be| can be)|name you|i'?ll call you|you'?re|you are|go by|you can be|you'?ll be|be called)\b/i;
+// The name itself, when a hint phrase is followed by one ("you can be julia", "i'll call you max").
+const HINTED_NAME = /\b(?:call (?:you|yourself)|your name(?:'s| is| will be| can be)|name you|i'?ll call you|you can be|you'?ll be|be called|go by)\s+([\p{L}][\p{L}'-]{0,19})\b/iu;
+export function hintedAgentName(text: string): string | null {
+  const m = text.match(HINTED_NAME);
+  if (!m || NOT_A_NAME.test(m[1]) || /^(my|your|a|an|the|me|so|really|very|more)$/i.test(m[1])) return null;
+  return m[1].replace(/^\p{L}/u, (c) => c.toUpperCase());
+}
+// They're asking for the contact card ("send me the contact card", "where's your card", "it's not there").
+export const CARD_ASK = /\b(contact( card)?|your card|the card|ur card)\b/i;
+export const CARD_WANT = /\b(send|resend|share|where|didn'?t (get|see|send)|can'?t (find|see)|not there|missing|again)\b/i;
 // A bare "send it" (not "send me the link"), and "did you send it?".
 export const SEND_CMD = /^\s*(ok(ay)?,? |yes,? |yeah,? |yep,? )?(please )?(send|send it|send that|send the (email|draft|message)|send it now|go ahead and send( it)?|ship it)( now| please)?[.! ]*$/i;
 export const SENT_Q = /\b(did (u|you) (send|sent)|was it sent|is it sent|has it (been )?sent|did it (go|send))\b/i;
@@ -174,8 +184,9 @@ export const INTENTS: Record<string, IntentDef> = {
   EMAIL_RE: { re: EMAIL_RE, means: "a bare email address", says: ["a@b.com"], notSays: ["a@b", "email me at a@b.com"] },
   SEND_OK: { re: SEND_OK, means: "a yes to sending", says: ["send it", "looks good", "yep"], notSays: ["hmm", "nice"] },
   SEND_HOLD: { re: SEND_HOLD, means: "hold off on sending", says: ["wait", "change the subject", "not yet"], notSays: ["send it", "looks great"] },
-  NAME_HINT: { re: NAME_HINT, means: "naming the assistant inside a longer message", says: ["i'll call you nova", "your name is max"], notSays: ["call me sam", "what's my name"] },
+  NAME_HINT: { re: NAME_HINT, means: "naming the assistant inside a longer message", says: ["i'll call you nova", "your name is max", "hey you can be julia. im krish"], notSays: ["call me sam", "what's my name"] },
   SEND_CMD: { re: SEND_CMD, means: "the whole message is a send command", says: ["send", "ok, send it", "go ahead and send it"], notSays: ["send it to bob instead", "don't send"] },
+  CARD_ASK: { re: CARD_ASK, means: "talking about the contact card", says: ["send me the contact card", "where's your card"], notSays: ["send me the link"] },
   SENT_Q: { re: SENT_Q, means: "asks whether it was sent", says: ["did you send it?", "was it sent"], notSays: ["send it"] },
   WAITING_ON_THEM: { re: WAITING_ON_THEM, means: "they'll come back once done", says: ["i'll let you know", "once it's connected"], notSays: ["let me know", "it's connected"] },
   NO_CALLS: { re: NO_CALLS, means: "no calls at all", says: ["don't call me", "text only", "i hate phone calls"], notSays: ["call me", "can you call me later?"] },
