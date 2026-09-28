@@ -19,14 +19,19 @@ export const TEAM: Record<string, TeamMember> = {
   yasser: { full: "Yasser Drif", handle: "@Yasser_Drif__", asks: "product engineering at persona", bio: "product engineering at Persona, bringing autonomous AI agents to life" },
 };
 
-// Their first name is on the team, and we haven't asked yet this session.
+// Their first name is on the team, and we haven't asked about that name yet.
 export function teamMatch(s: Session): string | null {
   const first = (s.slots.userName.value ?? "").trim().split(/\s+/)[0]?.toLowerCase();
-  return first && TEAM[first] && !s.teamGuess ? first : null;
+  return first && TEAM[first] && s.teamGuess !== first ? first : null;
 }
 
-export const teamLine = (key: string) => `woah, is this THE ${key}? ${TEAM[key].asks}? pleasure to meet you!`;
+// their yes, answered in code before the model's reply
+export const teamYes = (key: string) => (key === "jason" ? "no way, named after a file extension? an honor!" : "no way, an honor!");
+
+// one sentence with the role in it: "is this THE zach?" and "is this THE julia?" alone read as the same question
+// to the no-repeat guard, which dropped the second
+export const teamLine = (key: string) => `woah, is this THE ${key}, ${TEAM[key].asks}? pleasure to meet you!`;
 
 // After a yes: what the model may know about them (public info only), for a moment of recognition.
 export const teamNote = (key: string) =>
-  `They said they really are ${TEAM[key].full} from Persona (${TEAM[key].handle} on X). Public bio: ${TEAM[key].bio}. You can react warmly and mention a detail once if it fits, then carry on normally with whatever's next. Don't gush or keep bringing it up.`;
+  `They said they really are ${TEAM[key].full} from Persona (${TEAM[key].handle} on X). Public bio: ${TEAM[key].bio}. You already said \"no way, an honor!\" in a separate text just before yours, so don't react to it again: carry on normally with whatever's next. If they bring up their work, you can mention a detail from the bio. Don't gush.`;

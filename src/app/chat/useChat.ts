@@ -487,8 +487,6 @@ export function useChat() {
 
   // start over with a fresh session (keeps the old one server side, just forgets it here).
   const restart = () => {
-    // wiping the conversation by accident is worse than one extra tap
-    if (!window.confirm("Start over with a fresh conversation?")) return;
     if (call.status === "active" || call.status === "connecting") call.hangUp("user_hangup");
     try {
       localStorage.removeItem(LS_KEY);

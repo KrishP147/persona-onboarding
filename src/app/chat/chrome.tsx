@@ -1,7 +1,7 @@
 "use client";
 // page chrome around the phone, in persona's own design language (docs/design/persona-site.md)
 import Link from "next/link";
-import { useEffect, useRef, type ReactNode } from "react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
 import { SKIN_IDS, type SkinId } from "./skins/types";
 import { MapGlyph } from "./why/ReasoningMap";
 import { Mark } from "@/components/landing/svgs";
@@ -65,6 +65,36 @@ export function PhonePicker({ value, onChange, size = "md" }: { value: SkinId | 
   );
 }
 
+// Restart asks in place: the first tap arms it ("tap again: clears the chat"), a second within 4s does it.
+// A browser confirm() box was easy to miss and automated testers dismiss it silently.
+export function useArmed(action: () => void): [boolean, () => void] {
+  const [armed, setArmed] = useState(false);
+  useEffect(() => {
+    if (!armed) return;
+    const t = setTimeout(() => setArmed(false), 4000);
+    return () => clearTimeout(t);
+  }, [armed]);
+  return [armed, () => (armed ? action() : setArmed(true))];
+}
+
+function RestartPill({ onRestart }: { onRestart: () => void }) {
+  const [armed, tap] = useArmed(onRestart);
+  return (
+    <span aria-live="polite">
+      <Pill onClick={tap} pressed={armed}>{armed ? "Tap again: clears the chat" : "Restart"}</Pill>
+    </span>
+  );
+}
+
+function RestartButton({ onRestart }: { onRestart: () => void }) {
+  const [armed, tap] = useArmed(onRestart);
+  return (
+    <button onClick={tap} aria-live="polite" className={`mt-6 w-full h-12 rounded-full text-[16px] font-medium active:scale-[.99] ${armed ? "bg-[#c5221f] text-white" : "bg-ink text-canvas"}`}>
+      {armed ? "Tap again to start over (clears the chat)" : "Restart conversation"}
+    </button>
+  );
+}
+
 export function Pill({ children, onClick, pressed }: { children: ReactNode; onClick: () => void; pressed?: boolean }) {
   return (
     <button
@@ -106,7 +136,7 @@ export function TopBar({ skin, setSkin, pill, typingHints, toggleTypingHints, on
           {pill}
         </span>
         <HintsPill on={typingHints} onClick={toggleTypingHints} />
-        <Pill onClick={onRestart}>Restart</Pill>
+        <RestartPill onRestart={onRestart} />
         <ThemeToggle />
       </div>
     </nav>
@@ -170,9 +200,7 @@ export function MenuSheet({ skin, setSkin, canReason, onReasoning, typingHints, 
           <span className="text-[15px] font-medium">Appearance</span>
           <ThemeToggle />
         </div>
-        <button onClick={onRestart} className="mt-6 w-full h-12 rounded-full bg-ink text-canvas text-[16px] font-medium active:scale-[.99]">
-          Restart conversation
-        </button>
+        <RestartButton onRestart={onRestart} />
       </div>
     </div>
   );
