@@ -89,6 +89,7 @@ export interface Session {
   graduateAfterCall?: boolean; // they asked to skip setup mid-call: graduate once the call ends
   callDeclinedAt?: number; // transcript length when they said no to a call (in words or by declining) // interruptions shown, with outcomes (see src/lib/triage.ts)
   graduatedReason?: string;
+  graduatedAt?: string; // ISO time setup ended (first time only), for the what-i-know card and setup time
   demoOffered?: boolean; // the sample inbox was offered (once) after google sign-in failed or stalled
   agentNameDefaulted?: boolean; // they skipped naming it: goes by "Persona" until they pick one
   emailSeen?: string[]; // email text the agent has seen (subjects, snippets): slot values found only here are quarantined

@@ -411,6 +411,7 @@ export async function handleUserMessageInner(
   // "skip all this, just find me sushi": setup ends now, in code, and the request gets answered.
   if (!s.call.active && s.phase !== "graduated" && SKIP_SETUP.test(clean)) {
     s.phase = "graduated";
+    s.graduatedAt ??= new Date().toISOString();
     s.graduatedReason = "they skipped setup";
     for (const k of Object.keys(s.slots) as SlotKey[]) if (s.slots[k].status === "missing") s.slots[k].status = "deferred";
     const bare = /^\s*(ok(ay)?,?\s*)?(can we |let'?s |i want to |just )?skip( all( of)?)?( this| that| it| setup| the setup| the rest)*\W*$/i.test(clean);

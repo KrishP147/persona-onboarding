@@ -108,6 +108,7 @@ export const EVENT_HANDLERS: { [K in SessionEvent["type"]]: EventHandler<K> } = 
       s.pendingVoice = undefined;
     }
     s.phase = s.prePhase === "graduated" || s.graduateAfterCall ? "graduated" : "post_call";
+    if (s.phase === "graduated") s.graduatedAt ??= new Date().toISOString();
     if (s.graduateAfterCall) {
       s.graduateAfterCall = false;
       for (const k of Object.keys(s.slots) as SlotKey[]) if (s.slots[k].status === "missing") s.slots[k].status = "deferred";

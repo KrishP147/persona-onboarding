@@ -337,6 +337,7 @@ export async function runTool(ctx: Ctx, name: string, input: Record<string, unkn
       }
       if (open.length && !userWantsOut(s)) return `error: still open (${open.join(", ")}) and they haven't asked to skip. keep helping and gather what's left gently`;
       s.phase = "graduated";
+      s.graduatedAt ??= new Date().toISOString();
       s.graduatedReason = String(input.reason ?? "");
       for (const k of Object.keys(s.slots) as SlotKey[]) if (s.slots[k].status === "missing") s.slots[k].status = "deferred";
       ctx.actions.push({ type: "graduate" });

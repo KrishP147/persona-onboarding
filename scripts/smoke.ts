@@ -412,6 +412,16 @@ async function main() {
   pe.transcript.push({ id: "u-bob", role: "user", channel: "text", text: "lol actually my name is bob", ts: Date.now() });
   check("the same value is fine once they said it", !fromEmailOnly(pe, "Bob"));
 
+  // graduating stamps graduatedAt once (a later graduation never moves it)
+  const ga = newSession();
+  await handleEvent(ga, { type: "open" });
+  await handleUserMessage(ga, "text", "skip all this, just find me sushi");
+  const firstAt = ga.graduatedAt;
+  ga.prePhase = "graduated";
+  ga.call.active = true;
+  await handleEvent(ga, { type: "call_ended", reason: "user_hangup" });
+  check("graduatedAt set once, as an iso time", ga.phase === "graduated" && !!firstAt && !Number.isNaN(Date.parse(firstAt)) && ga.graduatedAt === firstAt, String(firstAt));
+
   // the guard pipeline runs in a fixed, named order (goodbye before hangup comes before the gmail rules, etc.)
   const order = GUARD_PIPELINE.map((g) => g.name);
   check("guard pipeline order", order.join(",") === "avoid,force-end,placing-call,goodbye-before-hangup,hang-up-after-goodbye,gmail-by-the-book,no-repeat-gmail-ask,no-third-question,no-repeat-name-ask,no-false-sent,call-offer-and-link-claims,long-text-to-chat,link-said-aloud,no-repeat-questions", order.join(","));
