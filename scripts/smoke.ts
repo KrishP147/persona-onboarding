@@ -209,8 +209,14 @@ async function main() {
   const skip = newSession();
   await handleEvent(skip, { type: "open" });
   const sk = await handleUserMessage(skip, "text", "i need help with my inbox honestly");
-  const last = sk.newMessages.at(-1);
-  check("skipped name in a reply: persona default as the last bubble", skip.slots.agentName.value === "Persona" && last?.move?.id === "default-name", said(sk));
+  const last = sk.newMessages.find((m) => m.move?.id === "default-name");
+  check("skipped name in a reply: persona default bubble", skip.slots.agentName.value === "Persona" && last?.move?.id === "default-name", said(sk));
+  check("default-name bubble comes before the reply", sk.newMessages.findIndex((m) => m.move?.id === "default-name") < sk.newMessages.findIndex((m) => m.role === "agent" && m.move?.id !== "default-name") || sk.newMessages.filter((m) => m.role === "agent").length === 1, said(sk));
+  const lolOk = newSession();
+  await handleEvent(lolOk, { type: "open" });
+  await handleUserMessage(lolOk, "text", "sage");
+  const lo = await handleUserMessage(lolOk, "text", "lol ok");
+  check("\"lol ok\" to the call offer rings", lo.actions.some((a) => a.type === "start_call"), said(lo));
   const shortHi = newSession();
   await handleEvent(shortHi, { type: "open" });
   await handleUserMessage(shortHi, "text", "hi");

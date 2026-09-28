@@ -933,7 +933,7 @@ export async function handleUserMessage(
     /\b(call me(?=\s*($|[.!?,]|(now|back|please|pls|plz|asap|right now|real quick|quick|when|whenever|anytime|later|today|tomorrow|so|and|if|then)\b))|(can|could|should|shall) (we|you) (call|hop on a call|do a call)|let'?s (call|hop on a call|do a call)|give me a (call|ring)|ring me|phone me|hop on a (quick )?call)\b/i.test(clean) &&
     !NEGATED_CALL.test(clean);
   // A short yes ("sure", "yeah call me") is a yes; "yes but u aren't listening..." is not (it rang once).
-  const saidYesToOffer = !!prevText && OFFERED_CALL.test(prevText.text) && YES.test(clean) && !/\bbut\b/i.test(clean) && (clean.trim().split(/\s+/).length <= 4 || /\b(call|ring)\b/i.test(clean));
+  const saidYesToOffer = !!prevText && OFFERED_CALL.test(prevText.text) && YES.test(clean.replace(LAUGH_LEAD, "")) && !/\bbut\b/i.test(clean) && (clean.trim().split(/\s+/).length <= 4 || /\b(call|ring)\b/i.test(clean));
   if (channel === "text" && !s.call.active && s.slots.agentName.status !== "missing" && (asksForCall || saidYesToOffer) && !CALL_NO.test(clean)) {
     const ctx: Ctx = { s, channel, actions: [], newMessages: [], move: EVENT_MOVES.callNow };
     const out = await runTool(ctx, "start_call", {});
@@ -1067,9 +1067,15 @@ export async function handleUserMessage(
   if (early) r.newMessages.unshift(...early.msgs);
   r.newMessages.unshift(userMsg);
   if (skippedName && !r.actions.some((a) => a.type === "start_call")) {
+    // Before the reply, so its call offer (unlocked by the name) reads as the next step, not an aside.
     const ctx: Ctx = { s, channel: "text", actions: [], newMessages: [], move: EVENT_MOVES.defaultName };
-    emitAgentText(ctx, SKIPPED_NAME);
-    r.newMessages.push(...ctx.newMessages);
+    emitAgentText(ctx, SKIPPED_NAME_REPLY);
+    const [m] = ctx.newMessages;
+    const at = s.transcript.findIndex((x) => r.newMessages.includes(x) && x.role === "agent");
+    s.transcript.splice(s.transcript.indexOf(m), 1);
+    s.transcript.splice(at >= 0 ? at : s.transcript.length, 0, m);
+    const first = r.newMessages.findIndex((x) => x.role === "agent");
+    r.newMessages.splice(first >= 0 ? first : r.newMessages.length, 0, m);
   }
   if (channel === "voice" && s.call.holding && s.call.active) r.actions.push({ type: "patience", ms: 90000 });
   // Image bytes were for this one reply; storing them would bloat every later read and write.
@@ -1528,6 +1534,7 @@ export function countNudges(msgs: Msg[]) {
   return msgs.filter((m, i) => isNudge(m) && !(isNudge(msgs[i - 1]) && m.ts - msgs[i - 1].ts < 5000)).length;
 }
 const SKIPPED_NAME = "hey, looks like you skipped my name. i'll go by persona for now, you can rename me anytime";
+const SKIPPED_NAME_REPLY = "ha, you skipped my name. i'll go by persona for now, rename me anytime";
 
 // They didn't pick a name: go by "Persona" (a default they can change with one text) instead of stalling on it.
 function defaultAgentName(s: Session) {
@@ -1535,3 +1542,5 @@ function defaultAgentName(s: Session) {
   s.agentNameDefaulted = true;
   if (s.lastAskedSlot === "agentName") s.lastAskedSlot = undefined;
 }
+// "lol ok" / "haha sure": the laugh is a reaction, the rest is the answer.
+const LAUGH_LEAD = new RegExp(`^\\s*${LAUGH_TOKEN}[!., ]+`, "iu");

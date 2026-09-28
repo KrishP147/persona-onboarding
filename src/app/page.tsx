@@ -441,7 +441,7 @@ export default function Home() {
   // Left on read: a friend double texts once (then once more, lightly), never nags.
   const nudge = useCallback(() => void sendEvent({ type: "text_idle" }), [sendEvent]);
   useIdleNudge(messages, typing || revealing || !!draft.trim() || pending.length > 0 || call.status !== "idle" || !!recording || transcribing, nudge);
-  const thread =messages.filter((m) => m.channel !== "voice");
+  const thread = messages.filter((m) => m.channel !== "voice");
   // Texts that arrived while the call screen covered them (a link, a draft): shown as a badge on the call.
   const textsVisible = callHidden || !onCall;
   const unread = textsVisible ? 0 : thread.filter((m) => m.role === "agent" && m.kind !== "event" && m.ts > seenAt).length;
