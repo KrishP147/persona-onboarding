@@ -3,7 +3,7 @@
 // values + sources in docs/design/phone-ui-spec.md A1 and its fidelity pass
 import type { CSSProperties, ReactNode } from "react";
 import type { BubbleProps, CallProps, ComposerProps, HeaderProps, Pos, RichCardProps, Skin, UnknownProps } from "./types";
-import { AGENT_NUMBER, BubbleBody, BubbleIcon, GoogleG, MicIcon, PauseIcon, PersonaLogo, PersonSilhouette, PhoneIcon, RecTimer, callLog, eventKind, isToday, time, useClock, useElapsed } from "./shared";
+import { AGENT_NUMBER, BubbleBody, BubbleIcon, GoogleG, MicIcon, onComposerKeyDown, PauseIcon, PersonaLogo, PersonSilhouette, PhoneIcon, RecTimer, callLog, eventKind, isToday, time, useAutoGrow, useClock, useElapsed } from "./shared";
 
 const BLUE = "var(--ios-blue)";
 const RECV = "var(--ios-recv)";
@@ -177,6 +177,8 @@ function Typing() {
 }
 
 function Composer({ draft, setDraft, onSubmit, onAttach, canSend, recording, transcribing, onMic, hint }: ComposerProps) {
+  const grow = useAutoGrow(draft, 150);
+  const showCount = draft.length > 80 || draft.includes("\n");
   return (
     <form
       className="relative z-10 flex items-end gap-2 px-3 pt-2 pb-[calc(var(--sb-bottom)+8px)]"
@@ -190,20 +192,30 @@ function Composer({ draft, setDraft, onSubmit, onAttach, canSend, recording, tra
           <path d="M8 1.5v13M1.5 8h13" />
         </svg>
       </button>
-      <div className="flex-1 min-w-0 min-h-[38px] rounded-[19px] flex items-center pl-[14px] pr-[5px]" style={{ ...glass, background: "var(--ios-field)", border: ".5px solid var(--ios-field-rim)" }}>
+      <div className="flex-1 min-w-0 min-h-[38px] rounded-[19px] flex items-end pl-[14px] pr-[5px]" style={{ ...glass, background: "var(--ios-field)", border: ".5px solid var(--ios-field-rim)" }}>
         {recording ? (
-          <span className="flex-1 flex items-center gap-2 text-[17px] tracking-[-0.4px]" style={{ color: RED }}>
+          <span className="flex-1 flex items-center gap-2 text-[17px] tracking-[-0.4px] py-[7px]" style={{ color: RED }}>
             <span className="w-2 h-2 rounded-full sk-pulse" style={{ background: RED }} />
             <RecTimer startedAt={recording.startedAt} />
           </span>
         ) : (
-          <input
-            value={draft}
-            onChange={(e) => setDraft(e.target.value)}
-            placeholder={hint ?? "iMessage"}
-            aria-label="Message"
-            className="flex-1 min-w-0 bg-transparent outline-none text-[17px] leading-[22px] tracking-[-0.4px] py-[7px] text-[var(--ios-ink)] placeholder:text-[var(--ios-placeholder)]"
-          />
+          <div className="relative flex-1 min-w-0">
+            <textarea
+              ref={grow}
+              rows={1}
+              value={draft}
+              onChange={(e) => setDraft(e.target.value)}
+              onKeyDown={onComposerKeyDown(onSubmit)}
+              placeholder={hint ?? "iMessage"}
+              aria-label="Message"
+              className="w-full resize-none bg-transparent outline-none text-[17px] leading-[22px] tracking-[-0.4px] py-[7px] pr-6 text-[var(--ios-ink)] placeholder:text-[var(--ios-placeholder)]"
+            />
+            {showCount && (
+              <span className="pointer-events-none absolute right-0 bottom-[9px] text-[10px] tabular-nums" style={{ color: GRAY }}>
+                {draft.length}
+              </span>
+            )}
+          </div>
         )}
         {canSend && !recording ? (
           <button type="submit" aria-label="Send" className="w-[28px] h-[28px] my-[4px] rounded-full flex items-center justify-center text-white" style={{ background: BLUE }}>

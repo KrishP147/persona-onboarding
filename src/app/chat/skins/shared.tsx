@@ -1,6 +1,6 @@
 "use client";
 // pieces every skin uses: icons, the persona avatar, voice notes, clocks, text helpers
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, type KeyboardEvent } from "react";
 import type { Msg } from "@/lib/types";
 
 export const AGENT_NUMBER = "+1 (650) 555-0142";
@@ -193,3 +193,26 @@ export function eventKind(text: string): "hidden" | "call" | "plain" {
   if (/^Call (ended|declined)/.test(text)) return "call";
   return "plain";
 }
+
+// a textarea that grows with its content, like a phone's message field. capped at maxPx (the
+// composer: ~6 lines, then it scrolls internally); left uncapped for the draft card's edit fields.
+export function useAutoGrow(value: string, maxPx?: number) {
+  const ref = useRef<HTMLTextAreaElement | null>(null);
+  useEffect(() => {
+    const el = ref.current;
+    if (!el) return;
+    el.style.height = "0px";
+    const full = el.scrollHeight;
+    el.style.height = `${maxPx ? Math.min(full, maxPx) : full}px`;
+    el.style.overflowY = maxPx && full > maxPx ? "auto" : "hidden";
+  }, [value, maxPx]);
+  return ref;
+}
+
+// enter sends, like a phone; shift+enter makes a new line
+export const onComposerKeyDown = (onSubmit: () => void) => (e: KeyboardEvent<HTMLTextAreaElement>) => {
+  if (e.key === "Enter" && !e.shiftKey) {
+    e.preventDefault();
+    onSubmit();
+  }
+};
