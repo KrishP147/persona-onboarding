@@ -537,7 +537,12 @@ async function main() {
   plain.slots.agentName = { ...plain.slots.agentName, value: "Nova", status: "filled" };
   plain.transcript.push({ id: "u-p", role: "user", channel: "text", text: "mostly school stuff", ts: Date.now() - 61000 }, { id: "a-p", role: "agent", channel: "text", text: "that's a lot to juggle", ts: Date.now() - 60000 });
   const pl = await handleEvent(plain, { type: "text_idle" });
-  check("left-on-read line is code-written", said(pl) === "no rush, i'm around whenever", said(pl));
+  check("no 'no rush' when nothing was asked", pl.newMessages.length === 0, said(pl));
+  const askedQ = newSession();
+  askedQ.slots.agentName = { ...askedQ.slots.agentName, value: "Nova", status: "filled" };
+  askedQ.transcript.push({ id: "u-q", role: "user", channel: "text", text: "mostly school stuff", ts: Date.now() - 61000 }, { id: "a-q", role: "agent", channel: "text", text: "that's a lot. which class is the worst?", ts: Date.now() - 60000 });
+  const aq = await handleEvent(askedQ, { type: "text_idle" });
+  check("left-on-read after a question: one code-written line", said(aq) === "no rush, i'm around whenever", said(aq));
 
   // their name: always in re-engagement lines, otherwise about once every 3 turns and never twice in a row
   const nm = newSession();
