@@ -15,6 +15,8 @@ branch `krish/voice-mic-watchdog` (worktree `C:\Users\User\_worktrees\persona-on
 typecheck, lint, smoke (blank keys), `next build --webpack` (blank keys). fresh worktree needed `npx next typegen` once for `LayoutProps` (generated type, not a code issue).
 headless scripts in scratchpad `voice/` (mic.cjs, swap.cjs, ctx.cjs), dev server with all model/voice keys blanked (confirmed via @next/env loadEnvConfig that blank shell vars win over .env.local). mock mode reached 'active' with no product changes (token 503 -> web speech; tts 502 -> speechSynthesis).
 
+round 2 verify (all pass): typecheck, lint, smoke + `next build --webpack` (blank keys); mic.cjs A/B (iphone 3999ms, pixel 3876ms prompt, call stays up; pngs refreshed), swap.cjs, ctx.cjs. new scratchpad `voice/dg.cjs` (token route stubbed with messy keyterms, fake WebSocket, no network): keyterm params = only valid strings; after mic swap socket 1 closed, socket 2 open with one EBML header; both closed after hangup. dev server needs `next dev --webpack` (turbopack rejects node_modules junction).
+
 ## not done / gaps
 
 - fresh-session swap untested against real deepgram (no spend); brief overlap of two sockets during swap (extra token fetch per swap).
@@ -33,5 +35,5 @@ manual check on a real machine with deepgram key (user approval needed for spend
 ## Board status
 
 - no issue/card number in the brief; no board card touched, nothing moved.
-- task complete per brief; gaps above.
+- task complete per brief (round 1 + round 2 review fixes); gaps above.
 - deviation: none from brief. idea (superseded by round 2 fresh session, kept for reference): route the mic through the existing AudioContext into a MediaStreamDestination and record that stream once, so swaps only reconnect a source node and the container never restarts.
