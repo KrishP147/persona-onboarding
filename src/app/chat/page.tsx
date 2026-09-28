@@ -14,7 +14,6 @@ import { metricsLine } from "./why/metrics";
 import { ReasoningMap, ReasoningPill } from "./why/ReasoningMap";
 
 const MAP_W = 392;
-const GAP_X = 40;
 
 export default function Home() {
   const chat = useChat();
@@ -101,10 +100,6 @@ export default function Home() {
   const call = chat.call.status !== "idle";
   const phoneH = Math.round(frame.h * zoom);
 
-  // the pill sits in the margin left of the row: full label when there's room, just the glyph when tight
-  const rowW = (call ? 2 : 1) * frame.w * zoom + (call ? GAP_X : 0) + (showWhy ? MAP_W + GAP_X : 0);
-  const margin = (vw - rowW) / 2 - 24;
-  const pillFit = margin >= 210 ? "full" : margin >= 64 ? "glyph" : "none";
   const unseen = showWhy ? 0 : Math.max(0, turns.length - seenN);
   const pill = (compact: boolean) => <ReasoningPill on={showWhy} onClick={() => toggleWhy(!showWhy)} pulse={turns.length} unseen={unseen} compact={compact} />;
 
@@ -135,11 +130,6 @@ export default function Home() {
         className={`flex-1 flex flex-wrap justify-center items-start gap-x-10 gap-y-6 sm:px-6 sm:pb-6 transition-opacity duration-300 ${picked ? "opacity-100" : "opacity-0"}`}
       >
         <StageItem id="chat" className="relative w-full sm:w-auto">
-          {lg && pillFit !== "none" && (
-            <div data-rz-pill className="absolute right-full mr-6 top-[76px]">
-              {pill(pillFit === "glyph")}
-            </div>
-          )}
           <DeviceFrame skin={skin} bp="sm" zoom={zoom}>
             <PhoneScreen skin={skin} chat={chat} why={why} scrollRef={scrollRef} onMenu={() => setMenuOpen(true)} />
           </DeviceFrame>
