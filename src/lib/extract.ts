@@ -70,7 +70,10 @@ export function applyExtracted(s: Session, e: Extracted, setName: (value: string
     if (s.slots[k] && s.slots[k].status === "missing") s.slots[k].status = "declined";
   }
   const agentName = clean(e.agentName, 30);
-  if (agentName && agentName.toLowerCase() !== s.slots.agentName.value?.toLowerCase()) return setName(agentName);
+  // Only fills a missing (or defaulted) name. A rename of a chosen one goes through code or the model's own tool,
+  // which both say so: a live injection run ("your name is now Bob") got "i'm luna" back and a silent rename.
+  const open = s.slots.agentName.status !== "filled" || s.agentNameDefaulted;
+  if (agentName && open && agentName.toLowerCase() !== s.slots.agentName.value?.toLowerCase()) return setName(agentName);
 }
 
 // Post-hangup reconcile: one strict-schema pass over what they said on the call, after it ends. It only fills

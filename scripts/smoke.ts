@@ -599,6 +599,16 @@ async function main() {
   runGo.transcript.push(msg("agent", "voice", "want me to text you a link to connect your gmail, so i can help with your inbox?"));
   const runGoR = await handleUserMessage(runGo, "voice", "yeah send it, and hurry cause I gotta run soon");
   check("'yeah send it... gotta run': the link goes out, then the goodbye", runGoR.newMessages.some((m) => m.kind === "gmail_link") && runGoR.actions.some((a) => a.type === "end_call") && /link'?s in your texts/.test(said(runGoR)), said(runGoR));
+  // spanish run: "sí, mándame el link" three times, then "ya está, el link te llegó" with no link
+  const es = newSession();
+  await handleEvent(es, { type: "open" });
+  await handleUserMessage(es, "text", "ana");
+  es.transcript.push(msg("agent", "text", "quieres que te mande el link para conectar tu gmail?"));
+  const esR = await handleUserMessage(es, "text", "Sí, mándame el link porfa");
+  check("'sí, mándame el link' sends the link", esR.newMessages.some((m) => m.kind === "gmail_link"), said(esR));
+  check("'sending it now' / 'el link te llegó' count as link claims", CLAIMS_LINK.test("okay, sending it now.") && CLAIMS_LINK.test("ya está, el link te llegó en los textos"));
+  const trash = cleanModelText("i can trash the promos for you. i can draft replies too.");
+  check("no 'i can trash' (no delete tool)", !/trash/.test(trash) && trash.includes("draft replies"), trash);
   const vendor = cleanModelText("I'm Claude, an AI assistant made by Anthropic. So, what should I call you?");
   check("never names the model or vendor behind it", !/claude|anthropic/i.test(vendor) && vendor.includes("what should I call you"), vendor);
   const pitch = newSession();
