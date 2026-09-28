@@ -371,6 +371,8 @@ export const scopeError = (reason: "expired" | "no_scope" | "failed", what: stri
       ? "error: their gmail connection doesn't allow drafts or sending. ask if they want the link again to allow it (one tap)"
       : `error: gmail didn't ${what}. tell them honestly; never say it worked`;
 
+export const SAME_PERSON = /\b(him|her|them|same (person|guy|address|email)|again|another (one|email))\b/i;
+
 export async function saveDraftTool(ctx: Ctx, input: Record<string, unknown>): Promise<string> {
   const { s } = ctx;
   const d = { to: String(input.to ?? "").trim().slice(0, 200), subject: String(input.subject ?? "").trim().slice(0, 200), body: String(input.body ?? "").trim().slice(0, 5000) };
@@ -379,6 +381,8 @@ export async function saveDraftTool(ctx: Ctx, input: Record<string, unknown>): P
   if (s.slots.userName.value) d.body = d.body.replace(/\[(your|my|sender'?s?) (full )?name\]/gi, s.slots.userName.value);
   // They gave the address in their message but it didn't make it into the draft.
   if (!d.to) d.to = lastUserText(s).match(/[^\s@<>(),;:]+@[^\s@<>(),;:]+\.[a-z]{2,}/i)?.[0] ?? "";
+  // "email him again" / "same person": the one we last sent to.
+  if (!d.to && s.lastSent && SAME_PERSON.test(lastUserText(s))) d.to = s.lastSent.to;
   if (d.to && !EMAIL_RE.test(d.to)) return `error: "${d.to}" isn't an email address. ask them for it, or save with an empty "to"`;
   // Connected or not, the draft always shows as one clean message in the chat.
   const access: GmailAccess = s.slots.gmail.status === "filled" ? await gmailAccess(s) : { error: "" };
@@ -432,6 +436,7 @@ export async function sendEmailTool(ctx: Ctx): Promise<string> {
     if (!r.ok) return scopeError(r.reason, "send it");
   }
   d.sent = true;
+  s.lastSent = { to: d.to, subject: d.subject };
   ctx.sentEmail = true;
   return `sent to ${d.to}. tell them in a few words`;
 }

@@ -80,6 +80,7 @@ export interface Session {
   gmailEmail?: string;
   tz?: string; // their browser's time zone (IANA), for dates and times
   draft?: { id?: string; to: string; subject: string; body: string; shownAt: number; sent?: boolean }; // latest email draft (gmail drafts id when saved there)
+  lastSent?: { to: string; subject: string }; // last email that went out: "email him again" means this person
   gmailUnread?: number; // small value moment at connect time; tokens are never stored
   gmailVerified?: { email: string; unread?: number; demo?: boolean; inbox?: InboxItem[] }; // set by the oauth callback, consumed by the gmail_connected event
   alerts?: Alert[];

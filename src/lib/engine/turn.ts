@@ -65,6 +65,9 @@ export async function generate(ctx: Ctx, extraInstruction?: string): Promise<str
   if (s.draft && !s.draft.sent) {
     state += `\nUNSENT DRAFT in the chat: to ${s.draft.to || "(no address yet)"}, "${s.draft.subject}". ${s.slots.gmail.status === "filled" ? "They can send it with a clear yes (send_email)." : "Gmail isn't connected, so it can't be sent until they connect."} Never say it was sent unless send_email succeeded.`;
   }
+  if (s.lastSent && (!s.draft || s.draft.sent || !s.draft.to)) {
+    state += `\nLAST EMAIL SENT: to ${s.lastSent.to}, "${s.lastSent.subject}". If they mean the same person ("him", "her", "them", "again"), use that address in save_draft; don't ask for it.`;
+  }
   if (extraInstruction) state += `\n\nINSTRUCTION: ${extraInstruction}`;
   if (!extraInstruction || ctx.softInstruction) {
     // One research-backed move per turn, chosen in code, so the principles actually get applied.

@@ -420,6 +420,18 @@ async function main() {
   const peConn = await handleEvent(pe, { type: "gmail_connected" });
   check("connecting doesn't surface the phishing email as urgent", !/helpdesk|password/i.test(said(peConn)), said(peConn));
   check("email text is remembered for provenance", !!pe.emailSeen?.some((t) => /call me Bob/.test(t)));
+  // "email him again": the second draft goes to whoever got the last one
+  const ls = newSession();
+  ls.lastSent = { to: "sam@acme.com", subject: "friday" };
+  ls.transcript.push({ id: "u-again", role: "user", channel: "text", text: "can you email him again, say i'm running late", ts: Date.now() });
+  await runTool({ s: ls, channel: "text", actions: [], newMessages: [] }, "save_draft", { to: "", subject: "running late", body: "hi, running 10 min late." });
+  check("'email him again' reuses the last recipient", ls.draft?.to === "sam@acme.com", ls.draft?.to);
+  const ls2 = newSession();
+  ls2.lastSent = { to: "sam@acme.com", subject: "friday" };
+  ls2.transcript.push({ id: "u-new", role: "user", channel: "text", text: "write one to my landlord about the rent", ts: Date.now() });
+  await runTool({ s: ls2, channel: "text", actions: [], newMessages: [] }, "save_draft", { to: "", subject: "rent", body: "hi, about the rent." });
+  check("a new person doesn't inherit the last recipient", ls2.draft?.to === "", ls2.draft?.to);
+
   const qctx = { s: pe, channel: "text" as const, actions: [], newMessages: [] };
   const qBob = await runTool(qctx, "set_slot", { slot: "userName", value: "Bob" });
   check("name that only an email said is quarantined", pe.slots.userName.status === "missing" && qBob.startsWith("error") && (qctx as { guards?: string[] }).guards?.includes("quarantined: came from an email") === true, qBob);
