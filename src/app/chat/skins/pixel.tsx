@@ -1,7 +1,7 @@
 "use client";
 // google messages on android 16, material 3 expressive, dark. values from docs/design/phone-ui-spec.md A2
 import type { CSSProperties, ReactNode } from "react";
-import type { BubbleProps, CallProps, ComposerProps, HeaderProps, Pos, Skin } from "./types";
+import type { BubbleProps, CallProps, ComposerProps, HeaderProps, Pos, RichCardProps, Skin } from "./types";
 import { AGENT_NUMBER, BubbleBody, BubbleIcon, GoogleG, MicIcon, PersonaLogo, PersonSilhouette, PhoneIcon, RecTimer, callLog, eventKind, isToday, time, useClock, useElapsed } from "./shared";
 
 const C = {
@@ -336,6 +336,20 @@ function ContactCard({ name, saved, onSave, pos }: { name: string; saved: boolea
   );
 }
 
+// rich card: an m3 received bubble with a title row
+function RichCard({ title, children, pos = "single" }: RichCardProps) {
+  return (
+    <div data-role="agent" className={`${gapOf(pos)} flex justify-start`}>
+      <section aria-label={title} className="w-[86%] overflow-hidden" style={{ ...corners(false, pos), background: C.recv, color: C.recvInk }}>
+        <div className="px-4 pt-3 pb-1 text-[12px] leading-4 font-medium tracking-[0.1px]" style={{ color: C.mute }}>
+          {title}
+        </div>
+        {children}
+      </section>
+    </div>
+  );
+}
+
 function Media({ src }: { src: string }) {
   return (
     <div data-role="agent" className="pt-3 flex justify-start">
@@ -475,4 +489,6 @@ export const pixel: Skin = {
   UnknownAvatar,
   Banner,
   CallScreen,
+  RichCard,
+  rich: { ink: C.recvInk, mute: C.mute, accent: C.primary, onAccent: C.onPrimary, line: "rgba(255,255,255,.1)", danger: C.error, track: "rgba(255,255,255,.14)" },
 };

@@ -55,11 +55,14 @@ export interface Turn {
   move: Move;
   fw: Framework;
   n: number; // 1-based among explained turns
+  guards: string[]; // checks code ran on this reply, when the server sends them (deduped)
 }
 
 // every agent message that carries a move, in order (texts and call lines)
 export function turnsOf(messages: Msg[]): Turn[] {
-  return messages.filter((m) => m.role === "agent" && m.move).map((m, i) => ({ m, move: m.move!, fw: frameworkOf(m.move!), n: i + 1 }));
+  return messages
+    .filter((m) => m.role === "agent" && m.move)
+    .map((m, i) => ({ m, move: m.move!, fw: frameworkOf(m.move!), n: i + 1, guards: [...new Set(m.guards ?? [])] }));
 }
 
 export const PIPELINE: [string, string][] = [

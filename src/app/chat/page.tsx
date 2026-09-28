@@ -2,12 +2,15 @@
 // the web sim: persona page chrome around a phone (iphone, pixel or galaxy), plus "why it said that"
 import { useCallback, useMemo, useRef, useState } from "react";
 import { MenuSheet, TopBar } from "./chrome";
+import { Intro } from "./Intro";
 import { CallPhone, DeviceFrame, FRAMES, PhoneScreen, useFrameZoom } from "./Phone";
 import { SKINS, useSkin } from "./skins";
 import type { WhyHooks } from "./Thread";
 import { useChat } from "./useChat";
+import { usePref } from "./usePref";
 import { turnsOf } from "./why/frameworks";
 import { WhySheet } from "./why/WhySheet";
+import { metricsLine } from "./why/metrics";
 import { WhySidebar } from "./why/WhySidebar";
 
 const wide = () => typeof window !== "undefined" && window.matchMedia("(min-width: 1024px)").matches;
@@ -17,7 +20,8 @@ export default function Home() {
   const [picked, setSkin] = useSkin();
   const skin = picked ?? SKINS.pixel;
   const zoom = useFrameZoom(skin.id);
-  const [showWhy, setShowWhy] = useState(true);
+  // desktop reasoning lane: collapsed until asked for, remembered
+  const [showWhy, setShowWhy] = usePref("persona-show-reasoning", false);
   const [menuOpen, setMenuOpen] = useState(false); // phone: picker, annotate, how it works, restart
   const [annotate, setAnnotate] = useState(false);
   const [hoverId, setHover] = useState<string | null>(null);
@@ -73,12 +77,13 @@ export default function Home() {
     },
   };
 
+  const metrics = metricsLine(chat.session);
   const restart = chat.restart;
   const frame = FRAMES[skin.id];
 
   return (
     <main className="min-h-dvh bg-canvas text-ink flex flex-col overflow-x-clip">
-      <TopBar skin={picked?.id ?? null} setSkin={setSkin} showWhy={showWhy} toggleWhy={() => setShowWhy((v) => !v)} onRestart={restart} mock={chat.mock} />
+      <TopBar skin={picked?.id ?? null} setSkin={setSkin} showWhy={showWhy} toggleWhy={() => setShowWhy(!showWhy)} onRestart={restart} mock={chat.mock} />
       <div className={`flex-1 flex flex-wrap justify-center items-start gap-x-10 gap-y-6 sm:px-6 sm:pb-6 transition-opacity duration-300 ${picked ? "opacity-100" : "opacity-0"}`}>
         <DeviceFrame skin={skin} bp="sm" zoom={zoom}>
           <PhoneScreen
@@ -87,7 +92,7 @@ export default function Home() {
             why={why}
             scrollRef={scrollRef}
             onMenu={() => setMenuOpen(true)}
-            overlay={sheetId && <WhySheet key={skin.id} skin={skin} turns={turns} id={sheetId} onNav={openSheet} onClose={closeSheet} />}
+            overlay={sheetId && <WhySheet key={skin.id} skin={skin} turns={turns} id={sheetId} onNav={openSheet} onClose={closeSheet} metrics={metrics} />}
           />
         </DeviceFrame>
         {chat.call.status !== "idle" && <CallPhone skin={skin} chat={chat} zoom={zoom} />}
@@ -103,6 +108,7 @@ export default function Home() {
               expanded={expanded}
               setExpanded={setExpanded}
               height={Math.round(frame.h * zoom)}
+              metrics={metrics}
             />
           </div>
         )}
@@ -120,6 +126,7 @@ export default function Home() {
           }}
         />
       )}
+      <Intro />
     </main>
   );
 }

@@ -429,6 +429,14 @@ export function useChat() {
     void sendEvent({ type: "contact_saved" });
   };
 
+  // "forget" on the what-i-know card: gone here at once, the server wipes it for real
+  const forgetSlot = (slot: "userName" | "helpNeed" | "gmail") => {
+    if (!session) return;
+    const was = session.slots[slot];
+    setSession({ ...session, slots: { ...session.slots, [slot]: { ...was, value: null, status: "declined" } }, ...(slot === "gmail" ? { gmailEmail: undefined, alerts: undefined } : {}) });
+    void sendEvent({ type: "forget_slot", slot });
+  };
+
   // start over with a fresh session (keeps the old one server side, just forgets it here).
   const restart = () => {
     if (call.status === "active" || call.status === "connecting") call.hangUp("user_hangup");
@@ -493,6 +501,7 @@ export function useChat() {
     declineCall,
     connectGmail,
     saveContact,
+    forgetSlot,
     restart,
     attachFiles,
   };

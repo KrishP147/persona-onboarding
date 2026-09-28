@@ -1,6 +1,7 @@
 "use client";
 // desktop: one card per agent turn, anchored beside its bubble like a docs comment
 import { useCallback, useEffect, useLayoutEffect, useRef, useState, type RefObject } from "react";
+import { Guards } from "./Guards";
 import { PIPELINE, type Turn } from "./frameworks";
 
 const GAP = 8;
@@ -15,8 +16,10 @@ export function WhySidebar({
   expanded,
   setExpanded,
   height,
+  metrics,
 }: {
   turns: Turn[];
+  metrics?: string | null; // "this session: n turns · $x · p50 yms", when the server sends it
   scrollRef: RefObject<HTMLDivElement | null>;
   activeId: string | null;
   hoverId: string | null;
@@ -31,17 +34,12 @@ export function WhySidebar({
   const laneRef = useRef<HTMLOListElement>(null);
   const cardRefs = useRef(new Map<string, HTMLLIElement>());
   const ys = useRef(new Map<string, { y: number; h: number }>());
-  const quietUntil = useRef(0); // lane scrolls we made ourselves don't drive the thread
   const seen = useRef("");
-  const lastSc = useRef(0);
 
-  // thread px -> lane px (the framed phone is css-zoomed, the lane isn't)
-  const ratio = (sc: HTMLElement) => sc.getBoundingClientRect().height / (sc.offsetHeight || 1) || 1;
 
   const scrollLane = useCallback((top: number, smooth = false) => {
     const box = boxRef.current;
     if (!box || Math.abs(box.scrollTop - top) < 1) return;
-    quietUntil.current = performance.now() + (smooth ? 700 : 120);
     const reduced = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
     box.scrollTo({ top, behavior: smooth && !reduced ? "smooth" : "auto" });
   }, []);
@@ -60,58 +58,31 @@ export function WhySidebar({
     [scrollLane],
   );
 
-  // the lane scrolls with the thread; past the thread's end it keeps going on its own
-  const follow = useCallback(() => {
-    const sc = scrollRef.current;
-    const box = boxRef.current;
-    if (!sc || !box) return;
-    const target = Math.round(sc.scrollTop * ratio(sc));
-    const down = sc.scrollTop >= lastSc.current;
-    lastSc.current = sc.scrollTop;
-    // the lane may run ahead (a newer card below the thread's end): only the thread going up pulls it back
-    if (down && box.scrollTop > target) return;
-    scrollLane(target);
-  }, [scrollRef, scrollLane]);
-
-  // place each card level with its bubble (in thread content coords, so scrolling moves both together);
-  // push apart on collision, the active one wins its spot. turns without a bubble (the call) follow in order.
+  // stack the cards from the top, right under the header, in turn order. hover and click still link
+  // each card to its bubble; selecting one scrolls both into view.
   const layout = useCallback(() => {
     const lane = laneRef.current;
-    const box = boxRef.current;
-    const sc = scrollRef.current;
-    if (!lane || !box || !sc) return;
-    const k = ratio(sc);
-    // offsetTop, not rects: bubbles animate in with transforms, and offsets don't move with scroll
-    const shift = sc.getBoundingClientRect().top - box.getBoundingClientRect().top;
+    if (!lane) return;
+    let prev = 0;
     const items = turns.map((t) => {
       const el = cardRefs.current.get(t.m.id);
-      const bubble = sc.querySelector<HTMLElement>(`[data-msg-id="${t.m.id}"]`);
-      return { id: t.m.id, el, h: el?.offsetHeight ?? 0, want: bubble ? bubble.offsetTop * k + shift : null, y: 0 };
+      const it = { id: t.m.id, el, h: el?.offsetHeight ?? 0, y: prev };
+      prev += it.h + GAP;
+      return it;
     });
-    let prev = 0;
-    items.forEach((it) => {
-      it.y = Math.max(it.want ?? prev, prev);
-      prev = it.y + it.h + GAP;
-    });
-    const a = items.findIndex((it) => it.id === activeId);
-    if (a >= 0 && items[a].want !== null) {
-      items[a].y = Math.max(0, items[a].want!);
-      for (let i = a + 1; i < items.length; i++) items[i].y = Math.max(items[i].y, items[i - 1].y + items[i - 1].h + GAP);
-      for (let i = a - 1; i >= 0; i--) items[i].y = Math.min(items[i].y, items[i + 1].y - items[i].h - GAP);
-      // nothing above the lane's top: if the chain ran out of room, slide it all down
-      const over = -Math.min(0, items[0]?.y ?? 0);
-      if (over) for (const it of items) it.y += over;
-    }
     ys.current = new Map(items.map((it) => [it.id, { y: it.y, h: it.h }]));
     for (const it of items) if (it.el) it.el.style.transform = `translateY(${Math.round(it.y)}px)`;
-    // tall enough to follow the thread all the way down, and to reach the last card
-    const scMax = Math.max(0, sc.scrollHeight - sc.clientHeight) * k;
-    lane.style.height = `${Math.ceil(Math.max(prev + 40, scMax + box.clientHeight))}px`;
-  }, [turns, activeId, scrollRef]);
+    lane.style.height = `${Math.ceil(prev + 40)}px`;
+  }, [turns]);
 
   useLayoutEffect(() => {
     layout();
   });
+
+  // hovering a bubble brings its card into view (a hovered card is already visible, so no jump)
+  useEffect(() => {
+    if (hoverId) showCard(hoverId);
+  }, [hoverId, showCard]);
 
   // the newest card moved or grew (a new turn, its bubble revealed): keep it in view while the thread sits at its end
   useLayoutEffect(() => {
@@ -129,10 +100,7 @@ export function WhySidebar({
   useEffect(() => {
     const sc = scrollRef.current;
     const box = boxRef.current;
-    const ro = new ResizeObserver(() => {
-      layout();
-      follow();
-    });
+    const ro = new ResizeObserver(() => layout());
     cardRefs.current.forEach((el) => ro.observe(el));
     if (box) ro.observe(box);
     if (sc) {
@@ -141,22 +109,12 @@ export function WhySidebar({
       sc.querySelectorAll("[data-msg-id]").forEach((el) => ro.observe(el));
     }
     void document.fonts?.ready.then(layout);
-    // wheel over the lane scrolls the thread too
-    const onLane = () => {
-      if (!sc || !box || performance.now() < quietUntil.current) return;
-      sc.scrollTop = box.scrollTop / ratio(sc);
-    };
-    sc?.addEventListener("scroll", follow, { passive: true });
-    box?.addEventListener("scroll", onLane, { passive: true });
     window.addEventListener("resize", layout);
-    follow();
     return () => {
       ro.disconnect();
-      sc?.removeEventListener("scroll", follow);
-      box?.removeEventListener("scroll", onLane);
       window.removeEventListener("resize", layout);
     };
-  }, [layout, follow, scrollRef, turns.length]);
+  }, [layout, scrollRef, turns.length]);
 
   // select a turn: open its card, bring its bubble to the middle of the phone, and the card into view
   const select = useCallback(
@@ -225,6 +183,7 @@ export function WhySidebar({
                 </div>
               </li>
             ))}
+            {metrics && <li className="pt-0.5 text-[12.5px] leading-[18px] text-ink-faint">{metrics}</li>}
           </ol>
         )}
       </div>
@@ -280,6 +239,7 @@ export function WhySidebar({
                     <div className="mt-1.5 text-[15px] leading-5 font-medium text-ink tracking-[-0.1px]">{t.move.label}</div>
                     <div className={`mt-1 text-[13px] leading-[18px] text-ink-mute ${open ? "" : "line-clamp-2"}`}>&ldquo;{t.m.text}&rdquo;</div>
                     <div className={`mt-1.5 text-[12px] leading-4 text-ink-faint italic ${open ? "" : "line-clamp-1"}`}>{t.move.source}</div>
+                    <Guards guards={t.guards} ink="var(--p-ink-mute)" mute="var(--p-ink-faint)" line="var(--p-step-200)" />
                   </button>
                   {open && (
                     <div id={`why-more-${t.m.id}`} className="pl-4 pr-3.5 pb-3.5 -mt-0.5 text-[13px] leading-[19px] text-ink-mute space-y-2">

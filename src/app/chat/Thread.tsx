@@ -1,10 +1,13 @@
 "use client";
 // the message list, drawn by the current skin. same order, grouping and receipts on every phone.
-import { useEffect, useRef, type ReactNode, type RefObject } from "react";
+import { Fragment, useEffect, useRef, type ReactNode, type RefObject } from "react";
 import type { Msg } from "@/lib/types";
+import { DraftCard, draftMsgId } from "./cards/DraftCard";
+import { KnowCard, useGradSlot } from "./cards/KnowCard";
 import type { Pos, Skin } from "./skins/types";
 import type { Chat } from "./useChat";
 import type { Turn } from "./why/frameworks";
+import { Guards } from "./why/Guards";
 
 export interface WhyHooks {
   byId: Map<string, Turn>;
@@ -37,6 +40,18 @@ export function Thread({ skin, chat, why, scrollRef }: { skin: Skin; chat: Chat;
   const lastUserIdx = thread.findIndex((x) => x.id === lastUserId);
   const readAt = thread.slice(lastUserIdx + 1).find((x) => x.role === "agent")?.ts;
   const S = skin;
+  const grad = useGradSlot(chat, thread);
+  const gradAt = grad.at;
+  const draftId = draftMsgId(session);
+  const draftIdx = draftId ? thread.findIndex((m) => m.id === draftId) : -1;
+  // a draft from before setup ended moves under the what-i-know card (shown once, not twice); later drafts stay in place
+  const draftUnder = gradAt !== null && draftIdx >= 0 && (gradAt === -1 || draftIdx <= gradAt);
+  const know = gradAt !== null && (
+    <>
+      <KnowCard skin={skin} chat={chat} setupMs={grad.setupMs} pos={draftUnder ? "first" : "single"} />
+      {draftUnder && <DraftCard skin={skin} chat={chat} pos="last" />}
+    </>
+  );
 
   return (
     <div ref={scrollRef} className={`relative flex-1 overflow-y-auto overscroll-contain ${skin.threadClass}`} role="log" aria-live="polite" aria-label="Messages">
@@ -50,10 +65,13 @@ export function Thread({ skin, chat, why, scrollRef }: { skin: Skin; chat: Chat;
         const turn = why.byId.get(m.id);
         const lit = turn && (why.hoverId === m.id || why.activeId === m.id) ? turn.fw.color : null;
         let body: ReactNode;
-        if (m.kind === "event") body = <S.EventRow text={m.text} />;
+        const moved = draftUnder && m.id === draftId;
+        if (moved) body = null;
+        else if (m.kind === "event") body = <S.EventRow text={m.text} />;
         else if (m.kind === "gmail_link") body = <S.GmailCard pos={pos} connected={session?.slots.gmail.status === "filled"} onConnect={chat.connectGmail} />;
         else if (m.kind === "gif") body = <S.Media src={m.text} />;
         else if (m.kind === "link_preview") body = <S.LinkPreview url={m.text} pos={pos} />;
+        else if (m.id === draftId && !draftUnder) body = <DraftCard skin={skin} chat={chat} />;
         else if (m.kind === "contact_card") body = <S.ContactCard name={m.text} pos={pos} saved={!!session?.contactSaved} onSave={chat.saveContact} />;
         else
           body = (
@@ -69,19 +87,22 @@ export function Thread({ skin, chat, why, scrollRef }: { skin: Skin; chat: Chat;
             />
           );
         return (
-          <div
-            key={m.id}
-            data-msg-id={m.id}
-            onMouseEnter={turn ? () => why.setHover(m.id) : undefined}
-            onMouseLeave={turn ? () => why.setHover(null) : undefined}
-            onClick={turn ? () => why.select(m.id) : undefined}
-          >
-            {showTime && <S.DateStamp ts={m.ts} first={i === 0} />}
-            {body}
-            {turn && why.inline !== "never" && <WhyBadge turn={turn} skin={skin} why={why} />}
-          </div>
+          <Fragment key={m.id}>
+            <div
+              data-msg-id={m.id}
+              onMouseEnter={turn ? () => why.setHover(m.id) : undefined}
+              onMouseLeave={turn ? () => why.setHover(null) : undefined}
+              onClick={turn ? () => why.select(m.id) : undefined}
+            >
+              {showTime && <S.DateStamp ts={m.ts} first={i === 0} />}
+              {body}
+              {turn && !moved && why.inline !== "never" && <WhyBadge turn={turn} skin={skin} why={why} />}
+            </div>
+            {gradAt === i && know}
+          </Fragment>
         );
       })}
+      {gradAt === -1 && know}
       {(typing || revealing) && <S.Typing />}
       {!chat.saved && S.UnknownNotice && thread.length > 0 && <S.UnknownNotice />}
       <div ref={bottomRef} className="h-1" />
@@ -110,8 +131,11 @@ function WhyBadge({ turn, skin, why }: { turn: Turn; skin: Skin; why: WhyHooks }
         >
           <span className="flex items-start gap-2 rounded-xl px-2.5 py-1.5 text-[12px] leading-4 border" style={{ background: skin.why.surface, borderColor: skin.why.line, color: skin.why.ink }}>
             <span className="mt-[3px] w-1.5 h-1.5 rounded-full shrink-0" style={{ background: turn.fw.color }} aria-hidden />
-            <span className="line-clamp-2">
-              <span className="font-semibold">{turn.fw.label}</span> · {turn.move.label}
+            <span>
+              <span className="line-clamp-2">
+                <span className="font-semibold">{turn.fw.label}</span> · {turn.move.label}
+              </span>
+              <Guards guards={turn.guards} ink={skin.why.ink} mute={skin.why.mute} line={skin.why.line} compact />
             </span>
           </span>
         </button>

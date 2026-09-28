@@ -1,7 +1,7 @@
 "use client";
 // samsung messages on one ui 8, light. values from docs/design/phone-ui-spec.md A3
 import type { CSSProperties, ReactNode } from "react";
-import type { BubbleProps, CallProps, ComposerProps, HeaderProps, Pos, Skin } from "./types";
+import type { BubbleProps, CallProps, ComposerProps, HeaderProps, Pos, RichCardProps, Skin } from "./types";
 import { AGENT_NUMBER, BubbleBody, BubbleIcon, GoogleG, MicIcon, PersonaLogo, PersonSilhouette, PhoneIcon, RecTimer, callLog, eventKind, time, useClock, useElapsed } from "./shared";
 
 const C = {
@@ -320,6 +320,20 @@ function ContactCard({ name, saved, onSave, pos }: { name: string; saved: boolea
   );
 }
 
+// rich card: one ui white card with a title row
+function RichCard({ title, children, pos = "single" }: RichCardProps) {
+  return (
+    <div data-role="agent" className={`${gapOf(pos)} flex justify-start`}>
+      <section aria-label={title} className="w-[84%] bg-white rounded-[18px] overflow-hidden" style={{ color: C.ink }}>
+        <div className="px-4 pt-3 pb-1 text-[12px] leading-4 font-semibold" style={{ color: C.mute }}>
+          {title}
+        </div>
+        {children}
+      </section>
+    </div>
+  );
+}
+
 function Media({ src }: { src: string }) {
   return (
     <div data-role="agent" className="pt-[14px] flex justify-start">
@@ -440,4 +454,6 @@ export const galaxy: Skin = {
   UnknownAvatar,
   Banner,
   CallScreen,
+  RichCard,
+  rich: { ink: C.ink, mute: C.mute, accent: C.accent, onAccent: "#fff", line: "#EDEDF0", danger: C.red, track: "#EDEDF0" },
 };
