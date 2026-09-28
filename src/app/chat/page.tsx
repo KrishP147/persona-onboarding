@@ -2,6 +2,7 @@
 // the web sim: persona page chrome around a phone (iphone, pixel or galaxy), plus "why it said that"
 import { useCallback, useMemo, useRef, useState } from "react";
 import { MenuSheet, TopBar } from "./chrome";
+import { Intro } from "./Intro";
 import { CallPhone, DeviceFrame, FRAMES, PhoneScreen, useFrameZoom } from "./Phone";
 import { SKINS, useSkin } from "./skins";
 import type { WhyHooks } from "./Thread";
@@ -120,6 +121,7 @@ export default function Home() {
           }}
         />
       )}
+      <Intro />
     </main>
   );
 }
