@@ -7,7 +7,6 @@ import { KnowCard, useGradSlot } from "./cards/KnowCard";
 import type { Pos, Skin } from "./skins/types";
 import type { Chat } from "./useChat";
 import type { Turn } from "./why/frameworks";
-import { Guards } from "./why/Guards";
 
 export interface WhyHooks {
   byId: Map<string, Turn>;
@@ -15,8 +14,6 @@ export interface WhyHooks {
   activeId: string | null;
   setHover: (id: string | null) => void;
   open: (id: string, trigger: HTMLElement) => void; // phone: the why sheet
-  inline: "always" | "below-lg" | "never"; // where the per-bubble "why" shows
-  annotate: boolean; // inline chips instead of the small badge
   select: (id: string) => void; // desktop: clicking a bubble opens its card
   sheetOpen: boolean; // room at the bottom so the last bubble can sit above the sheet
 }
@@ -96,7 +93,6 @@ export function Thread({ skin, chat, why, scrollRef }: { skin: Skin; chat: Chat;
             >
               {showTime && <S.DateStamp ts={m.ts} first={i === 0} />}
               {body}
-              {turn && !moved && why.inline !== "never" && <WhyBadge turn={turn} skin={skin} why={why} />}
             </div>
             {gradAt === i && know}
           </Fragment>
@@ -113,47 +109,6 @@ export function Thread({ skin, chat, why, scrollRef }: { skin: Skin; chat: Chat;
           {chat.error && <S.Banner tone="error">{chat.error}</S.Banner>}
         </div>
       )}
-    </div>
-  );
-}
-
-// small "why" under an agent bubble (44px hit area), or an inline chip in annotate mode
-function WhyBadge({ turn, skin, why }: { turn: Turn; skin: Skin; why: WhyHooks }) {
-  const vis = why.inline === "below-lg" ? "lg:hidden" : "";
-  const label = `Why this reply, turn ${turn.n}`;
-  if (why.annotate)
-    return (
-      <div className={`${vis} flex justify-start pt-1`}>
-        <button
-          onClick={(e) => why.open(turn.m.id, e.currentTarget)}
-          aria-label={label}
-          className="max-w-[78%] min-h-11 -my-1.5 flex items-center text-left"
-        >
-          <span className="flex items-start gap-2 rounded-xl px-2.5 py-1.5 text-[12px] leading-4 border" style={{ background: skin.why.surface, borderColor: skin.why.line, color: skin.why.ink }}>
-            <span className="mt-[3px] w-1.5 h-1.5 rounded-full shrink-0" style={{ background: turn.fw.color }} aria-hidden />
-            <span>
-              <span className="line-clamp-2">
-                <span className="font-semibold">{turn.fw.label}</span> · {turn.move.label}
-              </span>
-              <Guards guards={turn.guards} ink={skin.why.ink} mute={skin.why.mute} line={skin.why.line} compact />
-            </span>
-          </span>
-        </button>
-      </div>
-    );
-  return (
-    <div className={`${vis} flex justify-start`}>
-      <button
-        onClick={(e) => why.open(turn.m.id, e.currentTarget)}
-        aria-label={label}
-        className="group h-11 -my-2.5 pl-1 pr-3 flex items-center gap-1 opacity-70 hover:opacity-100 focus-visible:opacity-100"
-        style={{ color: skin.why.mute }}
-      >
-        <span className="w-[18px] h-[18px] rounded-full flex items-center justify-center text-[11px] font-semibold" style={{ boxShadow: `inset 0 0 0 1.5px ${turn.fw.color}`, color: turn.fw.color }} aria-hidden>
-          i
-        </span>
-        <span className="text-[11px] font-medium">why</span>
-      </button>
     </div>
   );
 }
