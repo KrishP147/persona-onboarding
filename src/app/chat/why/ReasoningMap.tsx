@@ -299,7 +299,7 @@ export function ReasoningMap({
             s.kind === "wp" ? (
               <div key={s.id} className="absolute flex items-center gap-1.5 text-[11.5px] text-ink-mute" style={{ top: s.y, left: s.lane * LANE + PIN - 5, height: WP_H }} role="listitem">
                 <span className="w-[10px] h-[10px] rotate-45 rounded-[2px] border-[1.5px] border-ink-faint bg-alt shrink-0" aria-hidden />
-                <span className="truncate" style={{ maxWidth: nodeW }}>
+                <span className="truncate" style={{ maxWidth: nodeW }} title={s.text}>
                   {s.text}
                 </span>
               </div>
@@ -384,7 +384,7 @@ function TurnNode({
             {t.fw.label}
           </span>
         </span>
-        <span className="mt-1 block text-[13px] leading-[17px] font-medium text-ink truncate">
+        <span className="mt-1 block text-[13px] leading-[17px] font-medium text-ink truncate" title={t.move.label}>
           {t.move.label}
         </span>
       </button>

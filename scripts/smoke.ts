@@ -3,6 +3,7 @@ import { getSecret, loadSession, newSession, saveSession, setSecret, withSession
 import { CLAIMS_LINK, GUARD_PIPELINE, dropAskedQuestions, fixCallTypos, makeGuardEnv, INTENTS, cleanModelText, cutRepeatQuestions, fence, fromEmailOnly, runTool, handleEvent, normQuestion, saysBye, softenGmailDemand, handleUserMessage, nowLine, parseTypedEmail, MAX_BUBBLES, emitAgentText } from "../src/lib/engine";
 import { computeDirective } from "../src/lib/policy";
 import { dropSelfAck } from "../src/lib/engine/text";
+import { msg } from "../src/lib/engine/context";
 import { KNOW_ASK, fixTypoInNeed, mergeGrowingUtterance, toTurns } from "../src/lib/engine/turn";
 import { chooseMove, crc32, pick } from "../src/lib/moves";
 import { readMood } from "../src/lib/mood";
@@ -590,6 +591,21 @@ async function main() {
   check("...the text after says when, not 'got cut off'", /call you back in/.test(said(hbEnd)) && !/cut off/.test(said(hbEnd)), said(hbEnd));
   const hbBack = await handleEvent(hb, { type: "call_started" });
   check("...and the callback opens with 'calling you back like i said'", /calling you back like i said/.test(said(hbBack)), said(hbBack));
+  // harness run: "yeah send it, and hurry cause i gotta run" hung up without the link they'd just said yes to
+  const runGo = newSession();
+  await handleEvent(runGo, { type: "open" });
+  await handleUserMessage(runGo, "text", "julia");
+  await handleEvent(runGo, { type: "call_started" });
+  runGo.transcript.push(msg("agent", "voice", "want me to text you a link to connect your gmail, so i can help with your inbox?"));
+  const runGoR = await handleUserMessage(runGo, "voice", "yeah send it, and hurry cause I gotta run soon");
+  check("'yeah send it... gotta run': the link goes out, then the goodbye", runGoR.newMessages.some((m) => m.kind === "gmail_link") && runGoR.actions.some((a) => a.type === "end_call") && /link'?s in your texts/.test(said(runGoR)), said(runGoR));
+  const vendor = cleanModelText("I'm Claude, an AI assistant made by Anthropic. So, what should I call you?");
+  check("never names the model or vendor behind it", !/claude|anthropic/i.test(vendor) && vendor.includes("what should I call you"), vendor);
+  const pitch = newSession();
+  await handleEvent(pitch, { type: "open" });
+  pitch.transcript.push(msg("agent", "text", "i can pull up any recipes you've saved, so i can suggest things that fit what you like."));
+  pitch.transcript.push(msg("user", "text", "yeah go for it"));
+  check("a yes to 'i can pull up your saved recipes' is the gmail turn", chooseMove(pitch, "text", { callFirst: false, mayAsk: false }).id === "ask-gmail");
   const bz = newSession();
   await handleEvent(bz, { type: "open" });
   await handleUserMessage(bz, "text", "julia");
@@ -1018,7 +1034,7 @@ async function main() {
     return { f, r, lines, rang: r.actions.some((a) => a.type === "start_call") };
   };
   const fm = await first("julia. my name is krish. clal me");
-  const ackAt = fm.lines.findIndex((x) => /julia it is\. nice to meet you, krish/i.test(x));
+  const ackAt = fm.lines.findIndex((x) => /^julia\b.*nice to meet you, krish/i.test(x));
   const ringAt = fm.lines.findIndex((x) => /calling you now/.test(x));
   check("'julia. my name is krish. clal me': both names in one beat, card, then it rings (no offer)", fm.f.slots.agentName.value === "Julia" && fm.f.slots.userName.value === "Krish" && ackAt >= 0 && fm.lines.includes("[card:Julia]") && ringAt > fm.lines.indexOf("[card:Julia]") && fm.rang && !fm.lines.some((x) => /want me to give you a (quick )?call/.test(x)), fm.lines.join(" | "));
   for (const t of ["julia. i'm krish. cal me", "julia. my name is krish. caal me", "julia. my name is krish. call me pls", "julia. my name is krish. u can call me now"]) {

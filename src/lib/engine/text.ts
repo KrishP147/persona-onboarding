@@ -47,7 +47,7 @@ export const EMPTY_PROMISE = /\b(give me (just )?(a|one) (sec|second|moment|minu
 // The model talking about its own setup instead of to the person ("the system is being strict about
 // the most recent message context..."). Only user-facing words ever go out; any sentence like this is dropped.
 export const LEAK =
-  /\b(the system|system (prompt|message|note|instruction)s?|my (instructions|prompt|guidelines)|(the|my) instructions (say|tell|are)|instructed to|message context|most recent message|(is|was|has been|have been) already sent|already been sent|tool (call|result|output)s?|function call|the (assistant|model)\b|language model|conversation (history|log)|the transcript|recap instruction|(i'?m|i am) (not )?(allowed|supposed|permitted) to|as per (my|the) (rules|instructions)|onboarding (step|flow|item)s?)\b/i;
+  /\b(the system|system (prompt|message|note|instruction)s?|my (instructions|prompt|guidelines)|(the|my) instructions (say|tell|are)|instructed to|message context|most recent message|(is|was|has been|have been) already sent|already been sent|tool (call|result|output)s?|function call|the (assistant|model)\b|language model|conversation (history|log)|the transcript|recap instruction|(i'?m|i am) (not )?(allowed|supposed|permitted) to|as per (my|the) (rules|instructions)|onboarding (step|flow|item)s?)\b|\b(i'?m|i am|running (as|on)|built on|made by|powered by|based on)\b[^.!?\n]{0,40}\b(claude|anthropic|chatgpt|openai|gpt-?\d|gemini|llama)\b/i;
 // Promises it has no tool for: calling a business, booking, touching their inbox beyond reading and
 // drafting, or a deliverable "later" ("i'm calling dr. patel now", "flagging that email", "i'll pull the list together").
 // "i'll call you" is fine (that's us), so only third parties count.

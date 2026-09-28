@@ -153,7 +153,7 @@ export const EVENT_HANDLERS: { [K in SessionEvent["type"]]: EventHandler<K> } = 
         })()
       : await turn(s, "text", `${RECAP_INSTRUCTION} ${how}${draftNote} Call lasted ${secs}s.${Object.keys(caught).length ? " A separate line after yours says what you caught from the call; don't repeat it." : ""}`, recapFallback(s, onPurpose ? "agent_ended" : e.reason), {
       move: EVENT_MOVES.recap,
-      avoid: e.reason === "agent_ended" || onPurpose ?/\b(cut off|dropped|lost you|got disconnected)\b/i : undefined,
+      avoid: e.reason === "agent_ended" || onPurpose ? /\b(cut off|dropped|lost you|got disconnected|still there|you there)\b/i : /\b(still there|you there)\b/i,
     });
     // A text always follows a call. If the model's recap got filtered to nothing, the code-written one goes out.
     const recaps = r.newMessages.filter((m) => m.role === "agent" && m.channel === "text" && !m.kind);
@@ -297,7 +297,7 @@ export const EVENT_HANDLERS: { [K in SessionEvent["type"]]: EventHandler<K> } = 
     return { session: s, newMessages: ctx.newMessages, chips: computeDirective(s, "text").chips, actions: [] };
   },
   mic_denied: async ({ s }) => {
-    eventMsg(s, "Microphone unavailable");
+    eventMsg(s, "Call ended: the microphone was blocked or unavailable");
     s.callOffers = MAX_CALL_OFFERS; // no mic: don't keep offering calls
     s.call = { ...s.call, active: false, endedReason: "error" };
     if (s.phase === "on_call" || s.phase === "call_offered") s.phase = "intro";
