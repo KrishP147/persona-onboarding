@@ -211,6 +211,25 @@ export async function handleUserMessage(...args: Parameters<typeof handleUserMes
   return r;
 }
 
+const utter = (t: string) => t.toLowerCase().replace(/[^\p{L}\p{N} ]/gu, "").replace(/\s+/g, " ").trim();
+export function mergeGrowingUtterance(s: Session, text: string) {
+  const i = s.transcript.findLastIndex((m) => m.role === "user");
+  const prev = s.transcript[i];
+  if (!prev || prev.channel !== "voice" || prev.attachments?.length || Date.now() - prev.ts > 90_000) return;
+  const was = utter(prev.text);
+  if (was.length < 8 || !utter(text).startsWith(was)) return;
+  const gone = [i, ...s.transcript.flatMap((m, k) => (k > i && m.role === "agent" && m.channel === "voice" && !m.kind && m.cutOff && m.text.trim() === "..." ? [k] : []))];
+  s.transcript = s.transcript.filter((_, k) => !gone.includes(k));
+  // positions stored as transcript lengths shift with it
+  const shift = (n: number) => n - gone.filter((k) => k < n).length;
+  if (s.draft) {
+    s.draft.shownAt = shift(s.draft.shownAt);
+    if (s.draft.dupWarnedAt !== undefined) s.draft.dupWarnedAt = shift(s.draft.dupWarnedAt);
+  }
+  if (s.lastSent) s.lastSent.at = shift(s.lastSent.at);
+  if (s.callDeclinedAt !== undefined) s.callDeclinedAt = shift(s.callDeclinedAt);
+}
+
 export const KNOW_ASK = /\bwhat (do|did|have) you (know|remember|got|saved|learned)( so far)? (about|on|of) me\b|\bwhat('?s| is) (my profile|saved about me)\b|\bshow me what you know\b/i;
 
 // Fold one turn's meter into the session's running numbers (and the dev ledger for `pnpm metrics`).
@@ -251,6 +270,10 @@ export async function handleUserMessageInner(
       last.cutOff = true;
     }
   }
+  // After a barge-in the call re-sends the whole utterance so far ("email natasha" -> "email natasha. i'll paste
+  // a link"): one message, not six, and replies cut off before a word was heard ("...") go with it. Six copies
+  // pushed a pasted link out of the model's history once.
+  if (channel === "voice") mergeGrowingUtterance(s, clean);
   // The client shows the message instantly under its own id; reuse it so there's no duplicate.
   const userMsg = msg("user", channel, clean, { ...(attachments?.length ? { attachments } : {}), ...(clientId ? { id: clientId } : {}) });
   s.transcript.push(userMsg);

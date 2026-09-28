@@ -2,7 +2,7 @@
 import { getSecret, loadSession, newSession, saveSession, setSecret, withSession } from "../src/lib/store";
 import { CLAIMS_LINK, GUARD_PIPELINE, dropAskedQuestions, fixCallTypos, makeGuardEnv, INTENTS, cleanModelText, cutRepeatQuestions, fence, fromEmailOnly, runTool, handleEvent, normQuestion, saysBye, softenGmailDemand, handleUserMessage, nowLine, parseTypedEmail, MAX_BUBBLES, emitAgentText } from "../src/lib/engine";
 import { computeDirective } from "../src/lib/policy";
-import { KNOW_ASK } from "../src/lib/engine/turn";
+import { KNOW_ASK, mergeGrowingUtterance } from "../src/lib/engine/turn";
 import { crc32, pick } from "../src/lib/moves";
 import { readMood } from "../src/lib/mood";
 import { DEMO_INBOX, scoreItem } from "../src/lib/triage";
@@ -455,6 +455,21 @@ async function main() {
   check("draft_edit updates the draft and its message in place", ec.draft?.body === "edited body" && edited.newMessages.length === 1 && /subject: hello/.test(edited.newMessages[0].text), said(edited));
   const gone = await handleEvent(ec, { type: "draft_discard" });
   check("draft_discard clears it and marks the message", !ec.draft && gone.newMessages[0]?.discarded === true);
+  // replay: after a barge-in the call re-sends the whole utterance so far; it folds into one message
+  const gu = newSession();
+  gu.transcript.push(
+    { id: "g-u1", role: "user", channel: "voice", text: "write another email to jane.", ts: Date.now() },
+    { id: "g-a1", role: "agent", channel: "voice", text: "...", cutOff: true, ts: Date.now() },
+    { id: "g-a2", role: "agent", channel: "text", text: "to: a@b.com\nsubject: x\n\nhi", ts: Date.now() },
+  );
+  gu.draft = { to: "a@b.com", subject: "x", body: "hi", shownAt: 3 };
+  mergeGrowingUtterance(gu, "Write another email to Jane. I'll paste a link in the chat");
+  check("a re-sent growing utterance replaces the earlier copy and its unheard reply", gu.transcript.map((m) => m.id).join(",") === "g-a2" && gu.draft.shownAt === 1, gu.transcript.map((m) => m.id).join(","));
+  const gu2 = newSession();
+  gu2.transcript.push({ id: "h-u1", role: "user", channel: "voice", text: "yes please", ts: Date.now() });
+  mergeGrowingUtterance(gu2, "no actually wait");
+  check("a new utterance is left alone", gu2.transcript.length === 1);
+
   const dn = newSession();
   dn.transcript.push({ id: "u-k", role: "user", channel: "text", text: "what do you know about me?", ts: Date.now() });
   check("'what do you know about me' shows the card", KNOW_ASK.test("what do you know about me?") && !KNOW_ASK.test("what do you know about paris"));

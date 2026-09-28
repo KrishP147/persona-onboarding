@@ -82,6 +82,7 @@ export function useChat() {
   const retryRef = useRef<(() => void) | null>(null);
   const chanRef = useRef<BroadcastChannel | null>(null);
   const idRef = useRef<string | null>(null);
+  const serverIds = useRef<Set<string>>(new Set()); // message ids the server last had
 
   const upsert = useCallback((incoming: Msg[]) => {
     setMessages((prev) => {
@@ -126,6 +127,10 @@ export function useChat() {
   const apply = useCallback(
     (r: TurnResult, sentAt?: number) => {
       if (idRef.current && r.session.id !== idRef.current) return; // stale reply from another session
+      // the server folds a re-sent growing voice utterance into one message: drop the copies it removed
+      const ids = new Set(r.session.transcript.map((m) => m.id));
+      setMessages((prev) => prev.filter((m) => ids.has(m.id) || !serverIds.current.has(m.id)));
+      serverIds.current = ids;
       setSession(r.session);
       chanRef.current?.postMessage("sync");
       revealRef.current = revealRef.current
@@ -175,6 +180,7 @@ export function useChat() {
       setMessages((prev) => {
         // server order, plus anything local the server hasn't saved yet (a message still sending).
         const ids = new Set(data.session.transcript.map((m) => m.id));
+        serverIds.current = ids;
         return [...data.session.transcript, ...prev.filter((m) => !ids.has(m.id) && m.role === "user")];
       });
     } catch {}
@@ -305,6 +311,7 @@ export function useChat() {
       } catch {}
       setSession(data.session);
       setMessages(data.session.transcript);
+      serverIds.current = new Set(data.session.transcript.map((m) => m.id));
       setMock(data.mock);
       // a call can't survive a reload: tell the server it dropped.
       if (data.session.call.active) {
