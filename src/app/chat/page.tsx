@@ -25,7 +25,16 @@ export default function Home() {
   const vw = useViewportWidth();
   // reasoning: off until asked for, remembered
   const [showWhy, setShowWhy] = usePref("persona-show-reasoning", false);
-  const [typingHints, setTypingHints] = usePref("persona-typing-hints", true);
+  const [typingHints, setTypingHintsRaw] = usePref("persona-typing-hints", true);
+  // a short toast so flipping hints on or off is never silent
+  const [toast, setToast] = useState<string | null>(null);
+  const toastTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const setTypingHints = (v: boolean) => {
+    setTypingHintsRaw(v);
+    setToast(v ? "typing hints on" : "typing hints off");
+    if (toastTimer.current) clearTimeout(toastTimer.current);
+    toastTimer.current = setTimeout(() => setToast(null), 1500);
+  };
   const [menuOpen, setMenuOpen] = useState(false); // phone: picker, reasoning, restart
   const [hoverId, setHoverRaw] = useState<string | null>(null);
   const [activeId, setActive] = useState<string | null>(null);
@@ -156,6 +165,9 @@ export default function Home() {
           <div className="flex-1 min-h-0 flex flex-col">{map(true)}</div>
         </div>
       )}
+      <div aria-live="polite" className="pointer-events-none fixed inset-x-0 bottom-[calc(24px+env(safe-area-inset-bottom,0px))] z-50 flex justify-center">
+        {toast && <span className="sk-fade rounded-full bg-ink text-canvas text-[14px] font-medium px-4 py-2 shadow-lg">{toast}</span>}
+      </div>
       {menuOpen && (
         <MenuSheet
           skin={picked?.id ?? null}
