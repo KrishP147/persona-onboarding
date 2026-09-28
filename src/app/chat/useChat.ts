@@ -66,7 +66,14 @@ function localTz() {
 export function useChat() {
   const [session, setSession] = useState<Session | null>(null);
   const [messages, setMessages] = useState<Msg[]>([]);
-  const [draft, setDraft] = useState("");
+  const [draft, setDraftState] = useState("");
+  // when they last touched the composer (typed, or an edit prefill): the idle nudge measures from this too,
+  // so typing then clearing the draft doesn't make the nudge think they've been silent since the agent's message.
+  const [lastKeystroke, setLastKeystroke] = useState(0);
+  const setDraft = useCallback((v: string) => {
+    setLastKeystroke(now());
+    setDraftState(v);
+  }, []);
   const [pending, setPending] = useState<Attachment[]>([]);
   const [typing, setTyping] = useState(false);
   const [mock, setMock] = useState(false);
@@ -317,7 +324,7 @@ export function useChat() {
     if (!idRef.current || (!text.trim() && pending.length === 0 && !extra)) return;
     const atts = extra?.attachments ?? pending;
     if (!extra) {
-      setDraft("");
+      setDraftState("");
       setPending([]);
     }
     // your own message lands right away, like any messaging app.
@@ -341,7 +348,7 @@ export function useChat() {
     } catch {
       clearTimeout(deliveredTimer);
       setMessages((prev) => prev.filter((m) => m.id !== clientId));
-      setDraft(text);
+      setDraftState(text);
       setPending(atts);
       if (!navigator.onLine) {
         setError("you're offline. i'll send it when you're back.");
@@ -454,7 +461,7 @@ export function useChat() {
   const onCall = call.status === "active" || call.status === "connecting";
   // left on read: a friend double texts once (then once more, lightly), never nags.
   const nudge = useCallback(() => void sendEvent({ type: "text_idle" }), [sendEvent]);
-  useIdleNudge(messages, typing || revealing || !!draft.trim() || pending.length > 0 || call.status !== "idle" || !!recording || transcribing, nudge);
+  useIdleNudge(messages, typing || revealing || !!draft.trim() || pending.length > 0 || call.status !== "idle" || !!recording || transcribing, lastKeystroke, nudge);
   const thread = messages.filter((m) => m.channel !== "voice");
   const [typingHints] = usePref("persona-typing-hints", true);
   const hint = useStuckHint({
