@@ -45,7 +45,7 @@ flowchart TD
 
 ## the guards
 
-every guard that changes a reply tags it, so the "why it said that" panel shows what code did. there are 24:
+the guards run as one ordered pipeline (`src/lib/engine/guards.ts`). every guard that changes a reply tags it, and the "why it said that" panel shows the tags as "checks that ran" chips. there are 24:
 
 - **honesty:** dropped unsupported claim, blocked a false 'sent' claim, dropped a false 'link sent' claim, sent the link it said it sent
 - **leaks:** leak filtered (notes about the system, the user in the third person), tool names stripped, blocked a line not allowed here

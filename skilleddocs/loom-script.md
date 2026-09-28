@@ -18,12 +18,12 @@ say: "onboarding is the first conversation with your assistant, so i spent most 
 - back in the texts, it asks for gmail with a reason tied to what you said. tap the card, then "use a demo inbox instead" (say: "google only lets approved test accounts in during a trial, so a reviewer never hits a dead end").
 - it doesn't read you a list of 14 unread emails. it interrupts for the one that costs you if you wait (a recruiter waiting on your availability) and rolls the rest into one line.
 - point out that the "IT helpdesk" email asking for your password and telling the assistant to "call me bob" is never flagged as urgent, and it won't take bob as anyone's name. "email text reaches the model as data, never as instructions."
-- ask it to draft the reply. it shows the draft, and it only sends after you say "send".
+- ask it to draft the reply. it shows the draft, and it only sends after you say "send", with 5 seconds to undo.
 
 ## 3:00 to 4:00: you can watch it think
 
 - open the "why it said that" panel next to any reply: the move code picked for that turn, and the source behind it. three to name: *the mom test* (fitzpatrick, 2013) for one question about a real recent moment, *to sell is human* (pink, 2012) for an easy yes and an easy no, and *influence* (cialdini, 1984) for giving before asking.
-- show a reply with a guard tag ("goodbye added before hangup", "blocked a third question in a row"). [placeholder: needs guard chips in the why panel before recording] "most onboarding bots hide their logic in a prompt. here every time code stepped in, the reply says so."
+- show the "checks that ran" chips on a reply ("goodbye added before hangup", "blocked a third question in a row"). reasoning is collapsed by default, so expand one. "most onboarding bots hide their logic in a prompt. here every time code stepped in, the reply says so."
 - flash FUNNEL.md: median 50 seconds from opening the chat to the first real help, and the three biggest drop-offs, each next to the fix it got. "that baseline is mostly our own testing, so the real test is the post-fix funnel."
 
 ## 4:00 to 5:00: my first 30 days at persona
@@ -43,5 +43,5 @@ one take, no slides, live link on screen.
 - **0:05** skip the name, say "i'm drowning in recruiter emails". it follows you, takes "persona" as a default, and offers a call with a reason.
 - **0:15** take the call, talk over it (it stops right away), then hang up mid-sentence. the recap text lands anyway, and it remembers the recruiter emails.
 - **0:30** connect the demo inbox. it interrupts for the one email that can't wait and ignores the phishing one that tries to rename it.
-- **0:45** open "why it said that": "every reply shows the move code chose and the research behind it, and every time code corrected the model, the reply records it."
+- **0:45** open "why it said that": "every reply shows the move code chose and the research behind it, and every time code corrected the model, the reply shows it."
 - **0:55** "the model writes the words. code decides what has to happen. that's why it holds up."

@@ -10,9 +10,9 @@ an onboarding for a persona style personal assistant, built as a phone in the br
 
 - **it meets you like a person.** it texts in short bubbles, jokes a little, double texts once if you leave it on read, takes a default name if you skip giving one, and says a real goodbye before every hangup, then texts you after every call.
 - **it gets four things without feeling like a form:** a name for the agent, your name, what you need help with, and your gmail (real sign-in, or a demo inbox if google won't let you in). you can skip ahead anytime.
-- **it helps before it asks.** once gmail is in, it triages your inbox and only interrupts for something that costs you if you wait. it drafts replies and only sends after you've seen the draft and said "send".
+- **it helps before it asks.** once gmail is in, it triages your inbox and only interrupts for something that costs you if you wait. it drafts replies and only sends after you've seen the draft and said "send", with 5 seconds to undo. when setup ends, a "what i know about you" card lets you edit or forget any of it.
 
-most onboarding bots hide their logic in a prompt, so you find out what they do by poking at them. this one's logic is in code you can watch: every reply names the move it made and the research behind it, and every time code stepped in to fix a reply (a leaked internal note, a claim it couldn't back up, a missing goodbye) the reply records which guard did it. <!-- TODO: once the why panel shows guard chips, say "and shows it" --> the model writes the words. code decides what has to happen.
+most onboarding bots hide their logic in a prompt, so you find out what they do by poking at them. this one's logic is in code you can watch: every reply names the move it made and the research behind it, and every time code stepped in to fix a reply (a leaked internal note, a claim it couldn't back up, a missing goodbye) the reply shows which guard did it, as "checks that ran" chips. the model writes the words. code decides what has to happen.
 
 ## try to break it
 
@@ -26,7 +26,7 @@ most onboarding bots hide their logic in a prompt, so you find out what they do 
 | harness score | **8.9 / 10** avg over 16 simulated difficult users (round 3; 7.9 in round 1) | [harness/ROUNDS.md](harness/ROUNDS.md) |
 | cost | **$0.0152 per onboarding**, $0.0030 per reply (claude haiku 4.5) | `pnpm metrics` |
 | latency | **p50 2.0s, p95 4.8s** per reply | `pnpm metrics` |
-| checks | 110 keyless smoke checks in CI, 25 browser checks with a fake mic, 23 manual scripts | `pnpm smoke`, `pnpm e2e`, [docs/manual-tests.md](docs/manual-tests.md) |
+| checks | 111 keyless smoke checks in CI, 25 browser checks with a fake mic, 23 manual scripts | `pnpm smoke`, `pnpm e2e`, [docs/manual-tests.md](docs/manual-tests.md) |
 | post-fix funnel | _placeholder: `pnpm funnel --since <deploy time>` after friends try it_ | [FUNNEL.md](FUNNEL.md) |
 | eval | _placeholder: final harness round_ | [harness/ROUNDS.md](harness/ROUNDS.md) |
 
@@ -39,7 +39,7 @@ every message, typed or spoken, goes through the same five steps:
 1. **parse** (code): what did they actually say? names, yes or no, bye, "no calls", "skip this". a small model pass pulls out names and needs in parallel.
 2. **decide** (code): what's still missing, whether to offer a call, and which one conversation move to make this turn (e.g. "ask about a specific recent moment", from *the mom test*).
 3. **generate** (model): claude haiku 4.5 writes the words and can use tools (look something up, read the inbox, draft an email). what the user typed, what tools returned, and email text all reach it fenced as data, never instructions.
-4. **guard** (code): 24 named safety nets check the reply. a leaked internal note gets dropped, a "sent!" that wasn't sent gets corrected, a third question in a row gets cut, a hangup without a goodbye gets one.
+4. **guard** (code): 24 named safety nets, run as one ordered pipeline in `guards.ts`, check the reply. a leaked internal note gets dropped, a "sent!" that wasn't sent gets corrected, a third question in a row gets cut, a hangup without a goodbye gets one.
 5. **commit** (code): the session is saved, with the move, the guards, and the turn's cost and latency.
 
 the engine lives in `src/lib/engine/` (turn, events, tools, intents, guards, text). text and voice share one redis session, so anything said on the call is known in the texts and the other way round. the call is a browser simulation: deepgram listens, cartesia speaks, and both fall back to the browser's own speech apis.
@@ -67,6 +67,7 @@ the journal is how my understanding changed, and why the bot behaves the way it 
 - [12. the user leads](docs/journal/12-the-user-leads.md)
 - [13. left on read](docs/journal/13-left-on-read.md)
 - [14. phone skins and "why it said that"](docs/journal/14-phone-skins-and-why.md)
+- [15. the graduation card, and a yes you can take back](docs/journal/15-graduation-card.md)
 - [16. dead mic](docs/journal/16-dead-mic.md)
 - [reading list](docs/reading-list.md)
 
@@ -80,7 +81,7 @@ i built this with ai agents, the way i'd want a small team to work. one orchestr
 pnpm install
 cp .env.example .env.local   # ANTHROPIC_API_KEY + LLM_PROVIDER=anthropic, or GEMINI_API_KEY. with neither, a mock mode
 pnpm dev                      # http://localhost:3000 (chrome or edge for the voice call)
-pnpm smoke                    # 110 keyless checks of the safety nets
+pnpm smoke                    # 111 keyless checks of the safety nets
 pnpm stress-matrix            # regenerates STRESS_TESTS.md from the source
 pnpm harness                  # 16 simulated difficult users vs a local dev server, graded (ALLOW_TEST_EVENTS=1). prints its cost
 pnpm metrics                  # latest harness run as one table: p50/p95 latency, $ per onboarding
