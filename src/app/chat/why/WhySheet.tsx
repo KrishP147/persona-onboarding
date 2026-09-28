@@ -4,7 +4,7 @@ import { useEffect, useRef, useState } from "react";
 import type { Skin } from "../skins/types";
 import { PIPELINE, type Turn } from "./frameworks";
 
-export function WhySheet({ skin, turns, id, onNav, onClose }: { skin: Skin; turns: Turn[]; id: string; onNav: (id: string) => void; onClose: () => void }) {
+export function WhySheet({ skin, turns, id, onNav, onClose, metrics }: { skin: Skin; turns: Turn[]; id: string; onNav: (id: string) => void; onClose: () => void; metrics?: string | null }) {
   const i = turns.findIndex((t) => t.m.id === id);
   const t = turns[i];
   const [how, setHow] = useState(false);
@@ -118,6 +118,11 @@ export function WhySheet({ skin, turns, id, onNav, onClose }: { skin: Skin; turn
                 </div>
               </li>
             ))}
+            {metrics && (
+              <li className="text-[12px] leading-4" style={{ color: c.mute }}>
+                {metrics}
+              </li>
+            )}
           </ol>
         )}
       </div>

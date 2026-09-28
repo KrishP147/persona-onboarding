@@ -10,6 +10,7 @@ import { useChat } from "./useChat";
 import { usePref } from "./usePref";
 import { turnsOf } from "./why/frameworks";
 import { WhySheet } from "./why/WhySheet";
+import { metricsLine } from "./why/metrics";
 import { WhySidebar } from "./why/WhySidebar";
 
 const wide = () => typeof window !== "undefined" && window.matchMedia("(min-width: 1024px)").matches;
@@ -76,6 +77,7 @@ export default function Home() {
     },
   };
 
+  const metrics = metricsLine(chat.session);
   const restart = chat.restart;
   const frame = FRAMES[skin.id];
 
@@ -90,7 +92,7 @@ export default function Home() {
             why={why}
             scrollRef={scrollRef}
             onMenu={() => setMenuOpen(true)}
-            overlay={sheetId && <WhySheet key={skin.id} skin={skin} turns={turns} id={sheetId} onNav={openSheet} onClose={closeSheet} />}
+            overlay={sheetId && <WhySheet key={skin.id} skin={skin} turns={turns} id={sheetId} onNav={openSheet} onClose={closeSheet} metrics={metrics} />}
           />
         </DeviceFrame>
         {chat.call.status !== "idle" && <CallPhone skin={skin} chat={chat} zoom={zoom} />}
@@ -106,6 +108,7 @@ export default function Home() {
               expanded={expanded}
               setExpanded={setExpanded}
               height={Math.round(frame.h * zoom)}
+              metrics={metrics}
             />
           </div>
         )}

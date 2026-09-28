@@ -15,8 +15,10 @@ export function WhySidebar({
   expanded,
   setExpanded,
   height,
+  metrics,
 }: {
   turns: Turn[];
+  metrics?: string | null; // "this session: n turns · $x · p50 yms", when the server sends it
   scrollRef: RefObject<HTMLDivElement | null>;
   activeId: string | null;
   hoverId: string | null;
@@ -225,6 +227,7 @@ export function WhySidebar({
                 </div>
               </li>
             ))}
+            {metrics && <li className="pt-0.5 text-[12.5px] leading-[18px] text-ink-faint">{metrics}</li>}
           </ol>
         )}
       </div>
