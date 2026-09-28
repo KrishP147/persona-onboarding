@@ -94,8 +94,9 @@ export interface Session {
   graduatedReason?: string;
   graduatedAt?: string; // ISO time setup ended (first time only), for the what-i-know card and setup time
   demoOffered?: boolean; // the sample inbox was offered (once) after google sign-in failed or stalled
-  nameCheck?: { value: string; as: "user" | "agent" | "confirm" }; // a bare name answered two open name questions: we leaned one way and asked which
+  nameCheck?: { value: string; as: "user" | "agent" | "confirm" | "same" }; // "same": they said their name is ours, asked "so we have the same name?" // a bare name answered two open name questions: we leaned one way and asked which
   agentNameDefaulted?: boolean; // they skipped naming it: goes by "Persona" until they pick one
+  inboxToScan?: InboxItem[]; // gmail just connected over text: the inbox look happens in its own event (inbox_scan) so "connected" shows at once
   emailSeen?: string[]; // email text the agent has seen (subjects, snippets): slot values found only here are quarantined
   metrics?: SessionMetrics; // per-session cost and model latency (src/lib/usage.ts meter)
   askedQuestions?: string[]; // normalized questions it already asked (last 12): never ask twice
@@ -140,7 +141,8 @@ export type ClientAction =
   | { type: "speak"; text: string }
   | { type: "graduate" }
   | { type: "show_know" } // they asked what we know: show the what-i-know card after this turn
-  | { type: "patience"; ms: number }; // user is doing a task (e.g. gmail sign-in): stretch the next silence window
+  | { type: "patience"; ms: number }
+  | { type: "inbox_scan" }; // gmail just connected over text: ask for the inbox look next // user is doing a task (e.g. gmail sign-in): stretch the next silence window
 
 // Server-side per-session numbers, cheap to keep: no extra model calls, bounded latency sample.
 export interface SessionMetrics {

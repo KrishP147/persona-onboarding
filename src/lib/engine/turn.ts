@@ -12,7 +12,7 @@ import { webEnabled } from "../web";
 import { currentMeter, metered, percentile, recordTurn, type Meter } from "../usage";
 import { type Ctx, emitAgentText, ensureCard, goodbyeLine, guard, msg, outageLine } from "./context";
 import { CALL_NO, CARD_ASK, LAUGH_LEAD, CARD_WANT, CLEAR_BYE, DELEGATE, firstSentenceName, fixCallTypos, hintedAgentName, ownNameIn, DEMO_YES, GMAIL_TROUBLE, HOLD, INSULT_NAME, LAUGH, NAME_ASK, NAME_HINT, NEGATED_CALL, NOT_A_NAME, NO_CALLS, OFFERED_CALL, OWN_NAME, SEND_CMD, SEND_REQUEST, SENT_Q, SKIP_SETUP, STOP_TALKING, repliedElsewhere, THANKS, USER_BYE, WAITING_ON_THEM, WANTS_OUT, YES, asTurnBy, asksForLink, gmailConsent, lastUserText, saidNow, saysBye } from "./intents";
-import { cleanModelText, dropDraftEcho, fence, nowLine, parseTypedEmail } from "./text";
+import { cleanModelText, dropDraftEcho, dropSelfAck, fence, nowLine, parseTypedEmail } from "./text";
 import { GMAIL_ASK_MARK, GUARD_PIPELINE, type TurnOpts, makeGuardEnv, sealGoodbye } from "./guards";
 import { LOOKUP_TOOLS, MAX_TOOL_ROUNDS, TERMS_LINK, TOOLS, WEB_TOOLS, gifAllowed, makeGif, runTool, saveDraftTool, sendEmailTool } from "./tools";
 import { handleEvent } from "./events";
@@ -247,10 +247,48 @@ export async function nameAmbiguity(s: Session, channel: Channel, text: string, 
   }
   // A Reply to some other message ("explain" on the intro) is about that message, never a name.
   if (repliedElsewhere(s, userMsg)) return null;
+  // The same name as ours, two separate cases (never a silent no-op or "persona instead of persona?").
+  const current = s.slots.agentName.status === "filled" ? s.slots.agentName.value : null;
+  if (current && !s.nameCheck) {
+    const lower = current.toLowerCase();
+    const word = text.trim().replace(/[.!?]+$/, "").toLowerCase();
+    const lastQ = s.transcript.slice(0, s.transcript.indexOf(userMsg)).findLast((m) => m.role === "agent" && (!m.kind || m.kind === "text"));
+    // their own name is ours ("my name is persona", or "persona" to "what's your name?"): check, it's odd
+    const theirs = ownNameIn(text) ?? (lastQ && USER_NAME_ASK.test(lastQ.text) && word === lower ? current : null);
+    if (theirs?.toLowerCase() === lower) {
+      s.nameCheck = { value: current, as: "same" };
+      emitAgentText(ctx, `wait, your name's ${lower} too? so we have the same name?`);
+      guard(ctx, "asked: their name is the same as ours");
+      return out(ctx);
+    }
+    // renaming it to what it's already called ("call you persona", or "persona" answering the name question)
+    const rename = hintedAgentName(text) ?? (word === lower && (nameAskIsNewest(s, userMsg) || s.agentNameDefaulted) ? current : null);
+    if (rename?.toLowerCase() === lower) {
+      emitAgentText(ctx, "lol that's already my name");
+      guard(ctx, "renamed to its current name: said so");
+      recordAsk(s, null);
+      return out(ctx);
+    }
+  }
   // Their answer to "is rowan your name, or what you'd like to call me?"
   const check = s.nameCheck;
   if (check) {
     s.nameCheck = undefined;
+    // "so we have the same name?": yes, it's theirs too; no, ask theirs
+    if (check.as === "same") {
+      if (/^\s*(yes|yeah|yea|ye|yep|yup|ya|sure|correct|right|mhm|lol yes|haha yes|lol yeah|haha yeah)\b/i.test(text)) {
+        s.slots.userName = { ...s.slots.userName, value: check.value, status: "filled", source: channel, updatedAt: Date.now() };
+        emitAgentText(ctx, `ha, twins then. nice to meet you, ${check.value.toLowerCase()}`);
+        recordAsk(s, null);
+        return out(ctx);
+      }
+      if (/^\s*(no|nah|nope|lol no|haha no|jk|just kidding)\b/i.test(text) && text.trim().split(/\s+/).length <= 3) {
+        emitAgentText(ctx, "haha ok, so what's your name?");
+        recordAsk(s, "userName");
+        return out(ctx);
+      }
+      return null;
+    }
     // "is 'not much' what you want to call me?": yes names it, no asks again
     if (check.as === "confirm") {
       if (/^\s*(yes|yeah|yep|yup|ya|sure|correct|right|mhm|lol yes|haha yes)\b/i.test(text)) {
@@ -324,7 +362,11 @@ export async function nameAmbiguity(s: Session, channel: Channel, text: string, 
     // A lone name-like word, but not as the direct answer to our name question (something else was said in
     // between, and it isn't a Reply to that question): it might be naming us, so ask instead of assuming.
     const unnamed = s.slots.agentName.status === "missing" || (s.agentNameDefaulted && s.slots.agentName.value === "Persona");
-    if (unnamed && agentAsk >= 0 && !/\s/.test(bare) && !nameAskIsNewest(s, userMsg)) {
+    // only while the name question is fresh: once it has a name (even the default), a stray word later
+    // ("ye" to "send it?") is never a rename. Renaming then takes a Reply to the name question or "call you x".
+    // "persona" when it already goes by persona: nothing to check ("go by persona instead of persona?")
+    const same = bare.toLowerCase() === (s.slots.agentName.value ?? "").toLowerCase();
+    if (unnamed && !same && recent(agentAsk) && !/\s/.test(bare) && !nameAskIsNewest(s, userMsg)) {
       const v = titled(bare);
       s.nameCheck = { value: v, as: "confirm" };
       emitAgentText(ctx, s.agentNameDefaulted ? `want me to go by ${v.toLowerCase()} instead of persona?` : `wait, is ${v.toLowerCase()} what you want to call me?`);
@@ -685,7 +727,7 @@ export async function handleUserMessageInner(
   const r = await turn(
     s,
     replyChannel,
-    [early?.note, linkNote ?? sawText, skippedName ? "They skipped naming you. You're going by Persona for now and a separate text right after yours tells them, so don't mention your name or ask for one. Just respond to what they said." : undefined].filter(Boolean).join(" ") || (interrupted ? "They talked over you mid-sentence. Drop what you were saying and respond to what they just said; don't repeat your cut-off line unless they ask." : undefined),
+    [early?.note, linkNote ?? sawText, skippedName ? "They skipped naming you. You're going by Persona for now and a separate text just before yours already told them, so don't mention your name, don't ask for one, and don't open with \"got it\" (that would be answering your own text). Just carry on." : undefined].filter(Boolean).join(" ") || (interrupted ? "They talked over you mid-sentence. Drop what you were saying and respond to what they just said; don't repeat your cut-off line unless they ask." : undefined),
     linkNote ? (channel === "voice" ? "okay, i'm texting you the link right now. it's the card that says connect your google account, tap it whenever you're ready." : "here you go, it's the card right there. signing in takes a few seconds.") : channel === "voice" ? "sorry, i missed that. say it one more time?" : "sorry, i lost my train of thought for a sec. can you say that again?",
     // A note about an interruption or a text mid-call still gets this turn's move (like the gmail offer).
     { soft: !linkNote },
@@ -700,13 +742,18 @@ export async function handleUserMessageInner(
   if (skippedName && !r.actions.some((a) => a.type === "start_call")) {
     // Before the reply, so its call offer (unlocked by the name) reads as the next step, not an aside.
     const ctx: Ctx = { s, channel: "text", actions: [], newMessages: [], move: EVENT_MOVES.defaultName };
-    emitAgentText(ctx, SKIPPED_NAME_REPLY);
+    // "persona" is a name like any other: its contact card goes out with it (a rename updates that same card)
+    const hasCard = s.transcript.some((x) => x.kind === "contact_card");
+    emitAgentText(ctx, hasCard ? SKIPPED_NAME_REPLY : `${SKIPPED_NAME_REPLY}. save my contact card so you know it's me`);
     const [m] = ctx.newMessages;
+    const card = hasCard ? [] : [msg("agent", "text", s.slots.agentName.value ?? "Persona", { kind: "contact_card" })];
+    // the reply comes after that line: it can't acknowledge it ("got it, going by persona")
+    for (const x of r.newMessages) if (x.role === "agent" && (!x.kind || x.kind === "text")) x.text = dropSelfAck(x.text);
     const at = s.transcript.findIndex((x) => r.newMessages.includes(x) && x.role === "agent");
     s.transcript.splice(s.transcript.indexOf(m), 1);
-    s.transcript.splice(at >= 0 ? at : s.transcript.length, 0, m);
+    s.transcript.splice(at >= 0 ? at : s.transcript.length, 0, m, ...card);
     const first = r.newMessages.findIndex((x) => x.role === "agent");
-    r.newMessages.splice(first >= 0 ? first : r.newMessages.length, 0, m);
+    r.newMessages.splice(first >= 0 ? first : r.newMessages.length, 0, m, ...card);
   }
   if (channel === "voice" && s.call.holding && s.call.active) r.actions.push({ type: "patience", ms: HOLD_MS });
   // Image bytes were for this one reply; storing them would bloat every later read and write.
@@ -767,7 +814,8 @@ export function nameAck(name: string) {
   return INSULT_NAME.test(name.trim()) ? `ouch, ${name.toLowerCase()}? harsh, but i'll wear it. ${name} it is.` : `${name} it is.`;
 }
 
-export const SKIPPED_NAME_REPLY = "i'll go by persona for now, rename me anytime";
+// confirms their call to skip it (not "got it": that reads as us acknowledging ourselves once the next text follows)
+export const SKIPPED_NAME_REPLY = "all good, no name needed. i'll go by persona for now, rename me anytime";
 
 // They didn't pick a name: go by "Persona" (a default they can change with one text) instead of stalling on it.
 export function defaultAgentName(s: Session) {

@@ -2,6 +2,7 @@
 import { getSecret, loadSession, newSession, saveSession, setSecret, withSession } from "../src/lib/store";
 import { CLAIMS_LINK, GUARD_PIPELINE, dropAskedQuestions, fixCallTypos, makeGuardEnv, INTENTS, cleanModelText, cutRepeatQuestions, fence, fromEmailOnly, runTool, handleEvent, normQuestion, saysBye, softenGmailDemand, handleUserMessage, nowLine, parseTypedEmail, MAX_BUBBLES, emitAgentText } from "../src/lib/engine";
 import { computeDirective } from "../src/lib/policy";
+import { dropSelfAck } from "../src/lib/engine/text";
 import { KNOW_ASK, fixTypoInNeed, mergeGrowingUtterance, toTurns } from "../src/lib/engine/turn";
 import { chooseMove, crc32, pick } from "../src/lib/moves";
 import { readMood } from "../src/lib/mood";
@@ -20,6 +21,13 @@ let fails = 0;
 const check = (name: string, ok: boolean, detail = "") => {
   console.log(`${ok ? "PASS" : "FAIL"} ${name}${detail ? `  (${detail})` : ""}`);
   if (!ok) fails++;
+};
+// gmail connect is two requests over text: "connected" at once, then the inbox look (the inbox_scan action)
+const connect = async (x: Parameters<typeof handleEvent>[0]): Promise<TurnResult> => {
+  const a = await handleEvent(x, { type: "gmail_connected" });
+  if (!a.actions.some((t) => t.type === "inbox_scan")) return a;
+  const b = await handleEvent(x, { type: "inbox_scan" });
+  return { ...b, newMessages: [...a.newMessages, ...b.newMessages], actions: [...a.actions, ...b.actions] };
 };
 const said = (r: TurnResult) => r.newMessages.filter((m) => m.role === "agent").map((m) => m.text).join(" | ");
 
@@ -80,7 +88,7 @@ async function main() {
   const fake = await handleEvent(g, { type: "gmail_connected", email: "attacker@evil.com" });
   check("unverified gmail event ignored", fake.newMessages.length === 0 && g.slots.gmail.status === "missing");
   g.gmailVerified = { email: "me@gmail.com", unread: 12, inbox: DEMO_INBOX };
-  const ok = await handleEvent(g, { type: "gmail_connected" });
+  const ok = await connect(g);
   check("verified gmail fills slot", g.slots.gmail.status === "filled" && g.gmailEmail === "me@gmail.com");
   check("gmail raises the one item that can't wait", said(ok).toLowerCase().includes("interview"), said(ok));
   check("interruption logged as pending", g.alerts?.length === 1 && g.alerts[0].category === "person" && g.alerts[0].outcome === "pending");
@@ -182,14 +190,14 @@ async function main() {
   const g2 = newSession();
   g2.alerts = [{ id: "x", category: "money", reason: "", subject: "", from: "", shownAt: Date.now(), outcome: "acted" }];
   g2.gmailVerified = { email: "me@gmail.com", inbox: DEMO_INBOX };
-  const quiet = await handleEvent(g2, { type: "gmail_connected" });
+  const quiet = await connect(g2);
   check("budget spent: no second interruption", g2.alerts.length === 1 && !said(quiet).toLowerCase().includes("interview"), said(quiet));
   // an old "bye" doesn't fire again on a system event, and the panel says so
   const g3 = newSession();
   await handleUserMessage(g3, "text", "ok that's all, bye");
   g3.gmailVerified = { email: "me@gmail.com", inbox: [] };
-  const later = await handleEvent(g3, { type: "gmail_connected" });
-  const laterMsg = later.newMessages.find((m) => m.role === "agent" && !m.kind);
+  const later = await connect(g3);
+  const laterMsg = later.newMessages.findLast((m) => m.role === "agent" && !m.kind); // the model turn (inbox look), not the instant "connected" line
   check("intent only read on their own turn", !later.actions.some((a) => a.type === "end_call" || a.type === "graduate") && !!laterMsg?.guards?.includes("ignored: not user-said") && g3.turnBy === undefined, JSON.stringify(laterMsg?.guards));
   // bye only as their last words, never negated, and "call me back" is a callback
   const byes = ["ok thanks, bye", "that's all for now. talk soon!", "gotta go", "You can hang up. I think I've gotten my help. I appreciate it."];
@@ -419,9 +427,67 @@ async function main() {
   check("phishing is never an interruption", !!bob && scoreItem(bob).category === null, bob ? scoreItem(bob).reason : "");
   const pe = newSession();
   pe.gmailVerified = { email: "demo.user@gmail.com", unread: 14, demo: true, inbox: DEMO_INBOX };
-  const peConn = await handleEvent(pe, { type: "gmail_connected" });
+  const peConn = await connect(pe);
   check("connecting doesn't surface the phishing email as urgent", !/helpdesk|password/i.test(said(peConn)), said(peConn));
   check("email text is remembered for provenance", !!pe.emailSeen?.some((t) => /call me Bob/.test(t)));
+  // over text, "connected" shows at once (code) and the inbox look is its own request; the demo says up front nothing really sends
+  const cx = newSession();
+  cx.gmailVerified = { email: "demo.user@gmail.com", unread: 14, demo: true, inbox: DEMO_INBOX };
+  const cx1 = await handleEvent(cx, { type: "gmail_connected" });
+  check("connect over text: instant line + inbox_scan next", cx1.actions.some((a) => a.type === "inbox_scan") && /no real email ever leaves it/.test(said(cx1)) && !!cx.inboxToScan, said(cx1));
+  await handleEvent(cx, { type: "inbox_scan" });
+  check("...inbox_scan looks once", !cx.inboxToScan && (await handleEvent(cx, { type: "inbox_scan" })).newMessages.length === 0);
+  // demo drafts: an inbox sender by first name, anyone else gets a made-up @persona.com; unsigned asks their name
+  cx.transcript.push({ id: "u-cx1", role: "user", channel: "text", text: "yes send an email to maya saying im free friday at noon", ts: Date.now() });
+  const cxCtx = { s: cx, channel: "text" as const, actions: [], newMessages: [] };
+  const cxOut = await runTool(cxCtx, "save_draft", { to: "", subject: "Re: final round", body: "Hi Maya,\n\nI'm free Friday at noon.\n\nBest" });
+  check("demo draft to 'maya' uses her inbox address", cx.draft?.to === "maya.chen@persona.com", String(cx.draft?.to));
+  check("unsigned draft with no known name: ask what name to sign it with", /ask what name to sign it with/.test(cxOut), cxOut);
+  cx.transcript.push({ id: "u-cx2", role: "user", channel: "text", text: "email jordan that i'm running late", ts: Date.now() });
+  await runTool(cxCtx, "save_draft", { to: "", subject: "running late", body: "Hi Jordan,\n\nRunning late.\n\nKrish" });
+  check("demo draft to someone not in the inbox: made-up @persona.com", cx.draft?.to === "jordan@persona.com", String(cx.draft?.to));
+  cx.transcript.push({ id: "u-cx3", role: "user", channel: "text", text: "yes send it", ts: Date.now() });
+  const cxSent = await runTool(cxCtx, "send_email", {});
+  check("demo send plays it straight: 'sent'", /^sent to jordan@persona\.com/.test(cxSent) && !!cx.draft?.sent, cxSent);
+  // going by persona is a name like any other: its card goes out with it; "persona" then isn't a rename; "yo" is a greeting
+  const pc = newSession();
+  await handleEvent(pc, { type: "open" });
+  const pcR = await handleUserMessage(pc, "text", "skip for now");
+  const pcAll = pcR.newMessages.filter((m) => m.role === "agent").map((m) => (m.kind === "contact_card" ? `[card:${m.text}]` : m.text));
+  check("default name sends the persona contact card, right after its line", pcAll.includes("[card:Persona]") && /save my contact card/.test(pcAll[pcAll.indexOf("[card:Persona]") - 1] ?? ""), pcAll.join(" | "));
+  const pcSame = await handleUserMessage(pc, "text", "persona");
+  check("'persona' when it's already persona: no 'instead of persona?' check", !/instead of persona/.test(said(pcSame)) && !pc.nameCheck, said(pcSame));
+  // same name, two cases: renaming it to what it's called is a joke back; their own name being ours gets a check
+  const rn = newSession();
+  await handleEvent(rn, { type: "open" });
+  await handleUserMessage(rn, "text", "luna");
+  const rnR = await handleUserMessage(rn, "text", "i'll call you luna");
+  check("rename to its current name: 'lol that's already my name'", /already my name/.test(said(rnR)) && rn.slots.agentName.value === "Luna", said(rnR));
+  const tw = newSession();
+  await handleEvent(tw, { type: "open" });
+  await handleUserMessage(tw, "text", "luna");
+  tw.transcript.push({ id: "a-tw1", role: "agent", channel: "text", text: "and what's your name?", ts: Date.now() });
+  const tw1 = await handleUserMessage(tw, "text", "luna");
+  check("their name = ours: 'so we have the same name?'", /same name\?/.test(said(tw1)) && tw.slots.userName.status !== "filled", said(tw1));
+  const tw2 = await handleUserMessage(tw, "text", "yeah lol");
+  check("...yes: it's theirs too", tw.slots.userName.value === "Luna" && /twins/.test(said(tw2)), said(tw2));
+  const tw3 = newSession();
+  await handleEvent(tw3, { type: "open" });
+  await handleUserMessage(tw3, "text", "luna");
+  const tw3a = await handleUserMessage(tw3, "text", "my name is luna");
+  const tw3b = await handleUserMessage(tw3, "text", "nah");
+  check("'my name is <ours>' gets the check; 'nah' asks theirs", /same name\?/.test(said(tw3a)) && /what's your name\?/.test(said(tw3b)) && tw3.slots.userName.status !== "filled", `${said(tw3a)} || ${said(tw3b)}`);
+  const yo = newSession();
+  await handleEvent(yo, { type: "open" });
+  await handleUserMessage(yo, "text", "yo");
+  check("'yo' to the name question is a greeting, not a name", yo.slots.agentName.status === "missing" && !yo.transcript.some((m) => m.kind === "contact_card"), String(yo.slots.agentName.value));
+  // name set (the default counts): a stray "ye" much later is a yes, never "want me to go by ye?"
+  const yeS = newSession();
+  await handleEvent(yeS, { type: "open" });
+  await handleUserMessage(yeS, "text", "skip for now");
+  for (let i = 0; i < 3; i++) yeS.transcript.push({ id: `u-ye${i}`, role: "user", channel: "text", text: "cool", ts: Date.now() }, { id: `a-ye${i}`, role: "agent", channel: "text", text: "want me to send it?", ts: Date.now() });
+  const yeR = await handleUserMessage(yeS, "text", "ye");
+  check("name set: a later 'ye' isn't a rename check", !/go by ye|call me\?/i.test(said(yeR)) && !yeS.nameCheck, said(yeR));
   // "email him again": the second draft goes to whoever got the last one
   const ls = newSession();
   ls.lastSent = { to: "sam@acme.com", subject: "friday", at: 0 };
@@ -543,6 +609,9 @@ async function main() {
   rxCheck.nameCheck = { value: "Explain", as: "confirm" };
   const rxNo = await handleUserMessage(rxCheck, "text", "no explain the message i replied to");
   check("'no, <a request>' to a name check isn't a bare no: no name re-ask", !/what do you want to call me\?/.test(said(rxNo)), said(rxNo));
+  // after our own "i'll go by persona" line, the next text can't acknowledge it (a real run: "got it, going by Persona for now.")
+  check("reply after the default-name line doesn't 'got it' itself", dropSelfAck("got it, going by Persona for now. mind if i give you a quick call? way faster than typing this all out.") === "mind if i give you a quick call? way faster than typing this all out.");
+  check("...but a real sentence about persona stays", dropSelfAck("persona can call places for you. want to try?") === "persona can call places for you. want to try?" && dropSelfAck("got it.") === "got it.");
   // quiet after the name question: it never offered a call, so the nudge can't say "no pressure on the call"
   const rxIdle = newSession();
   await handleEvent(rxIdle, { type: "open" });
@@ -722,7 +791,7 @@ async function main() {
   askedQ.slots.agentName = { ...askedQ.slots.agentName, value: "Nova", status: "filled" };
   askedQ.transcript.push({ id: "u-q", role: "user", channel: "text", text: "mostly school stuff", ts: Date.now() - 61000 }, { id: "a-q", role: "agent", channel: "text", text: "that's a lot. which class is the worst?", ts: Date.now() - 60000 });
   const aq = await handleEvent(askedQ, { type: "text_idle" });
-  check("left-on-read after a question: one code-written line", said(aq) === "no rush, i'm around whenever", said(aq));
+  check("left-on-read after a question: one code-written line", said(aq) === "btw no rush to respond, i'm available whenever", said(aq));
 
   // their name: always in re-engagement lines, otherwise about once every 3 turns and never twice in a row
   const nm = newSession();

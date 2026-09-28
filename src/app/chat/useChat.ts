@@ -261,6 +261,8 @@ export function useChat() {
         if (a.type === "speak") spoken = call.speak(a.text);
         if (a.type === "end_call") call.endAfterSpeaking(!!a.final);
         if (a.type === "patience") call.patience(a.ms);
+        // "connected" landed; the slower look through the inbox follows as its own request
+        if (a.type === "inbox_scan") void sendEvent({ type: "inbox_scan" });
       }
       return spoken;
     };

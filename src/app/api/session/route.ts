@@ -26,6 +26,7 @@ const Event = z.discriminatedUnion("type", [
   z.object({ type: z.literal("contact_saved") }),
   z.object({ type: z.literal("mic_denied") }),
   z.object({ type: z.literal("gmail_connected"), email: z.string().email().optional() }),
+  z.object({ type: z.literal("inbox_scan") }),
   z.object({ type: z.literal("gmail_failed"), error: z.string().max(200) }),
   z.object({ type: z.literal("forget_slot"), slot: z.enum(["userName", "helpNeed", "gmail"]) }),
   z.object({ type: z.literal("draft_edit"), to: z.string().max(200), subject: z.string().max(200), body: z.string().max(5000) }),
