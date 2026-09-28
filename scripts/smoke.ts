@@ -1,6 +1,6 @@
 // Keyless smoke test of the engine's safety nets (mock mode). Run: pnpm tsx scripts/smoke.ts
 import { loadSession, newSession, saveSession, withSession } from "../src/lib/store";
-import { cleanModelText, fence, handleEvent, saysBye, softenGmailDemand, handleUserMessage, nowLine, parseTypedEmail } from "../src/lib/engine";
+import { cleanModelText, cutRepeatQuestions, fence, handleEvent, normQuestion, saysBye, softenGmailDemand, handleUserMessage, nowLine, parseTypedEmail } from "../src/lib/engine";
 import { readMood } from "../src/lib/mood";
 import { DEMO_INBOX, scoreItem } from "../src/lib/triage";
 import type { TurnResult } from "../src/lib/types";
@@ -183,6 +183,15 @@ async function main() {
   const byes = ["ok thanks, bye", "that's all for now. talk soon!", "gotta go"];
   const notByes = ["don't hang up yet", "bye! oh wait, one more thing", "call me back later", "i'm not done", "i'll do the rest later, can you check my inbox?"];
   check("bye only as their last words", byes.every((x) => saysBye(x)) && !notByes.some((x) => saysBye(x)), [...byes.filter((x) => !saysBye(x)), ...notByes.filter((x) => saysBye(x))].join(" | "));
+  // never the same question twice, and one question per message
+  const rq = newSession();
+  rq.askedQuestions = [normQuestion("what's been eating your time lately?")];
+  const rep = cutRepeatQuestions(rq, "oh nice. so what has been eating your time lately?");
+  check("a repeat question is blocked", rep.label === "blocked repeat question" && !rep.text.includes("?"), rep.text);
+  const dbl = cutRepeatQuestions(rq, "love that. where are you based? and what should i call you?");
+  check("a double question keeps only the last", dbl.label === "cut a double question" && dbl.text === "love that. and what should i call you?", dbl.text);
+  rq.askedQuestions = [normQuestion("what should i call you?")];
+  check("a different pronoun is a different question", !cutRepeatQuestions(rq, "and what should you call me?").label);
   const cancel = await handleEvent(newSession(), { type: "gmail_failed", error: "access_denied" });
   check("oauth cancel treated as a choice", /no worries/.test(said(cancel)), said(cancel));
 

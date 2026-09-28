@@ -909,6 +909,12 @@ async function turn(
   if (channel === "voice" && ctx.newMessages.some((m) => m.kind === "gmail_link") && !/\b(text|link)\b/i.test(text)) {
     fix("said out loud that the link is in texts", `${text.trim()} i'm texting you the link right now. it's the card that says connect your google account, tap it whenever you're ready.`.trim());
   }
+  // One question per message, and never one it already asked: a targeted rewrite on a miss, else the cut.
+  if (!usedFallback && ctx.move?.id !== "ask-gmail") {
+    const fixed = await noRepeatQuestions(s, text);
+    if (fixed.label) fix(fixed.label, fixed.text);
+  }
+  rememberQuestions(s, text);
   // Ask bookkeeping: credit a question to the slot this turn's move was about (never the fallback line).
   const isQuestion = !usedFallback && text.includes("?");
   const MOVE_SLOT: Record<string, SlotKey> = { "name-me": "agentName", discover: "helpNeed", dig: "helpNeed", offramp: "helpNeed", "ask-name": "userName", "ask-gmail": "gmail" };
@@ -922,6 +928,60 @@ async function turn(
   }
   const final = computeDirective(s, channel);
   return { session: s, newMessages: ctx.newMessages, chips: final.chips, actions: ctx.actions };
+}
+
+// Questions it asked before, normalized ("what's eating your time?" == "what is eating your time").
+const Q_FILLER = /\b(so|and|but|oh|okay|ok|hey|just|quick(ly)?|real quick|btw|by the way|then|now|also|anyway)\b/g;
+export function normQuestion(q: string) {
+  return q.toLowerCase().replace(/'s\b/g, " is").replace(/'re\b/g, " are").replace(/[^a-z0-9 ]+/g, " ").replace(Q_FILLER, " ").replace(/\s+/g, " ").trim();
+}
+function sameQuestion(a: string, b: string) {
+  if (a === b) return true;
+  const A = new Set(a.split(" ")), B = new Set(b.split(" "));
+  const shared = [...A].filter((w) => B.has(w)).length;
+  // "what should i call you" vs "what should i call myself": a different pronoun is a different question.
+  const diff = [...A, ...B].filter((w) => !(A.has(w) && B.has(w)));
+  if (diff.some((w) => /^(you|your|me|my|myself|yourself|i|we|us)$/.test(w))) return false;
+  return shared / Math.max(A.size, B.size) >= 0.8;
+}
+const questionsIn = (text: string) => text.split(SENTENCE_BREAK).filter((x) => x.trim().endsWith("?"));
+
+function rememberQuestions(s: Session, text: string) {
+  const qs = questionsIn(text).map(normQuestion).filter(Boolean);
+  if (!qs.length) return;
+  s.askedQuestions = [...(s.askedQuestions ?? []), ...qs].slice(-12);
+}
+
+// Returns the text unchanged (no label) when it's fine. Double question: keep the last one. Repeat: drop it.
+export function cutRepeatQuestions(s: Session, text: string): { text: string; label?: string } {
+  const asked = s.askedQuestions ?? [];
+  const qs = questionsIn(text);
+  const repeats = qs.filter((q) => asked.some((a) => sameQuestion(normQuestion(q), a)));
+  if (!repeats.length && qs.length <= 1) return { text };
+  const keepQ = qs.filter((q) => !repeats.includes(q)).slice(-1)[0];
+  const kept = text.split(SENTENCE_BREAK).filter((x) => !x.trim().endsWith("?") || x === keepQ).join(" ").trim();
+  if (!kept) return { text };
+  return { text: kept, label: repeats.length ? "blocked repeat question" : "cut a double question" };
+}
+
+async function noRepeatQuestions(s: Session, text: string): Promise<{ text: string; label?: string }> {
+  const cut = cutRepeatQuestions(s, text);
+  if (!cut.label || !provider) return cut;
+  // One cheap rewrite keeps the reply natural; if it still misses, the cut stands.
+  try {
+    const asked = (s.askedQuestions ?? []).slice(-6).map((q) => `- ${q}`).join("\n") || "(none)";
+    const out = await quick({
+      tag: "repeat-rewrite",
+      maxTokens: 200,
+      system: "Rewrite the assistant's message so it asks at most ONE question and doesn't re-ask anything already asked (listed). Keep its meaning, tone, length and lowercase style. Reply with only the rewritten message.",
+      user: `Already asked:\n${asked}\n\nMessage:\n${text}`,
+    });
+    const clean = cleanModelText(out);
+    if (clean && !cutRepeatQuestions(s, clean).label) return { text: clean, label: "rewrote a repeat question" };
+  } catch {
+    // provider hiccup: the cut is fine
+  }
+  return cut;
 }
 
 const NAME_ASK = /\b(what (do you want to|should i|would you like to|will you) (call me|go by)|what should i go by|name (for )?me)\b/i;
