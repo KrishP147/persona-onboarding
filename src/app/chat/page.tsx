@@ -22,8 +22,7 @@ export default function Home() {
   const zoom = useFrameZoom(skin.id);
   // desktop reasoning lane: collapsed until asked for, remembered
   const [showWhy, setShowWhy] = usePref("persona-show-reasoning", false);
-  const [menuOpen, setMenuOpen] = useState(false); // phone: picker, annotate, how it works, restart
-  const [annotate, setAnnotate] = useState(false);
+  const [menuOpen, setMenuOpen] = useState(false); // phone: picker, reasoning, how it works, restart
   const [hoverId, setHover] = useState<string | null>(null);
   const [activeId, setActive] = useState<string | null>(null);
   const [expanded, setExpanded] = useState<string | null>(null);
@@ -67,8 +66,6 @@ export default function Home() {
     activeId,
     setHover,
     open: (id) => openSheet(id),
-    inline: showWhy ? "below-lg" : "always",
-    annotate,
     sheetOpen: !!sheetId,
     select: (id) => {
       if (!showWhy || !wide()) return;
@@ -117,8 +114,12 @@ export default function Home() {
         <MenuSheet
           skin={picked?.id ?? null}
           setSkin={setSkin}
-          annotate={annotate}
-          setAnnotate={setAnnotate}
+          canReason={turns.length > 0}
+          onReasoning={() => {
+            setMenuOpen(false);
+            const last = turns[turns.length - 1];
+            if (last) openSheet(last.m.id);
+          }}
           mock={chat.mock}
           onClose={() => setMenuOpen(false)}
           onRestart={() => {
