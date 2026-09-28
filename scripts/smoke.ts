@@ -470,6 +470,32 @@ async function main() {
   mergeGrowingUtterance(gu2, "no actually wait");
   check("a new utterance is left alone", gu2.transcript.length === 1);
 
+  // replay (user retest): "what do you want to call me?", "hi", "so what's your name?", "rowan" -> it named itself rowan.
+  // now: lean to the newest question (their name) and ask which they meant.
+  const both = async () => {
+    const x = newSession();
+    await handleEvent(x, { type: "open" });
+    x.transcript.push(
+      { id: "u-hi", role: "user", channel: "text", text: "hi", ts: Date.now() },
+      { id: "a-nm", role: "agent", channel: "text", text: "hey, good to meet you! so what's your name?", ts: Date.now() },
+    );
+    return x;
+  };
+  const yb = await both();
+  const ya = await handleUserMessage(yb, "text", "rowan");
+  check("both name questions open: a bare name leans to the newest (their name)", yb.slots.userName.value === "Rowan" && yb.slots.agentName.status === "missing", `${yb.slots.userName.value}/${yb.slots.agentName.value}`);
+  check("...and asks which one it was", /is rowan your name, or what you'd like to call me\?/.test(said(ya)), said(ya));
+  const yc = await handleUserMessage(yb, "text", "no thats what i want to call you");
+  check("'what i want to call you' moves it to the assistant, with the card, and asks their name", yb.slots.agentName.value === "Rowan" && yb.slots.userName.status === "missing" && yc.newMessages.some((m) => m.kind === "contact_card") && /what's your name\?/.test(said(yc)), said(yc));
+  const yd = await both();
+  await handleUserMessage(yd, "text", "rowan");
+  await handleUserMessage(yd, "text", "yeah my name");
+  check("'my name' keeps it as theirs", yd.slots.userName.value === "Rowan" && yd.slots.agentName.status === "missing" && !yd.nameCheck, `${yd.slots.userName.value}/${yd.slots.agentName.value}/${JSON.stringify(yd.nameCheck)}/${yd.lastAskedSlot}`);
+  const onlyIntro = newSession();
+  await handleEvent(onlyIntro, { type: "open" });
+  await handleUserMessage(onlyIntro, "text", "luna");
+  check("only the intro question open: a bare name still names the assistant (no check)", onlyIntro.slots.agentName.value === "Luna" && !onlyIntro.nameCheck);
+
   const dn = newSession();
   dn.transcript.push({ id: "u-k", role: "user", channel: "text", text: "what do you know about me?", ts: Date.now() });
   check("'what do you know about me' shows the card", KNOW_ASK.test("what do you know about me?") && !KNOW_ASK.test("what do you know about paris"));

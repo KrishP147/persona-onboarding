@@ -203,6 +203,81 @@ export async function captureAgentName(s: Session, channel: Channel, text: strin
   return { card: ctx.newCard ?? ctx.newMessages.find((x) => x.kind === "contact_card"), pending: ctx.pending ?? [] };
 }
 
+export const USER_NAME_ASK = /\b(what'?s your name|what is your name|what (should|do|can) i call you|who am i (talking|texting) (to|with)|your name\?)/i;
+const MINE = /\b(my name|that'?s me|it'?s me|i'?m|i am|mine|me)\b/i;
+const YOURS = /\b(call you|your name|for you|name you|you'?re|you are|yours|you)\b/i;
+const titled = (v: string) => v.replace(/\b\p{L}/gu, (c) => c.toUpperCase());
+
+export async function nameAmbiguity(s: Session, channel: Channel, text: string, userMsg: Msg): Promise<TurnResult | null> {
+  if (channel !== "text" || s.call.active) return null;
+  const out = (ctx: Ctx): TurnResult => ({ session: s, newMessages: [userMsg, ...ctx.newMessages], chips: computeDirective(s, channel).chips, actions: [] });
+  const ctx: Ctx = { s, channel, actions: [], newMessages: [], move: EVENT_MOVES.named };
+  // Their answer to "is rowan your name, or what you'd like to call me?"
+  const check = s.nameCheck;
+  if (check) {
+    s.nameCheck = undefined;
+    const mine = MINE.test(text) && !/\bcall you\b/i.test(text);
+    const yours = YOURS.test(text) && !/\bmy name\b/i.test(text);
+    if (check.as === "user" && yours && !mine) {
+      s.slots.userName = { value: null, status: "missing", asks: s.slots.userName.asks };
+      await runTool(ctx, "set_slot", { slot: "agentName", value: check.value });
+      await Promise.all(ctx.pending ?? []);
+      emitAgentText(ctx, `got it, ${nameAck(check.value)} save my contact card so you know it's me. and what's your name?`);
+      if (ctx.newCard) {
+        s.transcript.push(ctx.newCard);
+        ctx.newMessages.push(ctx.newCard);
+      }
+      recordAsk(s, "userName");
+      return out(ctx);
+    }
+    if (check.as === "agent" && mine && !yours) {
+      s.slots.agentName = { value: null, status: "missing", asks: s.slots.agentName.asks };
+      s.transcript = s.transcript.filter((m) => m.kind !== "contact_card");
+      s.slots.userName = { ...s.slots.userName, value: check.value, status: "filled", source: channel, updatedAt: Date.now() };
+      emitAgentText(ctx, `got it, nice to meet you ${check.value.toLowerCase()}. so what do you want to call me?`);
+      recordAsk(s, "agentName");
+      return out(ctx);
+    }
+    // "yeah my name": theirs it is, and the question about us is still open
+    if (check.as === "user" && (mine || /^\s*(yes|yeah|yep|yup|ya|correct|right|mhm)\b/i.test(text))) {
+      emitAgentText(ctx, `got it, ${check.value.toLowerCase()}. so what do you want to call me?`);
+      recordAsk(s, "agentName");
+      return out(ctx);
+    }
+    return null; // a yes to "that's what i call you", or something else: the lean stands, carry on
+  }
+  // A bare name ("rowan"), not "i'm rowan" or "call you rowan": those already say which.
+  if (OWN_NAME.test(text.trim()) || NAME_HINT.test(text)) return null;
+  const bare = text.trim().match(/^([\p{L}][\p{L}'-]{0,19}(?: [\p{L}][\p{L}'-]{0,19})?)[.!]?$/u)?.[1];
+  if (!bare || NOT_A_NAME.test(bare)) return null;
+  // Both still open: each asked within their last couple of replies, neither answered yet.
+  const lastUser = s.transcript.findLastIndex((m) => m.role === "user" && m !== userMsg);
+  const agentAsk = s.transcript.findLastIndex((m) => m.role === "agent" && NAME_ASK.test(m.text));
+  const userAsk = s.transcript.findLastIndex((m) => m.role === "agent" && USER_NAME_ASK.test(m.text));
+  const recent = (i: number) => i >= 0 && s.transcript.slice(i + 1).filter((m) => m.role === "user" && m !== userMsg).length <= 2;
+  if (s.slots.agentName.status !== "missing" || s.slots.userName.status === "filled" || !recent(agentAsk) || !recent(userAsk)) return null;
+  // Only when a newer question came after the other went unanswered (one right after their last reply).
+  if (Math.max(agentAsk, userAsk) < lastUser) return null;
+  const value = titled(bare);
+  if (userAsk > agentAsk) {
+    s.slots.userName = { ...s.slots.userName, value, status: "filled", source: channel, updatedAt: Date.now() };
+    s.nameCheck = { value, as: "user" };
+    emitAgentText(ctx, `nice to meet you, ${value.toLowerCase()}! quick check: is ${value.toLowerCase()} your name, or what you'd like to call me?`);
+    guard(ctx, "asked which name it was (both name questions were open)");
+    return out(ctx);
+  }
+  await runTool(ctx, "set_slot", { slot: "agentName", value });
+  await Promise.all(ctx.pending ?? []);
+  s.nameCheck = { value, as: "agent" };
+  emitAgentText(ctx, `${nameAck(value)} quick check though: is that what you'd like to call me, or is ${value.toLowerCase()} your name?`);
+  if (ctx.newCard) {
+    s.transcript.push(ctx.newCard);
+    ctx.newMessages.push(ctx.newCard);
+  }
+  guard(ctx, "asked which name it was (both name questions were open)");
+  return out(ctx);
+}
+
 export async function handleUserMessage(...args: Parameters<typeof handleUserMessageInner>): Promise<TurnResult> {
   const [r, meter] = await metered(async () => sealGoodbye(args[0], await asTurnBy(args[0], "user", () => handleUserMessageInner(...args))));
   noteMetrics(args[0], meter);
@@ -319,6 +394,10 @@ export async function handleUserMessageInner(
       return { session: s, newMessages: [userMsg, ...ctx.newMessages], chips: computeDirective(s, channel).chips, actions: ctx.actions };
     }
   }
+  // Both name questions open ("what do you want to call me?", later "what's your name?") and a bare name back:
+  // lean to the newest question, and ask which they meant.
+  const unsure = await nameAmbiguity(s, channel, clean, userMsg);
+  if (unsure) return unsure;
   // Name reply safety net: models sometimes say "julia it is" without saving it.
   const named = await captureAgentName(s, channel, clean);
   // A second pass reads the message for names, needs and refusals while the reply is written.
