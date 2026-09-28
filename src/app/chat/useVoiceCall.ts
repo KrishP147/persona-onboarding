@@ -166,6 +166,12 @@ function startProbe(w: Watch, deviceId?: string) {
     });
 }
 
+// ios (every browser there is webkit, ipads report as macs with touch)
+function noSecondCapture() {
+  const ua = navigator.userAgent;
+  return /iPhone|iPad|iPod/.test(ua) || (/Macintosh/.test(ua) && navigator.maxTouchPoints > 1);
+}
+
 function endProbe(w: Watch) {
   const p = w.probe;
   w.probe = null;
@@ -578,7 +584,13 @@ export function useVoiceCall(opts: {
           w.lastEnergy = now; // raw said live recently: zeros here are just noise suppression
           return;
         }
-        // zeros for 4s: ask the raw mic before blaming it
+        // zeros for 4s: ask the raw mic before blaming it. not on ios: a second capture there can
+        // mute or end the call's own track, so only the ended/muted checks count on iphones.
+        if (!w.probe && noSecondCapture()) {
+          w.probeOkUntil = now + PROBE_OK_MS;
+          w.lastEnergy = now;
+          return;
+        }
         if (!w.probe) return startProbe(w, track?.getSettings().deviceId);
         const p = w.probe;
         if (p.gone) {
