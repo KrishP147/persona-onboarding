@@ -36,6 +36,9 @@ export function toTurns(s: Session): Turn[] {
     const prefix = !hadCall ? "" : m.role === "user" ? (m.channel === "voice" ? "(said on the call) " : "(texted in the chat) ") : m.channel === "text" ? "(posted in the chat) " : "";
     let text = m.kind === "gmail_link" ? `${prefix}[the Connect Gmail link card]` : m.kind === "gif" ? `${prefix}[a gif]` : prefix + (m.role === "user" ? fence("user_said", m.text) : m.text);
     if (m.cutOff) text += " [they cut in here; the rest wasn't heard]";
+    // replying to one message (swipe / hover "reply"): say which, so "that one" is never a guess
+    const q = m.replyTo ? s.transcript.find((x) => x.id === m.replyTo) : undefined;
+    if (q) text = `[replying to ${q.role === "agent" ? (/^to:/i.test(q.text) ? "your email draft" : "your message") : "their own earlier message"}: ${JSON.stringify(q.kind === "gif" ? "a gif" : q.text.replace(/\s+/g, " ").slice(0, 200))}] ${text}`;
     if (m.attachments?.length) text += "\n" + m.attachments.map(attachmentText).join("\n");
     const parts: Part[] = [];
     // Only the latest user message carries actual image pixels; older ones use the summary.
@@ -332,6 +335,7 @@ export async function handleUserMessageInner(
   interrupted?: boolean,
   clientId?: string,
   heardBefore?: string,
+  replyTo?: string,
 ): Promise<TurnResult> {
   // Curly apostrophes (phones type them) broke every "that's all" / "don't" check.
   const clean = text.slice(0, 4000).replace(/[‘’]/g, "'");
@@ -350,7 +354,9 @@ export async function handleUserMessageInner(
   // pushed a pasted link out of the model's history once.
   if (channel === "voice") mergeGrowingUtterance(s, clean);
   // The client shows the message instantly under its own id; reuse it so there's no duplicate.
-  const userMsg = msg("user", channel, clean, { ...(attachments?.length ? { attachments } : {}), ...(clientId ? { id: clientId } : {}) });
+  // a reply to one message: only one that's really in this conversation
+  const quoted = replyTo && s.transcript.some((m) => m.id === replyTo && m.role !== "event") ? replyTo : undefined;
+  const userMsg = msg("user", channel, clean, { ...(attachments?.length ? { attachments } : {}), ...(clientId ? { id: clientId } : {}), ...(quoted ? { replyTo: quoted } : {}) });
   s.transcript.push(userMsg);
   recordOutcome(s, clean); // did they act on the last interruption, or wave it off?
   // A real answer ("mostly applying to jobs and schoolwork") pays for the question: the next turn can

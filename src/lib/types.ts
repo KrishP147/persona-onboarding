@@ -46,6 +46,7 @@ export interface Msg {
   attachments?: Attachment[];
   move?: Move; // which research-backed move produced this agent message (shown in the side panel)
   guards?: string[]; // safety nets in code that changed this reply this turn (shown in "why it said that")
+  replyTo?: string; // the message they swiped/hovered to reply to (its id)
   discarded?: boolean; // an email draft they threw away (the card shows it as one muted line)
 }
 

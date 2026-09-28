@@ -2,7 +2,7 @@
 import { getSecret, loadSession, newSession, saveSession, setSecret, withSession } from "../src/lib/store";
 import { CLAIMS_LINK, GUARD_PIPELINE, dropAskedQuestions, fixCallTypos, makeGuardEnv, INTENTS, cleanModelText, cutRepeatQuestions, fence, fromEmailOnly, runTool, handleEvent, normQuestion, saysBye, softenGmailDemand, handleUserMessage, nowLine, parseTypedEmail, MAX_BUBBLES, emitAgentText } from "../src/lib/engine";
 import { computeDirective } from "../src/lib/policy";
-import { KNOW_ASK, mergeGrowingUtterance } from "../src/lib/engine/turn";
+import { KNOW_ASK, mergeGrowingUtterance, toTurns } from "../src/lib/engine/turn";
 import { crc32, pick } from "../src/lib/moves";
 import { readMood } from "../src/lib/mood";
 import { DEMO_INBOX, scoreItem } from "../src/lib/triage";
@@ -495,6 +495,15 @@ async function main() {
   await handleEvent(onlyIntro, { type: "open" });
   await handleUserMessage(onlyIntro, "text", "luna");
   check("only the intro question open: a bare name still names the assistant (no check)", onlyIntro.slots.agentName.value === "Luna" && !onlyIntro.nameCheck);
+
+  // replying to one message: the model sees which one, and a made-up id is ignored
+  const rp = newSession();
+  rp.transcript.push({ id: "a-rp1", role: "agent", channel: "text", text: "want me to check your inbox or draft that reply?", ts: Date.now() });
+  await handleUserMessage(rp, "text", "that one", undefined, false, "u-rp1", undefined, "a-rp1");
+  const rpTurn = toTurns(rp).flatMap((t) => t.parts).map((p) => ("text" in p ? p.text : "")).join(" ");
+  check("a reply carries its quote to the model", rp.transcript.find((m) => m.id === "u-rp1")?.replyTo === "a-rp1" && /\[replying to your message: "want me to check your inbox/.test(rpTurn), rpTurn.slice(0, 160));
+  await handleUserMessage(rp, "text", "ok", undefined, false, "u-rp2", undefined, "nope-not-real");
+  check("a reply to an unknown message is just a message", !rp.transcript.find((m) => m.id === "u-rp2")?.replyTo);
 
   const dn = newSession();
   dn.transcript.push({ id: "u-k", role: "user", channel: "text", text: "what do you know about me?", ts: Date.now() });
