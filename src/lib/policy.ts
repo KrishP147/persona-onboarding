@@ -1,5 +1,6 @@
 import type { Channel, Session, SlotKey } from "./types";
 import { MOOD_GUIDANCE, readMood } from "./mood";
+import { replyFocus } from "./engine/intents";
 
 // Deterministic onboarding policy. The LLM writes the words; this decides
 // what the next move is, so behavior stays consistent under adversarial users.
@@ -95,7 +96,8 @@ export function computeDirective(s: Session, channel: Channel): Directive {
     s.callOffers < MAX_CALL_OFFERS &&
     s.slots.agentName.status !== "missing" &&
     (isOpen(s, "userName") || isOpen(s, "helpNeed") || isOpen(s, "gmail"));
-  const callFirst = offerCall && s.callOffers === 0;
+  // A Reply to one message is answered first; the call offer waits a turn.
+  const callFirst = offerCall && s.callOffers === 0 && !replyFocus(s);
 
   // Early graduation is the user's call; otherwise finish once nothing is left to gather.
   const canGraduate = missing.length === 0;

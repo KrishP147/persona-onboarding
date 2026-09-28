@@ -1,4 +1,4 @@
-import { type Session } from "../types";
+import { type Msg, type Session } from "../types";
 
 import { SENTENCE_BREAK } from "./text";
 
@@ -114,7 +114,8 @@ export const CALL_OK = /\b(yes|yeah|yep|yup|ya|sure|ok(ay)?|k|fine|alright|go ah
 // "you pick" / "idk" hands the choice to us; otherwise a name has to come from them.
 export const DELEGATE = /\b(you (pick|choose|decide)|up to you|your (call|choice)|surprise me|whatever|anything|any ?name|i don'?t (care|mind|know)|idc|idk|dunno|no idea|dealer'?s choice)\b/i;
 export const CALL_NO = /\b(no|nah|nope|not now|text is fine|rather text|just text|don'?t call|no calls?|hate (phone )?calls)\b/i;
-export const OFFERED_CALL = /\b(call|ring|phone)\b[^?]*\?/i;
+// "what do you want to call me?" asks for our name; it never offered a call (a nudge once said "no pressure on the call" to it).
+export const OFFERED_CALL = /\b(call|ring|phone)\b(?!\s+me\b)[^?]*\?/i;
 export const NEGATED_CALL = /\b(don'?t|do not|didn'?t|did not|won'?t|wasn'?t|shouldn'?t|no|not|never|stop)\b[^.!?]{0,20}\b(call|ring|phone)/i;
 
 // Whatever the model wrapped its words in, keep only what a person would actually say.
@@ -123,6 +124,15 @@ export const NEGATED_CALL = /\b(don'?t|do not|didn'?t|did not|won'?t|wasn'?t|sho
 // "send it" / "email them" ... and a reply that says it went out.
 export const SEND_REQUEST = /\b(send|sned|sewnd|email|forward|reply to)\b/i;
 export const NAME_ASK = /\b(what (do you want to|should i|would you like to|will you) (call me|go by)|what should i go by|name (for )?me)\b/i;
+// A Reply (swipe / hover) to one message that isn't the name question: they're pointing at that message, so this
+// turn is about it. No name guessing, no setup push.
+export function repliedElsewhere(s: Session, u?: Msg): Msg | undefined {
+  if (!u?.replyTo || u.role !== "user") return;
+  const q = s.transcript.find((m) => m.id === u.replyTo);
+  return q && !(q.role === "agent" && NAME_ASK.test(q.text)) ? q : undefined;
+}
+// The message this turn answers, if it's such a Reply: the newest one in the chat (events don't count).
+export const replyFocus = (s: Session) => (s.turnBy === "event" ? undefined : repliedElsewhere(s, s.transcript.findLast((m) => m.role !== "event" && m.kind !== "contact_card")));
 // Commands and reactions are never names ("send" once became "Send it is").
 export const NOT_A_NAME =
   /^(send|write|draft|call|email|connect|help|stop|cancel|done|next|go|continue|start|test|link|gmail|reply|check|find|search|wait|what\?|no|nah|nope|idk|i don'?t know|dunno|you pick|you choose|up to you|surprise me|anything|whatever|skip|why|what|whats|who|whos|hi|hey|hello|yes|yeah|yep|ok|okay|sure|cool|nice|thanks|thank you|ty|lol|haha|lmao|hmm+|um+|uh+|idc|nothing|none|me|you|it|this|that|i|im)\b/i;
@@ -228,7 +238,7 @@ export const INTENTS: Record<string, IntentDef> = {
   CALL_OK: { re: CALL_OK, means: "ok to ring them", says: ["sure", "call me", "k"], notSays: ["haha", "hmm"] },
   DELEGATE: { re: DELEGATE, means: "they hand us the choice", says: ["you pick", "idk", "surprise me"], notSays: ["luna", "i pick luna"] },
   CALL_NO: { re: CALL_NO, means: "no to a call", says: ["nah", "text is fine", "don't call"], notSays: ["sure", "yes call me"] },
-  OFFERED_CALL: { re: OFFERED_CALL, means: "our message offered a call", says: ["want me to give you a quick call?"], notSays: ["i'll call you in a sec.", "what's up?"] },
+  OFFERED_CALL: { re: OFFERED_CALL, means: "our message offered a call", says: ["want me to give you a quick call?"], notSays: ["i'll call you in a sec.", "what's up?", "what do you want to call me?"] },
   NEGATED_CALL: { re: NEGATED_CALL, means: "a call mentioned only to refuse it", says: ["please don't call me", "i didn't want you to call"], notSays: ["call me", "can you call me?"] },
   SEND_REQUEST: { re: SEND_REQUEST, means: "they asked for something to be sent", says: ["send it", "email her", "forward that"], notSays: ["what's up", "looks good"] },
   NAME_ASK: { re: NAME_ASK, means: "our message asks for our own name", says: ["what do you want to call me?", "what should i go by?"], notSays: ["what should i call you?"] },
