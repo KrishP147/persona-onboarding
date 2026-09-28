@@ -23,11 +23,14 @@ export const USER_BYE = /\b(end (the |this )?call|hang up|you can go|let'?s end|
 export const DONT_BYE = /\b(don'?t|do not|not|never|no need to)\b[^.!?]{0,12}\b(hang up|go|end|leave|done|bye)\b/i;
 // "call me back later" asks for a callback, not a goodbye.
 export const CALLBACK = /\b(call|ring) me (back|later|tomorrow|tonight|again|in (a|an|\d))/i;
+const CLOSER = /^(ok(ay)?[, ]*)?((i )?(really )?(appreciate (it|you|that)|thanks?( (so much|a lot|again))?|thank you( (so much|again))?|cheers)|i think i'?ve (got(ten)?|had) (my|what i|all the) (help|needed|need)|that (helped|was great|was helpful))[.! ]*$/i;
 // A bye counts only as their last words: "bye! oh wait, one more thing" is still talking.
 export function saysBye(text: string, phrases: RegExp = USER_BYE) {
   const t = text.trim();
   if (!t || DONT_BYE.test(t) || CALLBACK.test(t)) return false;
   const parts = t.split(SENTENCE_BREAK).filter((x) => x.trim());
+  // "you can hang up. i think i've gotten my help. i appreciate it.": thanks after the bye is still the bye.
+  while (parts.length > 1 && CLOSER.test(parts[parts.length - 1].trim())) parts.pop();
   const last = parts[parts.length - 1] ?? "";
   // A question at the end means they're still talking ("i'll do it later, can you check my inbox?").
   if (last.trim().endsWith("?")) return false;
