@@ -111,28 +111,58 @@ async function main() {
       } catch {}
     }
   }
-  const real = sessions.filter((s) => s.transcript?.length && !isTest(s));
-  const rows = real.map(measure);
+  const sinceAt = process.argv.indexOf("--since");
+  const since = sinceAt >= 0 ? Date.parse(process.argv[sinceAt + 1] ?? "") : NaN;
+  if (sinceAt >= 0 && Number.isNaN(since)) throw new Error("--since needs an iso date, e.g. --since 2026-09-28T12:00:00Z");
+  const real = sessions.filter((s) => s.transcript?.length && !isTest(s) && (Number.isNaN(since) || s.createdAt >= since));
+  const all = real.map(measure);
+  const openedOnly = all.filter((r) => !r.steps.engaged).length;
+  // The funnel starts at the first message: a page load alone (a refresh, a link preview) isn't a person trying it.
+  const rows = all.filter((r) => r.steps.engaged);
   const n = rows.length;
   const count = (k: Step) => rows.filter((r) => r.steps[k]).length;
-
-  const lines: string[] = [];
-  lines.push(`# onboarding funnel (real users, prod)`, ``);
-  lines.push(`generated ${new Date().toISOString().slice(0, 16).replace("T", " ")} utc by \`pnpm funnel\` (read-only over prod sessions, aggregate only). sessions expire after 7 days, so this is the last week. ${sessions.length - real.length} test or empty sessions left out.`, ``);
-  lines.push(`**n = ${n} sessions**`, ``);
-  lines.push(`| step | reached | of opened | from previous step | dropped here |`, `|---|---|---|---|---|`);
+  const FUNNEL = STEPS.slice(1);
   const drops: { step: string; lost: number; rate: number }[] = [];
-  STEPS.forEach(([k, label], i) => {
-    const c = count(k);
-    const prev = i ? count(STEPS[i - 1][0]) : c;
-    const lost = prev - c;
-    if (i) drops.push({ step: label, lost, rate: prev ? lost / prev : 0 });
-    lines.push(`| ${label} | ${c} | ${pct(c, n)} | ${i ? pct(c, prev) : "-"} | ${i ? lost : "-"} |`);
+  FUNNEL.forEach(([k, label], i) => {
+    if (!i) return;
+    const prev = count(FUNNEL[i - 1][0]);
+    drops.push({ step: label, lost: prev - count(k), rate: prev ? (prev - count(k)) / prev : 0 });
   });
+  const top = [...drops].sort((a, b) => b.lost - a.lost || b.rate - a.rate).slice(0, 3);
   const valueTimes = rows.map((r) => r.valueMs).filter((x): x is number => x !== null);
   const costs = rows.map((r) => r.cost).filter((x): x is number => x !== null);
   const calls = rows.reduce((a, r) => a + r.calls, 0);
   const hangups = rows.reduce((a, r) => a + r.hangups, 0);
+  const stamp = (ms: number) => new Date(ms).toISOString().slice(0, 16).replace("T", " ");
+
+  const lines: string[] = [];
+  lines.push(`# onboarding funnel`, ``);
+  lines.push(
+    Number.isNaN(since)
+      ? `**development-period baseline, before today's fixes.** prod sessions from the last 7 days: our own testing and debugging plus a few friends, with no reliable way to tell them apart. read it as a baseline, not as how real users behave.`
+      : `**sessions since ${stamp(since)} utc**, after the fixes below. still a small sample: friends trying it, possibly some of our own checks.`,
+    ``,
+    `generated ${stamp(Date.now())} utc by \`pnpm funnel${Number.isNaN(since) ? "" : " --since ..."}\` (read-only over prod sessions, aggregate only).`,
+    ``,
+  );
+  lines.push(`## headline`, ``);
+  lines.push(`- **median ${dur(median(valueTimes))} from opening the chat to the first real help** (inbox triage or a draft), across the ${valueTimes.length} sessions that got there.`);
+  for (const d of top) {
+    lines.push(`- **drop-off: ${d.step}** (lost ${d.lost}, ${Math.round(d.rate * 100)}% of those who reached the step before)`);
+    if (CHANGES[d.step]) lines.push(`  - fix: ${CHANGES[d.step]}`);
+  }
+  lines.push(``, `## funnel`, ``);
+  lines.push(
+    `n = ${n} sessions that sent at least one message. another ${openedOnly} only opened the page (refreshes, link previews, a look without typing) and aren't in the funnel. ${sessions.length - real.length} ${Number.isNaN(since) ? "e2e test or empty" : "e2e test, empty or pre-cutoff"} sessions left out.`,
+    ``,
+  );
+  lines.push(`| step | reached | of those who texted | from previous step | dropped here |`, `|---|---|---|---|---|`);
+  FUNNEL.forEach(([k, label], i) => {
+    const c = count(k);
+    const prev = i ? count(FUNNEL[i - 1][0]) : c;
+    lines.push(`| ${label} | ${c} | ${pct(c, n)} | ${i ? pct(c, prev) : "-"} | ${i ? prev - c : "-"} |`);
+  });
+  lines.push(`| (opened only, never texted) | ${openedOnly} | not in the funnel | - | - |`);
   lines.push(``, `| metric | value |`, `|---|---|`);
   lines.push(`| median time to first value (chat opened to inbox triage or a draft) | ${dur(median(valueTimes))} (${valueTimes.length} sessions got there) |`);
   lines.push(`| median turns per session | ${median(rows.map((r) => r.turns)) ?? "n/a"} |`);
@@ -141,12 +171,7 @@ async function main() {
   lines.push(`| gmail via the demo inbox | ${rows.filter((r) => r.demoGmail).length} of ${count("gmail")} |`);
   lines.push(`| graduated early (skipped the rest) | ${rows.filter((r) => r.early).length} |`);
   lines.push(`| $ per session (where metered) | ${costs.length ? `$${(costs.reduce((a, b) => a + b, 0) / costs.length).toFixed(4)} over ${costs.length}` : "n/a (metering is newer than these sessions)"} |`);
-  lines.push(``, `## biggest drop-offs`, ``);
-  for (const d of [...drops].sort((a, b) => b.lost - a.lost || b.rate - a.rate).slice(0, 3)) {
-    lines.push(`- **${d.step}**: lost ${d.lost} (${Math.round(d.rate * 100)}% of those who got to the step before)`);
-    if (CHANGES[d.step]) lines.push(`  - what changed: ${CHANGES[d.step]}`);
-  }
-  lines.push(``, `most of these sessions predate the changes above, so their effect shows up in the next run of this script, not this one. "opened" also counts refreshes, link previews and our own checks, so the first drop-off reads worse than it is.`);
+  if (Number.isNaN(since)) lines.push(``, `the fixes above shipped after almost all of these sessions, so their effect will show in \`pnpm funnel --since <deploy time>\`, not here.`);
   const out = lines.join("\n") + "\n";
   writeFileSync("FUNNEL.md", out);
   console.log(out);
