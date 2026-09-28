@@ -1,4 +1,4 @@
-import type { VoiceStyle } from "./types";
+import type { Session, VoiceStyle } from "./types";
 
 // One Cartesia voice per style, fixed, so an agent never changes voice mid-call or between calls.
 export const CARTESIA_VOICES: Record<VoiceStyle, string> = {
@@ -24,3 +24,9 @@ export const ELEVEN_VOICES: Record<VoiceStyle, string> = {
   masculine: process.env.ELEVENLABS_VOICE_MASCULINE ?? "TX3LPaxmHKxFdv7VOQHJ", // liam
   neutral: process.env.ELEVENLABS_VOICE_NEUTRAL ?? "SAz9YHcvj6GT2YYXdXww", // river
 };
+
+// Deepgram nova-3 keyterm prompting: names it must not mishear (sent with the stt token, appended as keyterm= params).
+export function keyterms(s: Session): string[] {
+  const names = [s.slots.agentName.value, s.slots.userName.value].filter((v): v is string => !!v?.trim());
+  return [...new Set([...names, "Persona", "Gmail"].map((k) => k.trim().slice(0, 40)))].slice(0, 10);
+}

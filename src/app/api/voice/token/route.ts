@@ -1,4 +1,5 @@
 import { incrDaily, loadSession } from "@/lib/store";
+import { keyterms } from "@/lib/voice";
 
 // Short-lived Deepgram token so the browser can stream mic audio without ever seeing our key.
 export async function GET(req: Request) {
@@ -18,5 +19,6 @@ export async function GET(req: Request) {
     return Response.json({ error: "stt unavailable" }, { status: 502 });
   }
   const { access_token } = (await res.json()) as { access_token: string };
-  return Response.json({ token: access_token }, { headers: { "Cache-Control": "no-store" } });
+  // nova-3 keyterm prompting: the words this call most needs to hear right (append each as `keyterm=` on the listen url).
+  return Response.json({ token: access_token, keyterms: keyterms(s) }, { headers: { "Cache-Control": "no-store" } });
 }
