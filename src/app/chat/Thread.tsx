@@ -1,7 +1,8 @@
 "use client";
 // the message list, drawn by the current skin. same order, grouping and receipts on every phone.
-import { useEffect, useRef, type ReactNode, type RefObject } from "react";
+import { Fragment, useEffect, useRef, type ReactNode, type RefObject } from "react";
 import type { Msg } from "@/lib/types";
+import { KnowCard, useGradSlot } from "./cards/KnowCard";
 import type { Pos, Skin } from "./skins/types";
 import type { Chat } from "./useChat";
 import type { Turn } from "./why/frameworks";
@@ -37,6 +38,8 @@ export function Thread({ skin, chat, why, scrollRef }: { skin: Skin; chat: Chat;
   const lastUserIdx = thread.findIndex((x) => x.id === lastUserId);
   const readAt = thread.slice(lastUserIdx + 1).find((x) => x.role === "agent")?.ts;
   const S = skin;
+  const gradAt = useGradSlot(chat, thread);
+  const know = gradAt !== null && <KnowCard skin={skin} chat={chat} />;
 
   return (
     <div ref={scrollRef} className={`relative flex-1 overflow-y-auto overscroll-contain ${skin.threadClass}`} role="log" aria-live="polite" aria-label="Messages">
@@ -69,19 +72,22 @@ export function Thread({ skin, chat, why, scrollRef }: { skin: Skin; chat: Chat;
             />
           );
         return (
-          <div
-            key={m.id}
-            data-msg-id={m.id}
-            onMouseEnter={turn ? () => why.setHover(m.id) : undefined}
-            onMouseLeave={turn ? () => why.setHover(null) : undefined}
-            onClick={turn ? () => why.select(m.id) : undefined}
-          >
-            {showTime && <S.DateStamp ts={m.ts} first={i === 0} />}
-            {body}
-            {turn && why.inline !== "never" && <WhyBadge turn={turn} skin={skin} why={why} />}
-          </div>
+          <Fragment key={m.id}>
+            <div
+              data-msg-id={m.id}
+              onMouseEnter={turn ? () => why.setHover(m.id) : undefined}
+              onMouseLeave={turn ? () => why.setHover(null) : undefined}
+              onClick={turn ? () => why.select(m.id) : undefined}
+            >
+              {showTime && <S.DateStamp ts={m.ts} first={i === 0} />}
+              {body}
+              {turn && why.inline !== "never" && <WhyBadge turn={turn} skin={skin} why={why} />}
+            </div>
+            {gradAt === i && know}
+          </Fragment>
         );
       })}
+      {gradAt === -1 && know}
       {(typing || revealing) && <S.Typing />}
       {!chat.saved && S.UnknownNotice && thread.length > 0 && <S.UnknownNotice />}
       <div ref={bottomRef} className="h-1" />
