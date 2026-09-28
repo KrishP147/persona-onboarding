@@ -20,18 +20,19 @@ const glass: CSSProperties = {
 
 const hasTail = (p: Pos) => p === "single" || p === "last";
 
-// the imessage tail: covers the rounded bottom corner and adds the hooked tip
+// the imessage tail: hooks out of the bottom corner. it paints behind the bubble's content
+// (z -1 inside an isolated bubble), so it can never cover a glyph whatever the run position
 function Tail({ mine, color }: { mine: boolean; color: string }) {
   return (
     <svg
-      width="20"
-      height="20"
-      viewBox="0 0 20 20"
+      width="18"
+      height="18"
+      viewBox="0 0 18 18"
       aria-hidden
-      className="absolute bottom-0 pointer-events-none"
-      style={mine ? { right: -5, color } : { left: -5, color, transform: "scaleX(-1)" }}
+      className="absolute bottom-0 -z-10 pointer-events-none"
+      style={mine ? { right: -6, color } : { left: -6, color, transform: "scaleX(-1)" }}
     >
-      <path d="M0 0H15V8C15 14 16.5 17.5 20 20C16 20.5 11.5 19.8 8 17.5C6.5 19 4 20 0 20Z" fill="currentColor" />
+      <path d="M0 0H12V7C12 12.5 13.5 15.6 18 18C13.4 18.6 9.2 17.6 6.2 15.4C4.6 17 2.6 18 0 18Z" fill="currentColor" />
     </svg>
   );
 }
@@ -133,13 +134,10 @@ function Bubble({ m, mine, pos, reaction, receipt, receiptAt, highlight }: Bubbl
   return (
     <div data-role={m.role} className={`${gap} flex flex-col ${mine ? "items-end" : "items-start"}`}>
       <div
-        className={`relative max-w-[70%] rounded-[18px] px-3 py-[7px] text-[17px] leading-[22px] tracking-[-0.4px] whitespace-pre-wrap break-words transition-[outline-color] duration-150 ${mine ? "text-white" : "text-black"}`}
+        className={`relative isolate max-w-[70%] rounded-[18px] px-3 py-[7px] text-[17px] leading-[22px] tracking-[-0.4px] whitespace-pre-wrap break-words transition-[outline-color] duration-150 ${mine ? "text-white" : "text-black"}`}
         style={{ background: mine ? `linear-gradient(#1A93FF, ${BLUE})` : RECV, outline: highlight ? `2px solid ${highlight}` : "2px solid transparent", outlineOffset: 2 }}
       >
-        {/* text above the tail, which paints over the corner */}
-        <span className="relative z-[1]">
-          <BubbleBody m={m} voice={mine ? undefined : { knob: "bg-black/10", bar: "bg-black/40", ink: "text-black/60" }} />
-        </span>
+        <BubbleBody m={m} voice={mine ? undefined : { knob: "bg-black/10", bar: "bg-black/40", ink: "text-black/60" }} />
         {hasTail(pos) && <Tail mine={mine} color={bg} />}
         {reaction && (
           // their tapback on your bubble: grey badge, top outer corner, with the little two-dot tail
@@ -262,7 +260,7 @@ function Card({ pos, children, footer, onClick, disabled, href }: { pos: Pos; ch
       </div>
     </>
   );
-  const cls = "relative block w-[264px] rounded-[18px] text-black";
+  const cls = "relative isolate block w-[264px] rounded-[18px] text-black";
   return (
     <div data-role="agent" className={`${pos === "single" || pos === "first" ? "pt-[9px]" : "pt-[2px]"} flex justify-start`}>
       {href ? (
@@ -326,7 +324,7 @@ function LinkPreview({ url, pos }: { url: string; pos: Pos }) {
 function ContactCard({ name, saved, onSave, pos }: { name: string; saved: boolean; onSave: () => void; pos: Pos }) {
   return (
     <div data-role="agent" className={`${pos === "single" || pos === "first" ? "pt-[9px]" : "pt-[2px]"} flex justify-start`}>
-      <div className="relative w-[264px] rounded-[18px] text-black" style={{ background: RECV }}>
+      <div className="relative isolate w-[264px] rounded-[18px] text-black" style={{ background: RECV }}>
         <div className="flex items-center gap-3 px-3 py-[10px]">
           <div className="w-10 h-10 rounded-full flex items-center justify-center text-white text-[17px] font-semibold shrink-0" style={{ background: "linear-gradient(#A5ABB8,#858994)" }}>
             {name.charAt(0).toUpperCase()}
