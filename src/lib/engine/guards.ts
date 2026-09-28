@@ -128,7 +128,7 @@ export function linkPending(s: Session) {
 // Provenance: email text the agent has seen this session, so values that only an email "said" never become slots.
 export function rememberEmails(s: Session, items: InboxItem[]) {
   const seen = new Set(s.emailSeen ?? []);
-  for (const m of items) seen.add(`${m.fromName} ${m.subject} ${m.snippet}`.slice(0, 400));
+  for (const m of items) seen.add(`${m.fromName} <${m.fromEmail}> ${m.subject} ${m.snippet}`.slice(0, 400));
   s.emailSeen = [...seen].slice(-40);
 }
 export const WORDS_OF = (t: string) => new Set(t.toLowerCase().split(/[^\p{L}\p{N}']+/u).filter((w) => w.length >= 3));

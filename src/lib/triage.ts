@@ -120,7 +120,7 @@ export function recordOutcome(s: Session, userText: string) {
 
 // Sample inbox for the demo account (no real Google client configured).
 export const DEMO_INBOX: InboxItem[] = [
-  { id: "d1", fromName: "Maya Chen", fromEmail: "maya.chen@stripe.com", subject: "Following up: final round interview times", snippet: "Hi! Just following up on my last note. Could you send your availability for Thursday or Friday so we can lock in your final round?", date: Date.now() - 20 * 3600e3 },
+  { id: "d1", fromName: "Maya Chen", fromEmail: "maya.chen@persona.com", subject: "Following up: final round interview times", snippet: "Hi! Just following up on my last note. Could you send your availability for Thursday or Friday so we can lock in your final round?", date: Date.now() - 20 * 3600e3 },
   { id: "d2", fromName: "Grubhub", fromEmail: "no-reply@grubhub.com", subject: "30% off your next order", snippet: "Treat yourself this weekend.", date: Date.now() - 5 * 3600e3, labels: ["CATEGORY_PROMOTIONS"] },
   { id: "d3", fromName: "GitHub", fromEmail: "notifications@github.com", subject: "[repo] New comment on issue #12", snippet: "Looks good to me.", date: Date.now() - 8 * 3600e3, labels: ["CATEGORY_UPDATES"] },
   { id: "d4", fromName: "Medium Daily Digest", fromEmail: "noreply@medium.com", subject: "Stories for you", snippet: "10 things about productivity", date: Date.now() - 30 * 3600e3, labels: ["CATEGORY_PROMOTIONS"] },

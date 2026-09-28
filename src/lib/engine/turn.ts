@@ -324,7 +324,9 @@ export async function nameAmbiguity(s: Session, channel: Channel, text: string, 
     // A lone name-like word, but not as the direct answer to our name question (something else was said in
     // between, and it isn't a Reply to that question): it might be naming us, so ask instead of assuming.
     const unnamed = s.slots.agentName.status === "missing" || (s.agentNameDefaulted && s.slots.agentName.value === "Persona");
-    if (unnamed && agentAsk >= 0 && !/\s/.test(bare) && !nameAskIsNewest(s, userMsg)) {
+    // only while the name question is fresh: once it has a name (even the default), a stray word later
+    // ("ye" to "send it?") is never a rename. Renaming then takes a Reply to the name question or "call you x".
+    if (unnamed && recent(agentAsk) && !/\s/.test(bare) && !nameAskIsNewest(s, userMsg)) {
       const v = titled(bare);
       s.nameCheck = { value: v, as: "confirm" };
       emitAgentText(ctx, s.agentNameDefaulted ? `want me to go by ${v.toLowerCase()} instead of persona?` : `wait, is ${v.toLowerCase()} what you want to call me?`);

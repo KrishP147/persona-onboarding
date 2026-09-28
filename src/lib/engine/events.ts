@@ -1,4 +1,4 @@
-import { type Msg, type Session, type SlotKey, type TurnResult } from "../types";
+import { type InboxItem, type Msg, type Session, type SlotKey, type TurnResult } from "../types";
 import { computeDirective, recordAsk, MAX_CALL_OFFERS, MAX_SILENCE_STRIKES, SILENCE_BEFORE_WARN_MS, SILENCE_SECOND_MS, SILENCE_WARN_GAP_MS, SILENCE_WARN_STRIKE } from "../policy";
 import { RECAP_INSTRUCTION } from "../prompt";
 
@@ -23,6 +23,7 @@ export type SessionEvent =
   | { type: "contact_saved" }
   | { type: "mic_denied" }
   | { type: "gmail_connected"; email?: string }
+  | { type: "inbox_scan" } // right after gmail_connected over text: the (slower) inbox look
   | { type: "gmail_failed"; error: string }
   | { type: "forget_slot"; slot: Exclude<SlotKey, "agentName"> } // "forget" on the what-i-know card
   | { type: "draft_edit"; to: string; subject: string; body: string } // edited in place on the draft card
@@ -305,29 +306,31 @@ export const EVENT_HANDLERS: { [K in SessionEvent["type"]]: EventHandler<K> } = 
     s.gmailEmail = v.email;
     s.gmailUnread = v.unread;
     eventMsg(s, `Gmail connected: ${v.email}`);
+    const demo = "demo" in v && !!v.demo;
+    const demoNote = "heads up, this is the demo inbox: sample emails only, and no real email ever leaves it, even when i tell you one did.";
     // They connected to send a draft: that's the next step, the inbox can wait.
     if (s.draft && !s.draft.sent && !s.call.active) {
       const ctx: Ctx = { s, channel: "text", actions: [], newMessages: [], move: EVENT_MOVES.callNow };
-      emitAgentText(ctx, s.draft.to ? `connected. want me to send the draft to ${s.draft.to} now?` : "connected. who should the draft go to? send me their email address.");
+      emitAgentText(ctx, (demo ? `${demoNote} ` : "") + (s.draft.to ? `connected. want me to send the draft to ${s.draft.to} now?` : "connected. who should the draft go to? send me their email address."));
       return { session: s, newMessages: ctx.newMessages, chips: computeDirective(s, "text").chips, actions: [] };
     }
-    // Interrupt only if waiting would cost them something; everything else is a digest line.
-    rememberEmails(s, v.inbox ?? []);
-    const t = await triageInbox(s, v.inbox ?? []);
-    let inboxNote: string;
-    let fallback: string;
-    if (t.interrupt) {
-      const it = t.interrupt.item;
-      (s.alerts ??= []).push({ id: it.id, category: t.interrupt.category!, reason: t.interrupt.reason, subject: it.subject, from: it.fromName, shownAt: Date.now(), outcome: "pending" });
-      inboxNote = `From their unread mail, ONE item is worth raising now: "${it.subject}" from ${it.fromName} (${it.snippet.slice(0, 120)}). Why it matters: ${t.interrupt.reason}. Mention just this one, say briefly why (the evidence), and offer one concrete thing you can do about it. Say the rest can wait for a digest. Don't list other emails.`;
-      fallback = `gmail's connected. one thing that looks like it can't wait: "${it.subject}" from ${it.fromName}. want me to draft a reply?`;
-    } else {
-      inboxNote = `Nothing in their unread mail looks urgent (no deadlines, money issues, or people waiting). Don't list emails or invent any. Just say it's connected and nothing needs them right now; you'll keep the rest for a digest.`;
-      fallback = "gmail's connected. nothing urgent in there, i'll keep the rest for a digest.";
+    // Over text, say "connected" now (code, instant) and look through the inbox in the next event: the look
+    // is a model call, and a run sat 11s silent until they asked "connected?".
+    if (!s.call.active) {
+      s.inboxToScan = v.inbox ?? [];
+      const ctx: Ctx = { s, channel: "text", actions: [], newMessages: [], move: EVENT_MOVES.honest };
+      // The demo inbox acts real later ("sent"), so the one honest line about it is here, up front.
+      emitAgentText(ctx, demo ? `${demoNote} looking through it now, one sec` : "connected! looking through your inbox now, one sec");
+      recordAsk(s, null);
+      return { session: s, newMessages: ctx.newMessages, chips: computeDirective(s, "text").chips, actions: [{ type: "inbox_scan" }] };
     }
-    // A promise made while they signed in ("i'll pull the shopping list together once it's done") comes first.
-    const waiting = "If you told them you'd do something once it connected (a list, a plan, a draft), deliver it now, in full, before anything else, and give the inbox item one short line after it.";
-    return turn(s, s.call.active ? "voice" : "text", `Their Gmail just connected. ${waiting} ${inboxNote}`, fallback, t.interrupt ? { move: EVENT_MOVES.interrupt } : {});
+    return scanInbox(s, v.inbox ?? [], false, demo);
+  },
+  inbox_scan: async ({ s, idle }) => {
+    const inbox = s.inboxToScan;
+    if (!inbox || s.slots.gmail.status !== "filled") return idle();
+    s.inboxToScan = undefined;
+    return scanInbox(s, inbox, true);
   },
   gmail_failed: async ({ s, e, idle }) => {
     if (s.slots.gmail.status === "filled") return idle(); // they picked the demo inbox in the popup instead
@@ -351,6 +354,31 @@ export const EVENT_HANDLERS: { [K in SessionEvent["type"]]: EventHandler<K> } = 
     );
   },
 };
+
+// The first look through a just-connected inbox: raise one item only if waiting would cost them, else a digest line.
+async function scanInbox(s: Session, inbox: InboxItem[], saidConnected = false, demo = false): Promise<TurnResult> {
+  {
+    rememberEmails(s, inbox);
+    const t = await triageInbox(s, inbox);
+    let inboxNote: string;
+    let fallback: string;
+    if (t.interrupt) {
+      const it = t.interrupt.item;
+      (s.alerts ??= []).push({ id: it.id, category: t.interrupt.category!, reason: t.interrupt.reason, subject: it.subject, from: it.fromName, shownAt: Date.now(), outcome: "pending" });
+      inboxNote = `From their unread mail, ONE item is worth raising now: "${it.subject}" from ${it.fromName} (${it.snippet.slice(0, 120)}). Why it matters: ${t.interrupt.reason}. Mention just this one, say briefly why (the evidence), and offer one concrete thing you can do about it. Say the rest can wait for a digest. Don't list other emails.`;
+      fallback = `gmail's connected. one thing that looks like it can't wait: "${it.subject}" from ${it.fromName}. want me to draft a reply?`;
+    } else {
+      inboxNote = `Nothing in their unread mail looks urgent (no deadlines, money issues, or people waiting). Don't list emails or invent any. Just say it's connected and nothing needs them right now; you'll keep the rest for a digest.`;
+      fallback = "gmail's connected. nothing urgent in there, i'll keep the rest for a digest.";
+    }
+    // A promise made while they signed in ("i'll pull the shopping list together once it's done") comes first.
+    const waiting = "If you told them you'd do something once it connected (a list, a plan, a draft), deliver it now, in full, before anything else, and give the inbox item one short line after it.";
+    // "connected!" already went out (inbox_scan): straight to what's in there
+    const demoSaid = demo ? " It's the demo inbox: say once, in a few words, that it's sample mail and nothing really gets sent." : "";
+    const said = demoSaid + (saidConnected ? " You already told them it's connected and that you're looking; don't say that again, go straight to what you found." : "");
+    return turn(s, s.call.active ? "voice" : "text", `Their Gmail just connected. ${waiting}${said} ${inboxNote}`, saidConnected ? fallback.replace(/^gmail's connected\. /, "") : fallback, t.interrupt ? { move: EVENT_MOVES.interrupt } : {});
+  }
+}
 
 // Left on read over text: first double text after about 45s (client timer), a lighter one minutes later, then quiet.
 export const MAX_IDLE_NUDGES = 1;

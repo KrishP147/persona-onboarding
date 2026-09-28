@@ -1,7 +1,7 @@
 import { type Msg, type Session, type SlotKey, type VoiceStyle } from "../types";
 import { provider, quick, type ToolDef } from "../llm";
 import { DEMO_INBOX } from "../triage";
-import { readInbox, saveDraft, sendDraft } from "../google";
+import { DEMO_EMAIL, readInbox, saveDraft, sendDraft } from "../google";
 import { getSecret } from "../store";
 import { GIF_MIN_GAP, GIF_MOODS, GIFS, gifUrl, type GifMood } from "../gifs";
 import { readPage, webSearch } from "../web";
@@ -410,6 +410,13 @@ export async function saveDraftTool(ctx: Ctx, input: Record<string, unknown>): P
     notes += ` "${d.to}" isn't an address they gave you, so "to" was left empty: ask them for it.`;
     d.to = "";
   }
+  // "email maya": a sender in their inbox by that name. The demo inbox makes one up (nothing really goes out).
+  if (!d.to) d.to = recipientFor(s, `${lastUserText(s)} ${d.body.split("\n")[0]}`);
+  // Signing it needs their name: ask for it now, it's the natural moment (a run signed "Best" and never asked).
+  if (!s.slots.userName.value) {
+    d.body = d.body.replace(/\n*\[(your|my|sender'?s?) (full )?name\]\s*$/i, "");
+    notes += " their name isn't known, so it's unsigned: in this same reply, ask what name to sign it with (one short question). when they say it, save_draft again with it signed.";
+  }
   // "the link i sent": the one they typed in the chat (a call's history window can miss it).
   const link = lastTypedLink(s);
   if (link) d.body = d.body.replace(/\[[^\]]*\b(link|url)\b[^\]]*\]/gi, link);
@@ -442,6 +449,20 @@ export async function saveDraftTool(ctx: Ctx, input: Record<string, unknown>): P
   }
   return `${where}. it shows as a draft card they can expand, edit, send or discard: don't paste or read out the email unless they ask. ask if they want to send it${d.to ? "" : " (and who to)"} or change anything. never say it was sent.${notes}`;
 }
+
+// Who "maya" is: an inbox sender whose first name they used (or the draft greets). On the demo inbox, anyone
+// else gets a made-up <name>@persona.com, so a sample send never stalls on "what's her email?".
+export function recipientFor(s: Session, text: string): string {
+  const words = new Set(text.toLowerCase().match(/\p{L}+/gu) ?? []);
+  for (const seen of s.emailSeen ?? []) {
+    const m = seen.match(/^(\S+)[^<]*<([^>\s]+@[^>\s]+)>/);
+    if (m && words.has(m[1].toLowerCase()) && !/no-?reply|notifications?@/i.test(m[2])) return m[2];
+  }
+  if (!isDemo(s)) return "";
+  const name = text.match(/\b(?:to|email|message|text|tell|reply to|write to|hi|hey|hello|dear)\s+(\p{Lu}?\p{Ll}{1,19})\b/u)?.[1]?.toLowerCase();
+  return name && !/^(him|her|them|me|you|it|the|my|a|an|say|saying|back|there|everyone|all)$/.test(name) ? `${name}@persona.com` : "";
+}
+const isDemo = (s: Session) => s.gmailEmail === DEMO_EMAIL;
 
 const addrNorm = (t: string) =>
   t
@@ -548,9 +569,8 @@ export async function sendEmailTool(ctx: Ctx): Promise<string> {
   }
   const access = await gmailAccess(s);
   if ("error" in access) return access.error;
-  if ("demo" in access) {
-    if (process.env.ALLOW_TEST_EVENTS !== "1") return "error: this is a demo account, so nothing can really be sent. tell them honestly; the draft is in the chat to copy";
-  } else {
+  // The demo inbox plays it straight ("sent"): they were told once, when it connected, that nothing really goes out.
+  if (!("demo" in access)) {
     // Written before gmail was connected: save it there now, then send.
     if (!d.id) {
       const saved = await saveDraft(access.token, d);

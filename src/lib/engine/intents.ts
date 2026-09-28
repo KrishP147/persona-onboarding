@@ -73,7 +73,7 @@ export const AGREE = /\b(that'?d be (great|good|nice|awesome|perfect|amazing)|th
 // They're asking what setup involves ("what do i need to set up?", "how does this work?").
 export const SETUP_Q = /\b(set ?up|what do (i|you) need|what('?s| is) (next|left)|how does (this|it) work|what('?s| is) involved|what are the steps)\b/i;
 export const STOP_TALKING = /^\s*(ok(ay)?,? )?(stop( talking| it)?|shh+|hush|quiet|be quiet|enough|stop stop|zip it)[.! ]*$/i;
-export const YES = /^\s*((oh|ah|um+|uh+|well|hmm+|haha)[,.!]?\s+)?(yes|yeah|yep|yup|sure|ok(ay)?|do it|please|go ahead|let'?s do it|sounds good|perfect)\b/i;
+export const YES = /^\s*((oh|ah|um+|uh+|well|hmm+|haha)[,.!]?\s+)?(yes|yeah|yea|ye|ya|yep|yup|sure|ok(ay)?|do it|please|go ahead|let'?s do it|sounds good|perfect)\b/i;
 
 export function lastUserText(s: Session) {
   return [...s.transcript].reverse().find((m) => m.role === "user")?.text ?? "";
@@ -135,7 +135,7 @@ export function repliedElsewhere(s: Session, u?: Msg): Msg | undefined {
 export const replyFocus = (s: Session) => (s.turnBy === "event" ? undefined : repliedElsewhere(s, s.transcript.findLast((m) => m.role !== "event" && m.kind !== "contact_card")));
 // Commands and reactions are never names ("send" once became "Send it is").
 export const NOT_A_NAME =
-  /^(send|write|draft|call|email|connect|help|stop|cancel|done|next|go|continue|start|test|link|gmail|reply|check|find|search|wait|what\?|no|nah|nope|idk|i don'?t know|dunno|you pick|you choose|up to you|surprise me|anything|whatever|skip|why|what|whats|who|whos|hi|hey|hello|yes|yeah|yep|ok|okay|sure|cool|nice|thanks|thank you|ty|lol|haha|lmao|hmm+|um+|uh+|idc|nothing|none|me|you|it|this|that|i|im)\b/i;
+  /^(send|write|draft|call|email|connect|help|stop|cancel|done|next|go|continue|start|test|link|gmail|reply|check|find|search|wait|what\?|no|nah|nope|idk|i don'?t know|dunno|you pick|you choose|up to you|surprise me|anything|whatever|skip|why|what|whats|who|whos|hi|hey|hello|yes|yeah|yea|ye|ya|yep|yup|k|kk|ok|okay|sure|cool|nice|thanks|thank you|ty|lol|haha|lmao|hmm+|um+|uh+|idc|nothing|none|me|you|it|this|that|i|im)\b/i;
 // Answering "what do you want to call me?" with their own name is common: that's THEIR name.
 export const OWN_NAME = /^(?:(?:hi|hey|hello)[,! ]+)?(?:i'?m|i am|my name(?:'s| is)|it'?s|this is|call me)\s+([\p{L}][\p{L}'-]{0,19})[.!]?\s*(?:btw|lol)?[.!]?$/iu;
 
@@ -231,7 +231,7 @@ export const INTENTS: Record<string, IntentDef> = {
   ASKED_LINK: { re: ASKED_LINK, means: "our message brought up the link", says: ["want me to text you a link?", "connect your google account"], notSays: ["what should i call you?"] },
   SKIP_SETUP: { re: SKIP_SETUP, means: "a clear skip of setup", says: ["skip this", "no more questions", "stop asking me questions"], notSays: ["skip the gym today", "i skipped lunch"] },
   SKIP_OFFER: { re: SKIP_OFFER, means: "our offer to skip ahead", says: ["want to skip the rest?", "want to jump right in?"], notSays: ["what should i call you?"] },
-  YES: { re: YES, means: "a yes at the start", says: ["yes", "oh, yeah sure", "sounds good"], notSays: ["no", "maybe yes", "haha"] },
+  YES: { re: YES, means: "a yes at the start", says: ["yes", "oh, yeah sure", "sounds good", "ye"], notSays: ["no", "maybe yes", "haha", "yeti"] },
   AGREE: { re: AGREE, means: "agreement without a leading yes", says: ["that'd be great", "please do", "sounds good"], notSays: ["that's a lot", "i'm good"] },
   SETUP_Q: { re: SETUP_Q, means: "asking what setup involves", says: ["what do i need to set up?", "how does this work?"], notSays: ["what's up", "set the table"] },
   STOP_TALKING: { re: STOP_TALKING, means: "stop talking (on a call: yield)", says: ["Stop talking.", "shh", "ok, stop"], notSays: ["stop by the store later", "don't stop"] },

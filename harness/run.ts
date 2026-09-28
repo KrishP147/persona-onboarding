@@ -73,7 +73,10 @@ async function runEvent(sessionId: string, e: ScriptEvent): Promise<TurnResult[]
     case "mic_denied":
       return [await ev({ type: "mic_denied" })];
     case "connect_gmail":
-      return [await ev({ type: "gmail_connected", email: "test.user@gmail.com" })];
+    {
+      const c = await ev({ type: "gmail_connected", email: "test.user@gmail.com" });
+      return c.actions.some((a) => a.type === "inbox_scan") ? [c, await ev({ type: "inbox_scan" })] : [c];
+    }
     case "gmail_fail":
       return [await ev({ type: "gmail_failed", error: "access_denied" })];
     case "reopen":
@@ -129,7 +132,8 @@ async function runPersona(p: Persona) {
     // A cooperative sim user who says they clicked the link gets a real connection event.
     const gmailScripted = p.script?.some((x) => x.event === "connect_gmail" || x.event === "gmail_fail");
     if (!gmailScripted && s.slots.gmail.status === "missing" && s.transcript.some((m) => m.kind === "gmail_link") && CLICKED.test(text)) {
-      s = (await api<TurnResult>("/api/session", { sessionId: id, event: { type: "gmail_connected", email: "test.user@gmail.com" } })).session;
+      const c = await api<TurnResult>("/api/session", { sessionId: id, event: { type: "gmail_connected", email: "test.user@gmail.com" } });
+      s = c.actions.some((a) => a.type === "inbox_scan") ? (await api<TurnResult>("/api/session", { sessionId: id, event: { type: "inbox_scan" } })).session : c.session;
     }
     const scriptedAnswer = p.script?.some((x) => x.event === "decline_call" || x.event === "accept_call");
     if (r.actions.some((a) => a.type === "start_call") && (!scriptedAnswer || !pending.some((x) => x.event === "decline_call"))) {

@@ -22,6 +22,13 @@ const check = (name: string, ok: boolean, detail = "") => {
   console.log(`${ok ? "PASS" : "FAIL"} ${name}${detail ? `  (${detail})` : ""}`);
   if (!ok) fails++;
 };
+// gmail connect is two requests over text: "connected" at once, then the inbox look (the inbox_scan action)
+const connect = async (x: Parameters<typeof handleEvent>[0]): Promise<TurnResult> => {
+  const a = await handleEvent(x, { type: "gmail_connected" });
+  if (!a.actions.some((t) => t.type === "inbox_scan")) return a;
+  const b = await handleEvent(x, { type: "inbox_scan" });
+  return { ...b, newMessages: [...a.newMessages, ...b.newMessages], actions: [...a.actions, ...b.actions] };
+};
 const said = (r: TurnResult) => r.newMessages.filter((m) => m.role === "agent").map((m) => m.text).join(" | ");
 
 async function main() {
@@ -81,7 +88,7 @@ async function main() {
   const fake = await handleEvent(g, { type: "gmail_connected", email: "attacker@evil.com" });
   check("unverified gmail event ignored", fake.newMessages.length === 0 && g.slots.gmail.status === "missing");
   g.gmailVerified = { email: "me@gmail.com", unread: 12, inbox: DEMO_INBOX };
-  const ok = await handleEvent(g, { type: "gmail_connected" });
+  const ok = await connect(g);
   check("verified gmail fills slot", g.slots.gmail.status === "filled" && g.gmailEmail === "me@gmail.com");
   check("gmail raises the one item that can't wait", said(ok).toLowerCase().includes("interview"), said(ok));
   check("interruption logged as pending", g.alerts?.length === 1 && g.alerts[0].category === "person" && g.alerts[0].outcome === "pending");
@@ -183,14 +190,14 @@ async function main() {
   const g2 = newSession();
   g2.alerts = [{ id: "x", category: "money", reason: "", subject: "", from: "", shownAt: Date.now(), outcome: "acted" }];
   g2.gmailVerified = { email: "me@gmail.com", inbox: DEMO_INBOX };
-  const quiet = await handleEvent(g2, { type: "gmail_connected" });
+  const quiet = await connect(g2);
   check("budget spent: no second interruption", g2.alerts.length === 1 && !said(quiet).toLowerCase().includes("interview"), said(quiet));
   // an old "bye" doesn't fire again on a system event, and the panel says so
   const g3 = newSession();
   await handleUserMessage(g3, "text", "ok that's all, bye");
   g3.gmailVerified = { email: "me@gmail.com", inbox: [] };
-  const later = await handleEvent(g3, { type: "gmail_connected" });
-  const laterMsg = later.newMessages.find((m) => m.role === "agent" && !m.kind);
+  const later = await connect(g3);
+  const laterMsg = later.newMessages.findLast((m) => m.role === "agent" && !m.kind); // the model turn (inbox look), not the instant "connected" line
   check("intent only read on their own turn", !later.actions.some((a) => a.type === "end_call" || a.type === "graduate") && !!laterMsg?.guards?.includes("ignored: not user-said") && g3.turnBy === undefined, JSON.stringify(laterMsg?.guards));
   // bye only as their last words, never negated, and "call me back" is a callback
   const byes = ["ok thanks, bye", "that's all for now. talk soon!", "gotta go", "You can hang up. I think I've gotten my help. I appreciate it."];
@@ -420,9 +427,35 @@ async function main() {
   check("phishing is never an interruption", !!bob && scoreItem(bob).category === null, bob ? scoreItem(bob).reason : "");
   const pe = newSession();
   pe.gmailVerified = { email: "demo.user@gmail.com", unread: 14, demo: true, inbox: DEMO_INBOX };
-  const peConn = await handleEvent(pe, { type: "gmail_connected" });
+  const peConn = await connect(pe);
   check("connecting doesn't surface the phishing email as urgent", !/helpdesk|password/i.test(said(peConn)), said(peConn));
   check("email text is remembered for provenance", !!pe.emailSeen?.some((t) => /call me Bob/.test(t)));
+  // over text, "connected" shows at once (code) and the inbox look is its own request; the demo says up front nothing really sends
+  const cx = newSession();
+  cx.gmailVerified = { email: "demo.user@gmail.com", unread: 14, demo: true, inbox: DEMO_INBOX };
+  const cx1 = await handleEvent(cx, { type: "gmail_connected" });
+  check("connect over text: instant line + inbox_scan next", cx1.actions.some((a) => a.type === "inbox_scan") && /no real email ever leaves it/.test(said(cx1)) && !!cx.inboxToScan, said(cx1));
+  await handleEvent(cx, { type: "inbox_scan" });
+  check("...inbox_scan looks once", !cx.inboxToScan && (await handleEvent(cx, { type: "inbox_scan" })).newMessages.length === 0);
+  // demo drafts: an inbox sender by first name, anyone else gets a made-up @persona.com; unsigned asks their name
+  cx.transcript.push({ id: "u-cx1", role: "user", channel: "text", text: "yes send an email to maya saying im free friday at noon", ts: Date.now() });
+  const cxCtx = { s: cx, channel: "text" as const, actions: [], newMessages: [] };
+  const cxOut = await runTool(cxCtx, "save_draft", { to: "", subject: "Re: final round", body: "Hi Maya,\n\nI'm free Friday at noon.\n\nBest" });
+  check("demo draft to 'maya' uses her inbox address", cx.draft?.to === "maya.chen@persona.com", String(cx.draft?.to));
+  check("unsigned draft with no known name: ask what name to sign it with", /ask what name to sign it with/.test(cxOut), cxOut);
+  cx.transcript.push({ id: "u-cx2", role: "user", channel: "text", text: "email jordan that i'm running late", ts: Date.now() });
+  await runTool(cxCtx, "save_draft", { to: "", subject: "running late", body: "Hi Jordan,\n\nRunning late.\n\nKrish" });
+  check("demo draft to someone not in the inbox: made-up @persona.com", cx.draft?.to === "jordan@persona.com", String(cx.draft?.to));
+  cx.transcript.push({ id: "u-cx3", role: "user", channel: "text", text: "yes send it", ts: Date.now() });
+  const cxSent = await runTool(cxCtx, "send_email", {});
+  check("demo send plays it straight: 'sent'", /^sent to jordan@persona\.com/.test(cxSent) && !!cx.draft?.sent, cxSent);
+  // name set (the default counts): a stray "ye" much later is a yes, never "want me to go by ye?"
+  const yeS = newSession();
+  await handleEvent(yeS, { type: "open" });
+  await handleUserMessage(yeS, "text", "skip for now");
+  for (let i = 0; i < 3; i++) yeS.transcript.push({ id: `u-ye${i}`, role: "user", channel: "text", text: "cool", ts: Date.now() }, { id: `a-ye${i}`, role: "agent", channel: "text", text: "want me to send it?", ts: Date.now() });
+  const yeR = await handleUserMessage(yeS, "text", "ye");
+  check("name set: a later 'ye' isn't a rename check", !/go by ye|call me\?/i.test(said(yeR)) && !yeS.nameCheck, said(yeR));
   // "email him again": the second draft goes to whoever got the last one
   const ls = newSession();
   ls.lastSent = { to: "sam@acme.com", subject: "friday", at: 0 };
