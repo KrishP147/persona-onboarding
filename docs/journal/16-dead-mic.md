@@ -26,8 +26,7 @@ one audio context per call, closed on hangup, every listener removed. nothing ab
 
 ## known gaps
 
-- with deepgram, a swap restarts the recorder on the same socket, so a second webm header goes down the wire. if deepgram doesn't like that and closes, the call already falls back to browser speech, but i haven't seen it against the real service yet.
-- deepgram's timestamps drift by the length of the swap gap (a few hundred ms), which only matters for echo timing right after a switch.
+- with deepgram, a swap opens a fresh session on the new mic and closes the old one once the new one is up. one socket, one recording, so deepgram never sees a second audio header mid stream and its clock starts at the new session. if the new session can't open, the call falls back to browser speech. there's a short overlap where both sockets are open, and i haven't run it against the real service yet.
 - the browser speech fallback uses its own mic (the system default), so picking a mic there changes what the level check hears, not what the recognizer hears.
 
 ## sources

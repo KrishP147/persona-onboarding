@@ -4,9 +4,11 @@ branch `krish/voice-mic-watchdog` (worktree `C:\Users\User\_worktrees\persona-on
 
 ## done
 
-- `19e28c5` src/app/chat/useVoiceCall.ts: dead-mic watchdog (one AudioContext + AnalyserNode per call, rms every 100ms, <1e-4 for 4s = trouble; track mute/ended flag, unmute clears; paused while muted; skipped while ctx not running), `swapInput(deviceId?)` shared by picker + devicechange (reacquire with same constraints, apply mute, rewire analyser/track listeners/deepgram recorder, stop old tracks, 2.5s toast), devicechange follows vanished input or moved OS default (only when user hasn't picked one). startDeepgram now returns `{ stop, swap }`; swap waits for old recorder onstop then starts a new MediaRecorder on same WS. cleanup in teardown + unmount. hook returns `micTrouble, micToast, inputId, swapInput`.
+- `19e28c5` src/app/chat/useVoiceCall.ts: dead-mic watchdog (one AudioContext + AnalyserNode per call, rms every 100ms, <1e-4 for 4s = trouble; track mute/ended flag, unmute clears; paused while muted; skipped while ctx not running), `swapInput(deviceId?)` shared by picker + devicechange (reacquire with same constraints, apply mute, rewire analyser/track listeners/deepgram recorder, stop old tracks, 2.5s toast), devicechange follows vanished input or moved OS default (only when user hasn't picked one). (round 2 replaced the same-socket recorder restart, see below.) cleanup in teardown + unmount. hook returns `micTrouble, micToast, inputId, swapInput`.
 - `beb69a5` src/app/chat/MicTrouble.tsx (new) + 2 lines in Phone.tsx: card "can't hear you. switch mic or text instead?" with mic select + "switch to text" (hangUp("user_hangup")), and toast.
 - `efb9bda` docs/journal/16-dead-mic.md.
+- round 2 `93cde2e`: swapInput with deepgram live opens a fresh deepgram session on the new stream (opener ref'd in accept), then stops the old one; null -> stop old + web speech. stale results (newer stream, hangup, old socket dropped meanwhile) are stopped. startDeepgram back to `{ stop }`. only the live session's drop triggers web speech fallback.
+- round 2 `4eda7be`: startDeepgram reads optional `keyterms: string[]` from token JSON (filters non-strings/blank) and appends `keyterm` params.
 
 ## verify (all pass)
 
@@ -15,8 +17,7 @@ headless scripts in scratchpad `voice/` (mic.cjs, swap.cjs, ctx.cjs), dev server
 
 ## not done / gaps
 
-- deepgram recorder restart mid-socket sends a second webm header; untested against real deepgram (no spend). fallback on WS close is web speech.
-- deepgram span timestamps drift by swap gap.
+- fresh-session swap untested against real deepgram (no spend); brief overlap of two sockets during swap (extra token fetch per swap).
 - web speech fallback ignores picked mic.
 - real devicechange (plug/unplug, OS default move) not testable headless; only a no-op devicechange dispatch was checked.
 - card sits at top of call screen, covers avatar/name while shown (both skins).
@@ -33,4 +34,4 @@ manual check on a real machine with deepgram key (user approval needed for spend
 
 - no issue/card number in the brief; no board card touched, nothing moved.
 - task complete per brief; gaps above.
-- deviation: none from brief. idea: if deepgram rejects the second webm header, route the mic through the existing AudioContext into a MediaStreamDestination and record that stream once, so swaps only reconnect a source node and the container never restarts.
+- deviation: none from brief. idea (superseded by round 2 fresh session, kept for reference): route the mic through the existing AudioContext into a MediaStreamDestination and record that stream once, so swaps only reconnect a source node and the container never restarts.
