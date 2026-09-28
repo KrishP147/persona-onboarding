@@ -451,6 +451,7 @@ function CallScreen(p: CallProps) {
         </div>
       )}
       <div className="flex-1" />
+      {p.status === "ringing" && p.hint && <div className="px-10 pb-5 text-center text-[13px] leading-[18px]" style={{ color: "rgba(255,255,255,0.6)" }}>{p.hint}</div>}
       {p.status === "ringing" ? (
         <div className="w-full grid grid-cols-2 pb-[calc(var(--sb-bottom)+64px)]">
           {[

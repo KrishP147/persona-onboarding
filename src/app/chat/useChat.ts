@@ -63,6 +63,9 @@ function localTz() {
   }
 }
 
+// events whose reply the agent writes (a model turn): show typing dots meanwhile, like any text
+const TYPING_EVENTS = new Set(["gmail_connected", "inbox_scan", "gmail_failed", "call_ended", "call_declined", "mic_denied"]);
+
 export function useChat() {
   const [session, setSession] = useState<Session | null>(null);
   const [messages, setMessages] = useState<Msg[]>([]);
@@ -198,6 +201,8 @@ export function useChat() {
   const sendEvent = useCallback(
     async (event: Record<string, unknown>): Promise<boolean> => {
       if (!idRef.current) return false;
+      const dots = TYPING_EVENTS.has(String(event.type));
+      if (dots) setTyping(true);
       try {
         apply(await post<TurnResult>("/api/session", { sessionId: idRef.current, event }, true));
         setError(null);
@@ -205,6 +210,8 @@ export function useChat() {
       } catch {
         setError("connection hiccup, retrying won't lose anything");
         return false;
+      } finally {
+        if (dots) setTyping(false);
       }
     },
     [apply],
@@ -480,6 +487,8 @@ export function useChat() {
 
   // start over with a fresh session (keeps the old one server side, just forgets it here).
   const restart = () => {
+    // wiping the conversation by accident is worse than one extra tap
+    if (!window.confirm("Start over with a fresh conversation?")) return;
     if (call.status === "active" || call.status === "connecting") call.hangUp("user_hangup");
     try {
       localStorage.removeItem(LS_KEY);

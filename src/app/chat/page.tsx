@@ -173,9 +173,7 @@ export default function Home() {
           setTypingHints={setTypingHints}
           mock={chat.mock}
           onClose={() => setMenuOpen(false)}
-          onRestart={() => {
-            if (window.confirm("Start over with a fresh conversation?")) restart();
-          }}
+          onRestart={restart}
         />
       )}
       <Intro />
