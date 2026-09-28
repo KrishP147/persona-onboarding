@@ -6,6 +6,7 @@ import { PhoneIcon } from "./skins/shared";
 import { Thread, type WhyHooks } from "./Thread";
 import type { Chat } from "./useChat";
 import { MicTrouble } from "./MicTrouble";
+import { useDark } from "@/components/ThemeToggle";
 
 // screen size (css px) and frame geometry per device, from phone-ui-spec.md section 0
 export const FRAMES: Record<SkinId, { w: number; h: number; screenW: number; screenH: number; x: number; y: number; r: number }> = {
@@ -27,7 +28,10 @@ export function useFrameZoom(skin: SkinId) {
 }
 
 // bp: where the frame appears (sm for the chat, lg for the call's second phone)
-export function DeviceFrame({ skin, bp, zoom, dark, children }: { skin: Skin; bp: "sm" | "lg"; zoom: number; dark?: boolean; children: ReactNode }) {
+// dark: the home indicator's ground; the call phone forces it (not on pixel, whose phone app follows the theme), the chat phone follows the page theme
+export function DeviceFrame({ skin, bp, zoom, dark: forceDark, children }: { skin: Skin; bp: "sm" | "lg"; zoom: number; dark?: boolean; children: ReactNode }) {
+  const themeDark = useDark();
+  const dark = forceDark ?? themeDark;
   const f = FRAMES[skin.id];
   const vars = { "--fw": `${f.w}px`, "--fh": `${f.h}px`, "--sx": `${f.x}px`, "--sy": `${f.y}px`, "--sw": `${f.screenW}px`, "--sh": `${f.screenH}px`, "--sr": `${f.r}px`, "--zoom": zoom } as CSSProperties;
   const sm = bp === "sm";
@@ -52,7 +56,7 @@ export function DeviceFrame({ skin, bp, zoom, dark, children }: { skin: Skin; bp
             style={
               skin.id === "iphone"
                 ? { bottom: 8, width: 134, height: 5, background: dark ? "#fff" : "#000" }
-                : { bottom: 8, width: skin.id === "pixel" ? 108 : 120, height: 4, background: dark || skin.id === "pixel" ? "rgba(255,255,255,.85)" : "rgba(0,0,0,.85)" }
+                : { bottom: 8, width: skin.id === "pixel" ? 108 : 120, height: 4, background: dark ? "rgba(255,255,255,.85)" : "rgba(0,0,0,.85)" }
             }
           />
         </div>
@@ -152,9 +156,9 @@ export function CallPhone({ skin, chat, zoom }: { skin: Skin; chat: Chat; zoom: 
   const S = skin;
   return (
     <div className={`fixed inset-0 z-20 lg:static lg:z-auto ${chat.callHidden ? "hidden lg:block" : ""}`}>
-      <DeviceFrame skin={skin} bp="lg" zoom={zoom} dark>
+      <DeviceFrame skin={skin} bp="lg" zoom={zoom} dark={skin.id === "pixel" ? undefined : true}>
         <div className="phone-screen relative h-full w-full" style={S.screen.style}>
-          <div className="hidden lg:block text-white [&_*]:!text-white">
+          <div className={skin.id === "pixel" ? "hidden lg:block" : "hidden lg:block text-white [&_*]:!text-white"}>
             <S.StatusBar />
           </div>
           <S.CallScreen

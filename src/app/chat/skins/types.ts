@@ -40,6 +40,12 @@ export interface ComposerProps {
   hint?: string; // stuck-hint placeholder example; undefined means the skin's own default
 }
 
+// unknown sender: only actions that work here (save = the contact card's save, dismiss hides it)
+export interface UnknownProps {
+  onAdd: () => void;
+  onDismiss: () => void;
+}
+
 export interface CallProps {
   saved: boolean;
   said: string;
@@ -85,7 +91,6 @@ export interface Skin {
   screen: { className: string; style?: CSSProperties };
   threadClass: string; // scroll area
   sheet: "ios" | "m3";
-  why: { ink: string; mute: string; surface: string; line: string }; // colors for the in-phone why affordance + sheet
   StatusBar: FC<{ dark?: boolean }>;
   Header: FC<HeaderProps>;
   DateStamp: FC<{ ts: number; first: boolean }>;
@@ -99,7 +104,7 @@ export interface Skin {
   Media: FC<{ src: string }>;
   UnknownAvatar: FC<{ size: number }>;
   Banner: FC<{ tone: "info" | "error"; children: ReactNode }>;
-  UnknownNotice?: FC; // iphone: "not in your contacts" line over the composer
+  UnknownNotice: FC<UnknownProps>; // "not in your contacts" line/card over the composer, per os
   CallScreen: FC<CallProps>;
   RichCard: FC<RichCardProps>; // skin-native shell for rich cards in the thread
   rich: RichTheme;

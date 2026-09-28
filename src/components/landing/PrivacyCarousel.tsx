@@ -1,7 +1,8 @@
 "use client";
 import { useEffect, useRef, useState, type ReactNode } from "react";
 
-const BLUE = "#1f6fe5";
+// card headline blue; lifts to --p-blue-card's dark value on the dark ground
+const BLUE = "var(--p-blue-card)";
 const ICON = {
   width: 40,
   height: 40,

@@ -6,16 +6,17 @@ import { DraftCard, draftMsgId } from "./cards/DraftCard";
 import { KnowCard, useGradSlot } from "./cards/KnowCard";
 import type { Pos, Skin } from "./skins/types";
 import type { Chat } from "./useChat";
+import { usePref } from "./usePref";
 import type { Turn } from "./why/frameworks";
 
 export interface WhyHooks {
+  on: boolean; // reasoning map open: bubbles link to their node
   byId: Map<string, Turn>;
   hoverId: string | null;
   activeId: string | null;
   setHover: (id: string | null) => void;
-  open: (id: string, trigger: HTMLElement) => void; // phone: the why sheet
-  select: (id: string) => void; // desktop: clicking a bubble opens its card
-  sheetOpen: boolean; // room at the bottom so the last bubble can sit above the sheet
+  select: (id: string) => void; // clicking an agent bubble opens its node in the map
+  sheetOpen: boolean; // room at the bottom so the last bubble can sit above the map sheet
 }
 
 const TEN_MIN = 10 * 60 * 1000;
@@ -38,6 +39,8 @@ export function Thread({ skin, chat, why, scrollRef }: { skin: Skin; chat: Chat;
   const readAt = thread.slice(lastUserIdx + 1).find((x) => x.role === "agent")?.ts;
   const S = skin;
   const grad = useGradSlot(chat, thread);
+  // "not in your contacts": dismissed once per conversation, gone for good once the contact is saved
+  const [dismissed, setDismissed] = usePref(`persona-unknown-dismissed:${session?.id ?? "new"}`, false);
   const gradAt = grad.at;
   const draftId = draftMsgId(session);
   const draftIdx = draftId ? thread.findIndex((m) => m.id === draftId) : -1;
@@ -59,7 +62,7 @@ export function Thread({ skin, chat, why, scrollRef }: { skin: Skin; chat: Chat;
         const first = showTime || side(prev) !== m.role;
         const last = side(next) !== m.role || (!!next && next.ts - m.ts > TEN_MIN);
         const pos: Pos = first && last ? "single" : first ? "first" : last ? "last" : "middle";
-        const turn = why.byId.get(m.id);
+        const turn = why.on ? why.byId.get(m.id) : undefined;
         const lit = turn && (why.hoverId === m.id || why.activeId === m.id) ? turn.fw.color : null;
         let body: ReactNode;
         const moved = draftUnder && m.id === draftId;
@@ -90,6 +93,7 @@ export function Thread({ skin, chat, why, scrollRef }: { skin: Skin; chat: Chat;
               onMouseEnter={turn ? () => why.setHover(m.id) : undefined}
               onMouseLeave={turn ? () => why.setHover(null) : undefined}
               onClick={turn ? () => why.select(m.id) : undefined}
+              className={turn ? "cursor-pointer" : undefined}
             >
               {showTime && <S.DateStamp ts={m.ts} first={i === 0} />}
               {body}
@@ -100,7 +104,7 @@ export function Thread({ skin, chat, why, scrollRef }: { skin: Skin; chat: Chat;
       })}
       {gradAt === -1 && know}
       {(typing || revealing) && <S.Typing />}
-      {!chat.saved && S.UnknownNotice && thread.length > 0 && <S.UnknownNotice />}
+      {!session?.contactSaved && !dismissed && thread.length > 0 && <S.UnknownNotice onAdd={chat.saveContact} onDismiss={() => setDismissed(true)} />}
       <div ref={bottomRef} className="h-1" />
       {why.sheetOpen && <div className="h-[50%]" aria-hidden />}
       {(chat.offline || chat.error) && (

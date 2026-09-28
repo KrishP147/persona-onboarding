@@ -1,18 +1,24 @@
 "use client";
-// samsung messages on one ui 8, light. values from docs/design/phone-ui-spec.md A3
+// samsung messages on one ui 8, light + dark. see docs/design/phone-ui-spec.md "fidelity pass / galaxy"
 import type { CSSProperties, ReactNode } from "react";
-import type { BubbleProps, CallProps, ComposerProps, HeaderProps, Pos, RichCardProps, Skin } from "./types";
+import type { BubbleProps, CallProps, ComposerProps, HeaderProps, Pos, RichCardProps, Skin, UnknownProps } from "./types";
 import { AGENT_NUMBER, BubbleBody, BubbleIcon, GoogleG, MicIcon, PauseIcon, PersonaLogo, PersonSilhouette, PhoneIcon, RecTimer, callLog, eventKind, time, useClock, useElapsed } from "./shared";
 
+// colors are --sam-* vars on .sk-sam (globals.css), light + dark
 const C = {
-  app: "#F6F6F8",
-  sent: "#D2E3FC",
-  recv: "#FFFFFF",
-  ink: "#111111",
-  mute: "#7B7B7B",
-  accent: "#3E91FF",
-  red: "#F14B4B",
-  green: "#2FB65A",
+  bg: "var(--sam-bg)",
+  sent: "var(--sam-sent)",
+  sentInk: "var(--sam-sent-ink)",
+  recv: "var(--sam-recv)",
+  recvInk: "var(--sam-recv-ink)",
+  card: "var(--sam-card)",
+  ink: "var(--sam-ink)",
+  mute: "var(--sam-mute)",
+  icon: "var(--sam-icon)",
+  accent: "var(--sam-accent)",
+  red: "var(--sam-red)",
+  green: "var(--sam-green)",
+  line: "var(--sam-line)",
 };
 
 function corners(mine: boolean, pos: Pos): CSSProperties {
@@ -23,12 +29,11 @@ function corners(mine: boolean, pos: Pos): CSSProperties {
   return mine ? { borderRadius: `${r}px ${top}px ${bot}px ${r}px` } : { borderRadius: `${top}px ${r}px ${r}px ${bot}px` };
 }
 const gapOf = (pos: Pos) => (pos === "single" || pos === "first" ? "pt-[14px]" : "pt-[3px]");
-const float: CSSProperties = { background: "#fff", boxShadow: "0 1px 3px rgba(0,0,0,.08), 0 4px 14px rgba(0,0,0,.05)" };
 
 function StatusBar() {
   const t = useClock();
   return (
-    <div className="absolute inset-x-0 top-0 z-30 h-10 flex items-center px-[18px] text-[14px] font-medium pointer-events-none" style={{ color: C.ink }} aria-hidden>
+    <div className="sk-sam absolute inset-x-0 top-0 z-30 h-10 flex items-center px-[18px] text-[14px] font-medium text-[var(--sam-ink)] pointer-events-none" aria-hidden>
       <span className="pt-[2px]">{t}</span>
       <span className="flex-1" />
       <span className="flex items-center gap-[5px] pt-[2px]">
@@ -54,48 +59,48 @@ function StatusBar() {
 
 function UnknownAvatar({ size }: { size: number }) {
   return (
-    <div className="rounded-full flex items-end justify-center overflow-hidden shrink-0" style={{ width: size, height: size, background: "#E3E8F0" }} aria-hidden>
-      <PersonSilhouette size={size * 0.74} color="#A3ACBA" />
+    <div className="rounded-full flex items-end justify-center overflow-hidden shrink-0" style={{ width: size, height: size, background: "var(--sam-unknown)" }} aria-hidden>
+      <PersonSilhouette size={size * 0.74} color="var(--sam-unknown-ink)" />
     </div>
   );
 }
 
+// one ui app bar: flat on the thread ground. back chevron, avatar, bold name with the chevron that
+// opens the contact menu, call, overflow. no floating pills (those belong to the list screen)
 function Header({ name, saved, onCall, callDisabled, onMenu }: HeaderProps) {
-  const btn = "w-11 h-11 rounded-full flex items-center justify-center disabled:opacity-40";
+  const btn = "w-10 h-10 rounded-full flex items-center justify-center disabled:opacity-40 hover:bg-[var(--sam-hover)]";
   return (
-    <div className="absolute inset-x-0 top-0 z-20 pointer-events-none">
-      <div className="absolute inset-x-0 top-0 h-[calc(var(--sb)+84px)]" style={{ background: `linear-gradient(${C.app} 62%, rgba(246,246,248,0))` }} />
-      <header className="relative flex items-center gap-2 px-3 h-16 mt-[var(--sb)]" style={{ color: C.ink }}>
-        <span className={`${btn} hidden sm:flex`} style={float} aria-hidden>
-          <svg width="10" height="18" viewBox="0 0 10 18" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
+    <div className="absolute inset-x-0 top-0 z-20" style={{ background: C.bg }}>
+      <header className="relative flex items-center gap-1 pl-1.5 pr-2 h-16 mt-[var(--sb)]" style={{ color: C.icon }}>
+        <span className={`${btn} hidden sm:flex`} aria-hidden>
+          <svg width="10" height="18" viewBox="0 0 10 18" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
             <path d="M8.5 1.5 1.5 9l7 7.5" />
           </svg>
         </span>
-        <button aria-label="Menu" onClick={onMenu} className={`${btn} sm:hidden pointer-events-auto`} style={float}>
+        <button aria-label="Menu" onClick={onMenu} className={`${btn} sm:hidden`}>
           <svg width="18" height="14" viewBox="0 0 18 14" fill="currentColor" aria-hidden>
             <rect y="0" width="18" height="2" rx="1" />
             <rect y="6" width="18" height="2" rx="1" />
             <rect y="12" width="18" height="2" rx="1" />
           </svg>
         </button>
-        {/* one ui 8.5: avatar + name float in their own pill */}
-        <div className="flex-1 min-w-0 flex">
-          <div className="min-w-0 max-w-full flex items-center gap-2.5 h-12 pl-1.5 pr-4 rounded-full" style={float}>
-            {saved ? <PersonaLogo size={36} /> : <UnknownAvatar size={36} />}
-            <div className="min-w-0">
-              <div className={`${saved ? "text-[17px]" : "text-[15px]"} leading-[21px] font-semibold truncate`}>{name}</div>
-              {saved && <div className="text-[12px] leading-4 truncate" style={{ color: C.mute }}>{AGENT_NUMBER}</div>}
-            </div>
+        <div className="flex-1 min-w-0 flex items-center gap-2.5 pl-1">
+          {saved ? <span className="rounded-full shadow-[0_0_0_1px_var(--sam-line)] shrink-0"><PersonaLogo size={34} /></span> : <UnknownAvatar size={34} />}
+          <div className={`min-w-0 truncate ${saved ? "text-[19px]" : "text-[17px]"} leading-6 font-bold`} style={{ color: C.ink }}>
+            {name}
           </div>
+          <svg width="11" height="7" viewBox="0 0 11 7" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" className="shrink-0" aria-hidden>
+            <path d="M1 1.2 5.5 5.7 10 1.2" />
+          </svg>
         </div>
-        <button aria-label="Call" disabled={callDisabled} onClick={onCall} className={`${btn} pointer-events-auto`} style={float}>
-          <PhoneIcon size={20} />
+        <button aria-label="Call" disabled={callDisabled} onClick={onCall} className={btn}>
+          <PhoneIcon size={21} />
         </button>
-        <span className={btn} style={float} aria-hidden>
+        <span className={btn} aria-hidden>
           <svg width="4" height="18" viewBox="0 0 4 18" fill="currentColor">
-            <circle cx="2" cy="2" r="2" />
-            <circle cx="2" cy="9" r="2" />
-            <circle cx="2" cy="16" r="2" />
+            <circle cx="2" cy="2" r="1.8" />
+            <circle cx="2" cy="9" r="1.8" />
+            <circle cx="2" cy="16" r="1.8" />
           </svg>
         </span>
       </header>
@@ -107,7 +112,7 @@ function Header({ name, saved, onCall, callDisabled, onMenu }: HeaderProps) {
 function DateStamp({ ts, first }: { ts: number; first: boolean }) {
   if (!first) return null;
   const d = new Date(ts).toLocaleDateString([], { weekday: "long", month: "long", day: "numeric" });
-  return <div className="text-center text-[12px] leading-4 font-semibold pt-4 pb-1" style={{ color: C.mute }}>{d}</div>;
+  return <div className="text-center text-[12px] leading-4 pt-4 pb-2" style={{ color: C.mute }}>{d}</div>;
 }
 
 const RECEIPT_WORD = { sent: "Sent", delivered: "Delivered", seen: "Read" } as const;
@@ -116,7 +121,7 @@ function Bubble({ m, mine, pos, reaction, receipt, highlight, showTime }: Bubble
   const side = (showTime || receipt) && (
     <span className={`self-end shrink-0 text-[11px] leading-[14px] pb-[2px] flex flex-col ${mine ? "items-end" : "items-start"}`} style={{ color: C.mute }}>
       {receipt && (
-        <span aria-label={receipt} style={{ color: receipt === "seen" ? C.accent : C.mute }}>
+        <span aria-label={receipt}>
           {RECEIPT_WORD[receipt]}
         </span>
       )}
@@ -128,11 +133,11 @@ function Bubble({ m, mine, pos, reaction, receipt, highlight, showTime }: Bubble
       {mine && side}
       <div
         className="relative max-w-[72%] px-[14px] py-[10px] text-[16px] leading-[22px] whitespace-pre-wrap break-words"
-        style={{ ...corners(mine, pos), background: mine ? C.sent : C.recv, color: C.ink, outline: highlight ? `2px solid ${highlight}` : "2px solid transparent", outlineOffset: 2 }}
+        style={{ ...corners(mine, pos), background: mine ? C.sent : C.recv, color: mine ? C.sentInk : C.recvInk, outline: highlight ? `2px solid ${highlight}` : "2px solid transparent", outlineOffset: 2 }}
       >
-        <BubbleBody m={m} voice={{ knob: "bg-black/10", bar: "bg-black/35", ink: "text-black/55" }} />
+        <BubbleBody m={m} voice={mine ? { knob: "bg-[var(--sam-knob)]", bar: "bg-white/70", ink: "text-white/80" } : { knob: "bg-[var(--sam-knob-recv)]", bar: "bg-[var(--sam-mute)]", ink: "text-[var(--sam-mute)]" }} />
         {reaction && (
-          <span className="absolute -bottom-[18px] right-2 h-[22px] px-1.5 rounded-full flex items-center text-[13px] bg-white border border-[#E3E3E3]" aria-label="reaction">
+          <span className="absolute -bottom-[18px] right-2 h-[22px] px-1.5 rounded-full flex items-center text-[13px] bg-[var(--sam-chip)] border border-[var(--sam-chip-rim)]" aria-label="reaction">
             {reaction}
           </span>
         )}
@@ -147,7 +152,7 @@ function Typing() {
     <div className="pt-[14px]">
       <div className="w-14 h-9 rounded-[22px] flex items-center justify-center gap-[5px]" style={{ background: C.recv }} role="status" aria-label="typing">
         {[0, 1, 2].map((i) => (
-          <span key={i} className="w-[6px] h-[6px] rounded-full sk-wave" style={{ background: "#A0A0A5", animationDelay: `${i * 140}ms` }} />
+          <span key={i} className="w-[6px] h-[6px] rounded-full sk-wave" style={{ background: C.mute, animationDelay: `${i * 140}ms` }} />
         ))}
       </div>
     </div>
@@ -163,12 +168,12 @@ function Composer({ draft, setDraft, onSubmit, onAttach, canSend, recording, tra
         onSubmit();
       }}
     >
-      <button type="button" aria-label="Attach" onClick={onAttach} className="w-10 h-10 shrink-0 rounded-full flex items-center justify-center hover:bg-black/5" style={{ color: "#5F6368" }}>
+      <button type="button" aria-label="Attach" onClick={onAttach} className="w-10 h-10 shrink-0 rounded-full flex items-center justify-center hover:bg-[var(--sam-hover)]" style={{ color: C.icon }}>
         <svg width="22" height="22" viewBox="0 0 22 22" stroke="currentColor" strokeWidth="2" strokeLinecap="round" aria-hidden>
           <path d="M11 3v16M3 11h16" />
         </svg>
       </button>
-      <div className="flex-1 min-w-0 h-11 rounded-full bg-white flex items-center pl-4 pr-1.5" style={{ boxShadow: "0 1px 2px rgba(0,0,0,.06)" }}>
+      <div className="flex-1 min-w-0 h-11 rounded-full bg-[var(--sam-field)] flex items-center pl-4 pr-1.5">
         {recording ? (
           <span className="flex-1 flex items-center gap-2 text-[16px]" style={{ color: C.red }}>
             <span className="w-2 h-2 rounded-full sk-pulse" style={{ background: C.red }} />
@@ -180,11 +185,11 @@ function Composer({ draft, setDraft, onSubmit, onAttach, canSend, recording, tra
             onChange={(e) => setDraft(e.target.value)}
             placeholder={hint ?? "Enter message"}
             aria-label="Message"
-            className="flex-1 min-w-0 bg-transparent outline-none text-[16px] placeholder:text-[#9A9A9F]"
+            className="flex-1 min-w-0 bg-transparent outline-none text-[16px] placeholder:text-[var(--sam-placeholder)]"
             style={{ color: C.ink }}
           />
         )}
-        <span className="w-9 h-9 flex items-center justify-center" style={{ color: "#5F6368" }} aria-hidden>
+        <span className="w-9 h-9 flex items-center justify-center" style={{ color: C.icon }} aria-hidden>
           <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8">
             <circle cx="12" cy="12" r="9" />
             <circle cx="9" cy="10" r="1" fill="currentColor" />
@@ -198,7 +203,7 @@ function Composer({ draft, setDraft, onSubmit, onAttach, canSend, recording, tra
           onClick={onMic}
           disabled={transcribing}
           className="w-9 h-9 rounded-full flex items-center justify-center disabled:opacity-60"
-          style={recording ? { background: C.red, color: "#fff" } : { color: "#5F6368" }}
+          style={recording ? { background: C.red, color: "#fff" } : { color: C.icon }}
         >
           {recording ? (
             <span className="w-2.5 h-2.5 rounded-[2px] bg-white" aria-hidden />
@@ -209,7 +214,7 @@ function Composer({ draft, setDraft, onSubmit, onAttach, canSend, recording, tra
           )}
         </button>
       </div>
-      <button type="submit" aria-label="Send" disabled={!canSend} className="w-10 h-10 shrink-0 rounded-full flex items-center justify-center text-white transition-colors" style={{ background: canSend ? C.accent : "#C9CCD1" }}>
+      <button type="submit" aria-label="Send" disabled={!canSend} className="w-10 h-10 shrink-0 rounded-full flex items-center justify-center text-white transition-colors" style={{ background: canSend ? C.sent : "var(--sam-send-off)" }}>
         <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor" aria-hidden>
           <path d="M3 20.5 21 12 3 3.5l.01 6.6L15 12 3.01 13.9z" />
         </svg>
@@ -225,7 +230,7 @@ function EventRow({ text }: { text: string }) {
   const c = callLog(text);
   return (
     <div className="flex justify-center py-3">
-      <div className="flex items-center gap-2 text-[12px] leading-4 bg-white rounded-full px-3 py-1.5" style={{ color: C.mute }}>
+      <div className="flex items-center gap-2 text-[12px] leading-4 bg-[var(--sam-card)] rounded-full px-3 py-1.5" style={{ color: C.mute }}>
         <span style={{ color: c.declined ? C.red : C.green }}>
           <PhoneIcon size={14} down={c.declined} />
         </span>
@@ -236,7 +241,7 @@ function EventRow({ text }: { text: string }) {
 }
 
 function Card({ pos, children, footer, onClick, disabled, href }: { pos: Pos; children: ReactNode; footer: ReactNode; onClick?: () => void; disabled?: boolean; href?: string }) {
-  const cls = "block w-[72%] overflow-hidden rounded-[18px] bg-white text-left";
+  const cls = "block w-[72%] overflow-hidden rounded-[20px] bg-[var(--sam-card)] text-left";
   const body = (
     <>
       {children}
@@ -304,7 +309,7 @@ function LinkPreview({ url, pos }: { url: string; pos: Pos }) {
 function ContactCard({ name, saved, onSave, pos }: { name: string; saved: boolean; onSave: () => void; pos: Pos }) {
   return (
     <div data-role="agent" className={`${gapOf(pos)} flex justify-start`}>
-      <div className="w-[72%] bg-white rounded-[18px] overflow-hidden" style={{ color: C.ink }}>
+      <div className="w-[72%] bg-[var(--sam-card)] rounded-[20px] overflow-hidden" style={{ color: C.ink }}>
         <div className="flex items-center gap-3 px-3 py-3">
           <div className="w-10 h-10 rounded-full bg-[#F8B26A] flex items-center justify-center text-[17px] font-semibold text-white shrink-0">{name.charAt(0).toUpperCase()}</div>
           <div className="min-w-0">
@@ -312,7 +317,7 @@ function ContactCard({ name, saved, onSave, pos }: { name: string; saved: boolea
             <div className="text-[12px]" style={{ color: C.mute }}>{AGENT_NUMBER}</div>
           </div>
         </div>
-        <button onClick={onSave} disabled={saved} className="w-full border-t border-[#EDEDF0] py-2.5 text-[14px] font-semibold" style={{ color: saved ? C.green : C.accent }}>
+        <button onClick={onSave} disabled={saved} className="w-full border-t border-[var(--sam-line)] py-2.5 text-[14px] font-semibold" style={{ color: saved ? C.green : C.accent }}>
           {saved ? "Saved ✓" : "Save"}
         </button>
       </div>
@@ -324,7 +329,7 @@ function ContactCard({ name, saved, onSave, pos }: { name: string; saved: boolea
 function RichCard({ title, children, pos = "single" }: RichCardProps) {
   return (
     <div data-role="agent" className={`${gapOf(pos)} flex justify-start`}>
-      <section aria-label={title} className="w-[84%] bg-white rounded-[18px] overflow-hidden" style={{ color: C.ink }}>
+      <section aria-label={title} className="w-[84%] bg-[var(--sam-card)] rounded-[20px] overflow-hidden" style={{ color: C.ink }}>
         <div className="px-4 pt-3 pb-1 text-[12px] leading-4 font-semibold" style={{ color: C.mute }}>
           {title}
         </div>
@@ -338,47 +343,72 @@ function Media({ src }: { src: string }) {
   return (
     <div data-role="agent" className="pt-[14px] flex justify-start">
       {/* eslint-disable-next-line @next/next/no-img-element */}
-      <img src={src} alt="animated reaction" className="rounded-[18px] max-w-[60%] max-h-48 object-cover bg-white" loading="lazy" />
+      <img src={src} alt="animated reaction" className="rounded-[18px] max-w-[60%] max-h-48 object-cover bg-[var(--sam-card)]" loading="lazy" />
     </div>
   );
 }
 
 function Banner({ tone, children }: { tone: "info" | "error"; children: ReactNode }) {
   return (
-    <div className="mx-3 mb-1 rounded-2xl px-4 py-2.5 text-[13px] leading-[18px]" style={tone === "error" ? { background: "#FDECEC", color: "#B3261E" } : { background: "#fff", color: "#3C3C43" }}>
+    <div className="mx-3 mb-1 rounded-2xl px-4 py-2.5 text-[13px] leading-[18px]" style={tone === "error" ? { background: "var(--sam-err-bg)", color: "var(--sam-err-ink)" } : { background: C.card, color: "var(--sam-info-ink)" }}>
       {children}
     </div>
   );
 }
 
+// samsung messages: the unknown-number bar is "add to contacts | block". block has no meaning here,
+// so the bar keeps add to contacts and a close
+function UnknownNotice({ onAdd, onDismiss }: UnknownProps) {
+  return (
+    <div className="mx-1 mt-4 mb-1 rounded-[20px] flex items-stretch overflow-hidden" style={{ background: C.card }} role="region" aria-label="Unknown sender">
+      <button type="button" onClick={onAdd} className="flex-1 h-12 text-[15px] font-semibold" style={{ color: C.accent }}>
+        Add to contacts
+      </button>
+      <span className="w-px my-3" style={{ background: C.line }} aria-hidden />
+      <button type="button" onClick={onDismiss} aria-label="Dismiss" className="w-14 h-12 flex items-center justify-center" style={{ color: C.mute }}>
+        <svg width="12" height="12" viewBox="0 0 12 12" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" aria-hidden>
+          <path d="M1.5 1.5l9 9M10.5 1.5l-9 9" />
+        </svg>
+      </button>
+    </div>
+  );
+}
+
+// samsung phone, one ui 8: small status line, huge bold name, "Mobile <number>" over the call
+// background; controls are icon + label (no circles) in a rounded dark panel with the red end
+// circle inside it. dark in both themes, like the call background
 function CallScreen(p: CallProps) {
   const timer = useElapsed(p.startedAt);
   const holdTimer = useElapsed(p.heldAt ?? null);
   const state = p.held ? "" : p.muted ? "muted" : p.speaking ? "speaking" : p.listening ? "listening" : "";
-  const small = "w-14 h-14 rounded-full flex items-center justify-center";
+  const tile = "w-[76px] h-14 rounded-[18px] flex items-center justify-center transition-colors";
   return (
     <div
-      className="relative h-full w-full flex flex-col items-center text-white"
-      style={{ background: "linear-gradient(170deg, #4b5a6b 0%, #26303b 55%, #161b21 100%)", fontFamily: "var(--font-samsung)" }}
+      className="sk-sam relative h-full w-full flex flex-col items-center text-white"
+      style={{ background: "var(--sam-call-bg)", fontFamily: "var(--font-samsung)" }}
       role={p.status === "ringing" ? "alertdialog" : undefined}
       aria-label={p.status === "ringing" ? `Incoming call from ${p.name}` : "Call"}
     >
-      <div className="pt-[calc(var(--sb)+96px)] text-center px-6">
-        <div className={`mx-auto w-[96px] h-[96px] rounded-full mb-5 transition-shadow ${p.speaking ? "shadow-[0_0_0_8px_rgba(255,255,255,.14)]" : ""}`}>
-          {p.saved ? <PersonaLogo size={96} /> : <UnknownAvatar size={96} />}
-        </div>
-        <div className="text-[32px] leading-[38px] font-semibold">{p.name}</div>
-        <div className="text-[16px] mt-1 text-white/65" role="status">
-          {p.status === "ringing" && (p.saved ? AGENT_NUMBER : "Mobile · United States")}
+      <div className="pt-[calc(var(--sb)+44px)] text-center px-6 w-full">
+        <div className="h-6 flex items-center justify-center gap-2 text-[16px] text-white/90" role="status">
+          {p.status !== "ended" && <PhoneIcon size={17} />}
+          {p.status === "ringing" && "Incoming call"}
           {p.status === "connecting" && "Calling…"}
           {p.status === "active" && (
-            <>
+            <span>
               <span className="tabular-nums">{p.held ? `on hold · ${holdTimer}` : timer}</span>
               {state && ` · ${state}`}
-            </>
+            </span>
           )}
           {p.status === "ended" && "Call ended"}
         </div>
+        <div className="mt-12 text-[40px] leading-[46px] font-bold tracking-[-0.5px]">{p.name}</div>
+        <div className="text-[17px] mt-1.5 text-white/85">{p.saved ? `Mobile ${AGENT_NUMBER}` : "Mobile"}</div>
+        {p.saved && (
+          <div className={`mx-auto mt-8 w-[88px] h-[88px] rounded-full transition-shadow ${p.speaking ? "shadow-[0_0_0_8px_rgba(255,255,255,.14)]" : ""}`}>
+            <PersonaLogo size={88} />
+          </div>
+        )}
       </div>
       {p.status === "active" && !p.held && (
         <div className="mt-6 px-8 space-y-3 text-[15px] leading-[21px] text-center">
@@ -387,50 +417,56 @@ function CallScreen(p: CallProps) {
               {p.said}
             </div>
           )}
-          {p.heard && <div className="text-white/55 italic">you: {p.heard}</div>}
+          {p.heard && <div className="text-white/60 italic">you: {p.heard}</div>}
         </div>
       )}
       <div className="flex-1" />
       {p.status === "ringing" ? (
         // one ui: green answer on the left, red decline on the right
         <div className="w-full flex justify-between px-12 pb-[calc(var(--sb-bottom)+72px)]">
-          <button onClick={p.onAccept} aria-label="Accept" className="w-[72px] h-[72px] rounded-full flex items-center justify-center" style={{ background: C.green }}>
-            <PhoneIcon size={30} />
-          </button>
-          <button onClick={p.onDecline} aria-label="Decline" className="w-[72px] h-[72px] rounded-full flex items-center justify-center" style={{ background: C.red }}>
-            <PhoneIcon size={30} down />
-          </button>
+          <div className="flex flex-col items-center gap-2">
+            <button onClick={p.onAccept} aria-label="Accept" className="w-[72px] h-[72px] rounded-full flex items-center justify-center" style={{ background: "var(--sam-answer)" }}>
+              <PhoneIcon size={30} />
+            </button>
+            <span className="text-[14px] text-white/85" aria-hidden>Answer</span>
+          </div>
+          <div className="flex flex-col items-center gap-2">
+            <button onClick={p.onDecline} aria-label="Decline" className="w-[72px] h-[72px] rounded-full flex items-center justify-center" style={{ background: "var(--sam-end)" }}>
+              <PhoneIcon size={30} down />
+            </button>
+            <span className="text-[14px] text-white/85" aria-hidden>Decline</span>
+          </div>
         </div>
       ) : (
-        <div className="flex flex-col items-center gap-8 pb-[calc(var(--sb-bottom)+48px)]">
-          <div className="flex gap-10">
+        <div className="w-[calc(100%-32px)] mb-[calc(var(--sb-bottom)+20px)] rounded-[28px] flex flex-col items-center gap-7 pt-7 pb-6" style={{ background: "var(--sam-call-panel)" }}>
+          <div className="flex gap-6">
             {p.onHide && p.status === "active" && (
-              <div className="lg:hidden flex flex-col items-center gap-1.5">
-                <button onClick={p.onHide} aria-label={p.unread ? `Messages, ${p.unread} new` : "Messages"} className={`relative ${small} bg-white/12`}>
-                  <BubbleIcon size={22} />
-                  {!!p.unread && <span className="absolute -top-1 -right-1 min-w-5 h-5 px-1 rounded-full text-[11px] font-semibold flex items-center justify-center" style={{ background: C.accent }}>{p.unread}</span>}
+              <div className="lg:hidden flex flex-col items-center gap-1">
+                <button onClick={p.onHide} aria-label={p.unread ? `Messages, ${p.unread} new` : "Messages"} className={`relative ${tile}`}>
+                  <BubbleIcon size={25} />
+                  {!!p.unread && <span className="absolute top-0 right-2 min-w-5 h-5 px-1 rounded-full text-[11px] font-semibold flex items-center justify-center" style={{ background: "var(--sam-end)" }}>{p.unread}</span>}
                 </button>
-                <span className="text-[12px] text-white/80" aria-hidden>Messages</span>
+                <span className="text-[13px] text-white/90" aria-hidden>Messages</span>
               </div>
             )}
             {p.onMute && p.status === "active" && (
-              <div className="flex flex-col items-center gap-1.5">
-                <button onClick={p.onMute} aria-pressed={!!p.muted} aria-label={p.muted ? "Unmute" : "Mute"} className={`${small} ${p.muted ? "bg-white text-black" : "bg-white/12"}`}>
-                  <MicIcon off={p.muted} size={22} />
+              <div className="flex flex-col items-center gap-1">
+                <button onClick={p.onMute} aria-pressed={!!p.muted} aria-label={p.muted ? "Unmute" : "Mute"} className={`${tile} ${p.muted ? "bg-white text-black" : ""}`}>
+                  <MicIcon off={p.muted} size={25} stroke={1.7} />
                 </button>
-                <span className="text-[12px] text-white/80" aria-hidden>{p.muted ? "Unmute" : "Mute"}</span>
+                <span className="text-[13px] text-white/90" aria-hidden>{p.muted ? "Unmute" : "Mute"}</span>
               </div>
             )}
             {p.onHold && p.status === "active" && (
-              <div className="flex flex-col items-center gap-1.5">
-                <button onClick={p.onHold} aria-pressed={!!p.held} aria-label={p.held ? "Unhold" : "Hold"} className={`${small} ${p.held ? "bg-white text-black" : "bg-white/12"}`}>
+              <div className="flex flex-col items-center gap-1">
+                <button onClick={p.onHold} aria-pressed={!!p.held} aria-label={p.held ? "Unhold" : "Hold"} className={`${tile} ${p.held ? "bg-white text-black" : ""}`}>
                   <PauseIcon size={22} />
                 </button>
-                <span className="text-[12px] text-white/80" aria-hidden>{p.held ? "Unhold" : "Hold"}</span>
+                <span className="text-[13px] text-white/90" aria-hidden>{p.held ? "Unhold" : "Hold"}</span>
               </div>
             )}
           </div>
-          <button onClick={p.onHangup} disabled={p.status === "ended"} className="w-[72px] h-[72px] rounded-full flex items-center justify-center" style={{ background: C.red }} aria-label="Hang up">
+          <button onClick={p.onHangup} disabled={p.status === "ended"} className="w-[72px] h-[72px] rounded-full flex items-center justify-center" style={{ background: "var(--sam-end)" }} aria-label="Hang up">
             <PhoneIcon size={30} down />
           </button>
         </div>
@@ -443,12 +479,11 @@ export const galaxy: Skin = {
   id: "galaxy",
   label: "Galaxy",
   screen: {
-    className: "",
-    style: { background: C.app, color: C.ink, fontFamily: "var(--font-samsung)", ["--sb-frame" as string]: "40px", ["--sb-bottom-frame" as string]: "20px" } as CSSProperties,
+    className: "sk-sam bg-[var(--sam-bg)] text-[var(--sam-ink)]",
+    style: { fontFamily: "var(--font-samsung)", ["--sb-frame" as string]: "40px", ["--sb-bottom-frame" as string]: "20px" } as CSSProperties,
   },
   threadClass: "px-3 pt-[calc(var(--sb)+72px)] pb-2",
   sheet: "m3",
-  why: { ink: C.ink, mute: C.mute, surface: "#FFFFFF", line: "rgba(0,0,0,.08)" },
   StatusBar,
   Header,
   DateStamp,
@@ -462,7 +497,8 @@ export const galaxy: Skin = {
   Media,
   UnknownAvatar,
   Banner,
+  UnknownNotice,
   CallScreen,
   RichCard,
-  rich: { ink: C.ink, mute: C.mute, accent: C.accent, onAccent: "#fff", line: "#EDEDF0", danger: C.red, track: "#EDEDF0" },
+  rich: { ink: C.ink, mute: C.mute, accent: C.accent, onAccent: "#fff", line: C.line, danger: C.red, track: C.line },
 };

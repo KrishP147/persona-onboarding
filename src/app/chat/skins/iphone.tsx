@@ -1,46 +1,46 @@
 "use client";
-// imessage on ios 26 (liquid glass), light. values from docs/design/phone-ui-spec.md A1
+// imessage on ios 26 (liquid glass), light + dark. colors are --ios-* vars on .sk-ios (globals.css),
+// values + sources in docs/design/phone-ui-spec.md A1 and its fidelity pass
 import type { CSSProperties, ReactNode } from "react";
-import type { BubbleProps, CallProps, ComposerProps, HeaderProps, Pos, RichCardProps, Skin } from "./types";
+import type { BubbleProps, CallProps, ComposerProps, HeaderProps, Pos, RichCardProps, Skin, UnknownProps } from "./types";
 import { AGENT_NUMBER, BubbleBody, BubbleIcon, GoogleG, MicIcon, PauseIcon, PersonaLogo, PersonSilhouette, PhoneIcon, RecTimer, callLog, eventKind, isToday, time, useClock, useElapsed } from "./shared";
 
-const BLUE = "#0088FF";
-const RECV = "#E9E9EB";
-const GRAY = "#8A8A8E";
-const RED = "#FF383C";
-const GREEN = "#34C759";
+const BLUE = "var(--ios-blue)";
+const RECV = "var(--ios-recv)";
+const GRAY = "var(--ios-gray)";
+const RED = "var(--ios-red)";
+const GREEN = "var(--ios-green)";
+const INK = "var(--ios-ink)";
 
 const glass: CSSProperties = {
-  background: "rgba(255,255,255,.62)",
+  background: "var(--ios-glass)",
   backdropFilter: "blur(20px) saturate(180%)",
   WebkitBackdropFilter: "blur(20px) saturate(180%)",
-  border: ".5px solid rgba(255,255,255,.7)",
-  boxShadow: "0 1px 4px rgba(0,0,0,.10), inset 0 1px 0 rgba(255,255,255,.8)",
+  border: ".5px solid var(--ios-glass-rim)",
+  boxShadow: "var(--ios-glass-shadow)",
 };
 
 const hasTail = (p: Pos) => p === "single" || p === "last";
 
 // the imessage tail: hooks out of the bottom corner. it paints behind the bubble's content
-// (z -1 inside an isolated bubble), so it can never cover a glyph whatever the run position
-function Tail({ mine, color }: { mine: boolean; color: string }) {
+// (z -1 inside an isolated bubble), so it can never cover a glyph whatever the run position.
+// a clipped box, not an svg, so a sent tail can share the bubble's fixed screen gradient
+const TAIL_R = "path('M0 0H12V7C12 12.5 13.5 15.6 18 18C13.4 18.6 9.2 17.6 6.2 15.4C4.6 17 2.6 18 0 18Z')";
+const TAIL_L = "path('M18 0H6V7C6 12.5 4.5 15.6 0 18C4.6 18.6 8.8 17.6 11.8 15.4C13.4 17 15.4 18 18 18Z')";
+function Tail({ mine, color = RECV }: { mine: boolean; color?: string }) {
   return (
-    <svg
-      width="18"
-      height="18"
-      viewBox="0 0 18 18"
+    <span
       aria-hidden
-      className="absolute bottom-0 -z-10 pointer-events-none"
-      style={mine ? { right: -6, color } : { left: -6, color, transform: "scaleX(-1)" }}
-    >
-      <path d="M0 0H12V7C12 12.5 13.5 15.6 18 18C13.4 18.6 9.2 17.6 6.2 15.4C4.6 17 2.6 18 0 18Z" fill="currentColor" />
-    </svg>
+      className={`absolute bottom-0 -z-10 pointer-events-none w-[18px] h-[18px] ${mine ? "sk-ios-sent" : ""}`}
+      style={mine ? { right: -6, clipPath: TAIL_R } : { left: -6, clipPath: TAIL_L, background: color }}
+    />
   );
 }
 
 function StatusBar() {
   const t = useClock();
   return (
-    <div className="absolute inset-x-0 top-0 z-30 h-[54px] flex items-center text-black pointer-events-none" aria-hidden>
+    <div className="absolute inset-x-0 top-0 z-30 h-[54px] flex items-center pointer-events-none" style={{ color: INK }} aria-hidden>
       <span className="w-[132px] text-center text-[17px] font-semibold tracking-[-0.4px] pt-[3px]">{t}</span>
       <span className="flex-1" />
       <span className="w-[132px] flex items-center justify-center gap-[6px] pt-[3px]">
@@ -65,7 +65,7 @@ function StatusBar() {
 
 function UnknownAvatar({ size }: { size: number }) {
   return (
-    <div className="rounded-full flex items-end justify-center overflow-hidden shrink-0" style={{ width: size, height: size, background: "linear-gradient(#A5ABB8,#858994)" }} aria-hidden>
+    <div className="rounded-full flex items-end justify-center overflow-hidden shrink-0" style={{ width: size, height: size, background: "var(--ios-avatar)" }} aria-hidden>
       <PersonSilhouette size={size * 0.78} color="#fff" />
     </div>
   );
@@ -78,7 +78,7 @@ function Header({ name, saved, onCall, callDisabled, onMenu }: HeaderProps) {
       <div
         className="absolute inset-x-0 top-0 h-[calc(var(--sb)+116px)]"
         style={{
-          background: "linear-gradient(#fff calc(100% - 34px), rgba(255,255,255,0))",
+          background: "linear-gradient(rgb(var(--ios-edge)) calc(100% - 34px), rgba(var(--ios-edge),0))",
           backdropFilter: "blur(6px)",
           WebkitBackdropFilter: "blur(6px)",
           maskImage: "linear-gradient(#000 calc(100% - 34px), transparent)",
@@ -86,12 +86,12 @@ function Header({ name, saved, onCall, callDisabled, onMenu }: HeaderProps) {
         }}
       />
       <header className="relative flex items-start justify-between px-4 pt-[calc(var(--sb)+6px)]">
-        <span className="hidden sm:flex w-11 h-11 rounded-full items-center justify-center text-black" style={glass} aria-hidden>
+        <span className="hidden sm:flex w-11 h-11 rounded-full items-center justify-center" style={{ ...glass, color: INK }} aria-hidden>
           <svg width="12" height="20" viewBox="0 0 12 20" fill="none" stroke="currentColor" strokeWidth="2.6" strokeLinecap="round" strokeLinejoin="round">
             <path d="M10 2 2 10l8 8" />
           </svg>
         </span>
-        <button aria-label="Menu" onClick={onMenu} className="sm:hidden pointer-events-auto w-11 h-11 rounded-full flex items-center justify-center text-black" style={glass}>
+        <button aria-label="Menu" onClick={onMenu} className="sm:hidden pointer-events-auto w-11 h-11 rounded-full flex items-center justify-center" style={{ ...glass, color: INK }}>
           <svg width="18" height="14" viewBox="0 0 18 14" fill="currentColor" aria-hidden>
             <rect y="0" width="18" height="2" rx="1" />
             <rect y="6" width="18" height="2" rx="1" />
@@ -100,14 +100,14 @@ function Header({ name, saved, onCall, callDisabled, onMenu }: HeaderProps) {
         </button>
         <div className="flex flex-col items-center -mt-[2px]">
           {saved ? <PersonaLogo size={50} /> : <UnknownAvatar size={50} />}
-          <div className="-mt-[6px] h-[24px] px-[10px] rounded-full flex items-center gap-[3px] text-[12px] font-semibold text-black tracking-[-0.1px] max-w-[200px]" style={glass}>
+          <div className="-mt-[6px] h-[28px] px-[12px] rounded-full flex items-center gap-[4px] text-[15px] font-semibold tracking-[-0.2px] max-w-[220px]" style={{ ...glass, color: INK }}>
             <span className="truncate">{name}</span>
-            <svg width="6" height="10" viewBox="0 0 6 10" fill="none" stroke={GRAY} strokeWidth="1.6" strokeLinecap="round" aria-hidden>
+            <svg width="7" height="11" viewBox="0 0 6 10" fill="none" stroke={GRAY} strokeWidth="1.6" strokeLinecap="round" aria-hidden>
               <path d="M1 1l4 4-4 4" />
             </svg>
           </div>
         </div>
-        <button aria-label="Call" disabled={callDisabled} onClick={onCall} className="pointer-events-auto w-11 h-11 rounded-full flex items-center justify-center text-black disabled:opacity-40" style={glass}>
+        <button aria-label="Call" disabled={callDisabled} onClick={onCall} className="pointer-events-auto w-11 h-11 rounded-full flex items-center justify-center disabled:opacity-40" style={{ ...glass, color: INK }}>
           <PhoneIcon size={19} />
         </button>
       </header>
@@ -129,21 +129,21 @@ function DateStamp({ ts, first }: { ts: number; first: boolean }) {
 }
 
 function Bubble({ m, mine, pos, reaction, receipt, receiptAt, highlight }: BubbleProps) {
-  const gap = pos === "single" || pos === "first" ? "pt-[9px]" : "pt-[2px]";
-  const bg = mine ? BLUE : RECV;
+  // measured: 3-4 between bubbles of one run, ~10 when the sender changes
+  const gap = pos === "single" || pos === "first" ? "pt-[10px]" : "pt-[3px]";
   return (
     <div data-role={m.role} className={`${gap} flex flex-col ${mine ? "items-end" : "items-start"}`}>
       <div
-        className={`relative isolate max-w-[70%] rounded-[18px] px-3 py-[7px] text-[17px] leading-[22px] tracking-[-0.4px] whitespace-pre-wrap break-words transition-[outline-color] duration-150 ${mine ? "text-white" : "text-black"}`}
-        style={{ background: mine ? `linear-gradient(#1A93FF, ${BLUE})` : RECV, outline: highlight ? `2px solid ${highlight}` : "2px solid transparent", outlineOffset: 2 }}
+        className={`relative isolate max-w-[70%] rounded-[18px] px-3 py-[7px] text-[17px] leading-[22px] tracking-[-0.4px] whitespace-pre-wrap break-words transition-[outline-color] duration-150 ${mine ? "sk-ios-sent" : ""}`}
+        style={{ ...(mine ? { color: "var(--ios-sent-ink)" } : { background: RECV, color: "var(--ios-recv-ink)" }), outline: highlight ? `2px solid ${highlight}` : "2px solid transparent", outlineOffset: 2 }}
       >
-        <BubbleBody m={m} voice={mine ? undefined : { knob: "bg-black/10", bar: "bg-black/40", ink: "text-black/60" }} />
-        {hasTail(pos) && <Tail mine={mine} color={bg} />}
+        <BubbleBody m={m} voice={mine ? undefined : { knob: "bg-[var(--ios-fill)]", bar: "bg-[var(--ios-fill-ink)]", ink: "text-[var(--ios-fill-ink)]" }} />
+        {hasTail(pos) && <Tail mine={mine} />}
         {reaction && (
           // their tapback on your bubble: grey badge, top outer corner, with the little two-dot tail
-          <span className={`absolute -top-[16px] ${mine ? "-left-[14px]" : "-right-[14px]"} w-[30px] h-[30px] rounded-full flex items-center justify-center text-[15px] border-2 border-white`} style={{ background: RECV }} aria-label="reaction">
+          <span className={`absolute -top-[16px] ${mine ? "-left-[14px]" : "-right-[14px]"} w-[30px] h-[30px] rounded-full flex items-center justify-center text-[15px] border-2`} style={{ background: RECV, borderColor: "var(--ios-bg)" }} aria-label="reaction">
             {reaction}
-            <span className="absolute -bottom-[3px] right-[2px] w-[7px] h-[7px] rounded-full border-2 border-white" style={{ background: RECV }} />
+            <span className="absolute -bottom-[3px] right-[2px] w-[7px] h-[7px] rounded-full border-2" style={{ background: RECV, borderColor: "var(--ios-bg)" }} />
           </span>
         )}
       </div>
@@ -163,10 +163,10 @@ function Bubble({ m, mine, pos, reaction, receipt, receiptAt, highlight }: Bubbl
 
 function Typing() {
   return (
-    <div className="pt-[9px] pl-[4px]">
+    <div className="pt-[10px] pl-[4px]">
       <div className="relative w-[58px] h-[36px] rounded-[18px] flex items-center justify-center gap-[4px]" style={{ background: RECV }} role="status" aria-label="typing">
         {[0, 1, 2].map((i) => (
-          <span key={i} className="w-2 h-2 rounded-full sk-pulse" style={{ background: "#8E8E93", animationDelay: `${i * 150}ms` }} />
+          <span key={i} className="w-2 h-2 rounded-full sk-pulse" style={{ background: GRAY, animationDelay: `${i * 150}ms` }} />
         ))}
         {/* thought-bubble tail */}
         <span className="absolute -bottom-[2px] -left-[2px] w-2 h-2 rounded-full" style={{ background: RECV }} />
@@ -185,12 +185,12 @@ function Composer({ draft, setDraft, onSubmit, onAttach, canSend, recording, tra
         onSubmit();
       }}
     >
-      <button type="button" aria-label="Attach" onClick={onAttach} className="w-9 h-9 shrink-0 rounded-full flex items-center justify-center text-black" style={glass}>
+      <button type="button" aria-label="Attach" onClick={onAttach} className="w-[38px] h-[38px] shrink-0 rounded-full flex items-center justify-center" style={{ ...glass, color: INK }}>
         <svg width="16" height="16" viewBox="0 0 16 16" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" aria-hidden>
           <path d="M8 1.5v13M1.5 8h13" />
         </svg>
       </button>
-      <div className="flex-1 min-w-0 min-h-9 rounded-[18px] flex items-center pl-3 pr-[4px] border" style={{ ...glass, background: "rgba(255,255,255,.9)", borderColor: "rgba(60,60,67,.18)" }}>
+      <div className="flex-1 min-w-0 min-h-[38px] rounded-[19px] flex items-center pl-[14px] pr-[5px]" style={{ ...glass, background: "var(--ios-field)", border: ".5px solid var(--ios-field-rim)" }}>
         {recording ? (
           <span className="flex-1 flex items-center gap-2 text-[17px] tracking-[-0.4px]" style={{ color: RED }}>
             <span className="w-2 h-2 rounded-full sk-pulse" style={{ background: RED }} />
@@ -202,7 +202,7 @@ function Composer({ draft, setDraft, onSubmit, onAttach, canSend, recording, tra
             onChange={(e) => setDraft(e.target.value)}
             placeholder={hint ?? "iMessage"}
             aria-label="Message"
-            className="flex-1 min-w-0 bg-transparent outline-none text-[17px] leading-[22px] tracking-[-0.4px] py-[6px] text-black placeholder:text-[#8A8A8E]"
+            className="flex-1 min-w-0 bg-transparent outline-none text-[17px] leading-[22px] tracking-[-0.4px] py-[7px] text-[var(--ios-ink)] placeholder:text-[var(--ios-placeholder)]"
           />
         )}
         {canSend && !recording ? (
@@ -260,7 +260,7 @@ function Card({ pos, children, footer, onClick, disabled, href }: { pos: Pos; ch
       </div>
     </>
   );
-  const cls = "relative isolate block w-[264px] rounded-[18px] text-black";
+  const cls = "relative isolate block w-[264px] rounded-[18px] text-[var(--ios-recv-ink)]";
   return (
     <div data-role="agent" className={`${pos === "single" || pos === "first" ? "pt-[9px]" : "pt-[2px]"} flex justify-start`}>
       {href ? (
@@ -324,20 +324,20 @@ function LinkPreview({ url, pos }: { url: string; pos: Pos }) {
 function ContactCard({ name, saved, onSave, pos }: { name: string; saved: boolean; onSave: () => void; pos: Pos }) {
   return (
     <div data-role="agent" className={`${pos === "single" || pos === "first" ? "pt-[9px]" : "pt-[2px]"} flex justify-start`}>
-      <div className="relative isolate w-[264px] rounded-[18px] text-black" style={{ background: RECV }}>
+      <div className="relative isolate w-[264px] rounded-[18px] text-[var(--ios-recv-ink)]" style={{ background: RECV }}>
         <div className="flex items-center gap-3 px-3 py-[10px]">
-          <div className="w-10 h-10 rounded-full flex items-center justify-center text-white text-[17px] font-semibold shrink-0" style={{ background: "linear-gradient(#A5ABB8,#858994)" }}>
+          <div className="w-10 h-10 rounded-full flex items-center justify-center text-white text-[17px] font-semibold shrink-0" style={{ background: "var(--ios-avatar)" }}>
             {name.charAt(0).toUpperCase()}
           </div>
           <div className="flex-1 min-w-0">
             <div className="text-[15px] font-semibold truncate tracking-[-0.2px]">{name}</div>
             <div className="text-[13px]" style={{ color: GRAY }}>{AGENT_NUMBER}</div>
           </div>
-          <svg width="7" height="12" viewBox="0 0 7 12" fill="none" stroke="#C4C4C7" strokeWidth="2" strokeLinecap="round" aria-hidden>
+          <svg width="7" height="12" viewBox="0 0 7 12" fill="none" stroke="var(--ios-gray3)" strokeWidth="2" strokeLinecap="round" aria-hidden>
             <path d="M1 1l5 5-5 5" />
           </svg>
         </div>
-        <button onClick={onSave} disabled={saved} className="w-full border-t border-black/10 py-[9px] text-[15px] font-semibold disabled:font-normal" style={{ color: saved ? GRAY : BLUE }}>
+        <button onClick={onSave} disabled={saved} className="w-full border-t border-[var(--ios-sep)] py-[9px] text-[15px] font-semibold disabled:font-normal" style={{ color: saved ? GRAY : BLUE }}>
           {saved ? "Saved ✓" : "Save"}
         </button>
         {hasTail(pos) && <Tail mine={false} color={RECV} />}
@@ -350,7 +350,7 @@ function ContactCard({ name, saved, onSave, pos }: { name: string; saved: boolea
 function RichCard({ title, children, pos = "single" }: RichCardProps) {
   return (
     <div data-role="agent" className={`${pos === "single" || pos === "first" ? "pt-[9px]" : "pt-[2px]"} flex justify-start`}>
-      <section aria-label={title} className="relative isolate w-[300px] max-w-[88%] rounded-[18px] text-black" style={{ background: RECV }}>
+      <section aria-label={title} className="relative isolate w-[300px] max-w-[88%] rounded-[18px] text-[var(--ios-recv-ink)]" style={{ background: RECV }}>
         <div className="px-3 pt-[10px] pb-1.5 text-[13px] leading-[18px] font-semibold tracking-[-0.08px]" style={{ color: GRAY }}>
           {title}
         </div>
@@ -372,18 +372,21 @@ function Media({ src }: { src: string }) {
 
 function Banner({ tone, children }: { tone: "info" | "error"; children: ReactNode }) {
   return (
-    <div className="mx-4 mb-1 rounded-[14px] px-3 py-2 text-[13px] leading-[18px] text-center" style={tone === "error" ? { background: "#FFF1F0", color: "#C4271F" } : { background: "#F2F2F7", color: "#3C3C43" }}>
+    <div className="mx-4 mb-1 rounded-[14px] px-3 py-2 text-[13px] leading-[18px] text-center" style={tone === "error" ? { background: "var(--ios-err-bg)", color: "var(--ios-err-ink)" } : { background: "var(--ios-info-bg)", color: "var(--ios-info-ink)" }}>
       {children}
     </div>
   );
 }
 
-function UnknownNotice() {
+// ios: gray line + one blue action. report junk is gone (it did nothing here); dismiss hides the line
+function UnknownNotice({ onDismiss }: UnknownProps) {
   return (
     <div className="text-center text-[13px] leading-[18px] pt-5 pb-1" style={{ color: GRAY }}>
       This sender is not in your contacts.
       <br />
-      <span style={{ color: BLUE }}>Report Junk</span>
+      <button type="button" onClick={onDismiss} className="min-h-8 px-2" style={{ color: BLUE }}>
+        Dismiss
+      </button>
     </div>
   );
 }
@@ -392,12 +395,28 @@ function CallScreen(p: CallProps) {
   const timer = useElapsed(p.startedAt);
   const holdTimer = useElapsed(p.heldAt ?? null);
   const state = p.held ? "" : p.muted ? "muted" : p.speaking ? "speaking" : p.listening ? "listening" : "";
-  const circle = "w-[72px] h-[72px] rounded-full flex items-center justify-center";
-  const glassDark: CSSProperties = { background: "rgba(255,255,255,.16)", backdropFilter: "blur(20px)", WebkitBackdropFilter: "blur(20px)", border: ".5px solid rgba(255,255,255,.18)" };
+  // ios 26 phone: 77pt glass circles with a light rim, 15pt labels (apple press, hold assist)
+  const circle = "w-[76px] h-[76px] rounded-full flex items-center justify-center";
+  const glassDark: CSSProperties = { background: "var(--ios-call-glass)", backdropFilter: "blur(20px) saturate(160%)", WebkitBackdropFilter: "blur(20px) saturate(160%)", border: "1px solid var(--ios-call-rim)" };
+  // active: the timer sits above the name (ios 26); ringing + ended keep the caption below
+  const above = p.status === "active" || p.status === "connecting";
+  const status = (
+    <div className={`text-[17px] leading-[22px] text-white/70 ${above ? "mb-1" : "mt-1"}`} role="status">
+      {p.status === "ringing" && (p.saved ? "mobile" : "Unknown Caller")}
+      {p.status === "connecting" && "calling…"}
+      {p.status === "active" && (
+        <>
+          <span className="tabular-nums">{p.held ? `on hold · ${holdTimer}` : timer}</span>
+          {state && <span className="text-white/50"> · {state}</span>}
+        </>
+      )}
+      {p.status === "ended" && "Call Ended"}
+    </div>
+  );
   return (
     <div
-      className="relative h-full w-full text-white flex flex-col items-center"
-      style={{ background: p.saved ? "radial-gradient(120% 70% at 50% 20%, #5b6270 0%, #2c2f36 55%, #17181c 100%)" : "linear-gradient(#2C2C2E, #1C1C1E)", fontFamily: "var(--font-ios)" }}
+      className="sk-ios relative h-full w-full text-white flex flex-col items-center"
+      style={{ background: p.saved ? "var(--ios-call-poster)" : "var(--ios-call-bg)", fontFamily: "var(--font-ios)" }}
       role={p.status === "ringing" ? "alertdialog" : undefined}
       aria-label={p.status === "ringing" ? `Incoming call from ${p.name}` : "Call"}
     >
@@ -405,18 +424,9 @@ function CallScreen(p: CallProps) {
         <div className={`mx-auto w-[84px] h-[84px] rounded-full mb-4 transition-shadow ${p.speaking ? "shadow-[0_0_0_8px_rgba(255,255,255,.14)]" : ""}`}>
           {p.saved ? <PersonaLogo size={84} /> : <UnknownAvatar size={84} />}
         </div>
-        <div className="text-[34px] leading-[41px] font-normal tracking-[0.2px]">{p.name}</div>
-        <div className="text-[17px] mt-1 text-white/70" role="status">
-          {p.status === "ringing" && (p.saved ? "mobile" : "Unknown Caller")}
-          {p.status === "connecting" && "calling…"}
-          {p.status === "active" && (
-            <>
-              <span className="tabular-nums">{p.held ? `on hold · ${holdTimer}` : timer}</span>
-              {state && <span className="text-white/50"> · {state}</span>}
-            </>
-          )}
-          {p.status === "ended" && "Call Ended"}
-        </div>
+        {above && status}
+        <div className="text-[34px] leading-[41px] font-semibold tracking-[0.4px]">{p.name}</div>
+        {!above && status}
       </div>
       {p.status === "active" && !p.held && (
         <div className="mt-8 px-8 space-y-3 text-[16px] leading-[21px] text-center max-w-full">
@@ -436,31 +446,31 @@ function CallScreen(p: CallProps) {
             { label: "Accept", onClick: p.onAccept, bg: GREEN, down: false },
           ].map((b) => (
             <div key={b.label} className="flex flex-col items-center gap-2">
-              <button onClick={b.onClick} aria-label={b.label} className="w-[75px] h-[75px] rounded-full flex items-center justify-center" style={{ background: b.bg }}>
+              <button onClick={b.onClick} aria-label={b.label} className={circle} style={{ background: b.bg }}>
                 <PhoneIcon size={30} down={b.down} />
               </button>
-              <span className="text-[13px] leading-[18px]" aria-hidden>{b.label}</span>
+              <span className="text-[15px] leading-[20px]" aria-hidden>{b.label}</span>
             </div>
           ))}
         </div>
       ) : (
         <div className="flex flex-col items-center gap-7 pb-[calc(var(--sb-bottom)+48px)]">
-          <div className="flex gap-7">
+          <div className="flex gap-[40px]">
             {p.onHide && p.status === "active" && (
-              <div className="lg:hidden flex flex-col items-center gap-1.5">
+              <div className="lg:hidden flex flex-col items-center gap-2">
                 <button onClick={p.onHide} aria-label={p.unread ? `Messages, ${p.unread} new` : "Messages"} className={`relative ${circle}`} style={glassDark}>
                   <BubbleIcon size={26} />
                   {!!p.unread && <span className="absolute -top-1 -right-1 min-w-5 h-5 px-1 rounded-full text-[12px] font-semibold flex items-center justify-center" style={{ background: GREEN }}>{p.unread}</span>}
                 </button>
-                <span className="text-[12px]" aria-hidden>Messages</span>
+                <span className="text-[15px] leading-[20px]" aria-hidden>Messages</span>
               </div>
             )}
             {p.onMute && p.status === "active" && (
-              <div className="flex flex-col items-center gap-1.5">
+              <div className="flex flex-col items-center gap-2">
                 <button onClick={p.onMute} aria-pressed={!!p.muted} aria-label={p.muted ? "Unmute" : "Mute"} className={`${circle} ${p.muted ? "bg-white text-black" : ""}`} style={p.muted ? undefined : glassDark}>
                   <MicIcon off={p.muted} size={26} />
                 </button>
-                <span className="text-[12px]" aria-hidden>{p.muted ? "Unmute" : "Mute"}</span>
+                <span className="text-[15px] leading-[20px]" aria-hidden>{p.muted ? "Unmute" : "Mute"}</span>
               </div>
             )}
             {p.onHold && p.status === "active" && (
@@ -472,11 +482,11 @@ function CallScreen(p: CallProps) {
               </div>
             )}
           </div>
-          <div className="flex flex-col items-center gap-1.5">
+          <div className="flex flex-col items-center gap-2">
             <button onClick={p.onHangup} disabled={p.status === "ended"} className={circle} style={{ background: RED }} aria-label="Hang up">
               <PhoneIcon size={30} down />
             </button>
-            <span className="text-[12px]" aria-hidden>End</span>
+            <span className="text-[15px] leading-[20px]" aria-hidden>End</span>
           </div>
         </div>
       )}
@@ -488,12 +498,11 @@ export const iphone: Skin = {
   id: "iphone",
   label: "iPhone",
   screen: {
-    className: "bg-white text-black",
+    className: "sk-ios bg-[var(--ios-bg)] text-[var(--ios-ink)]",
     style: { fontFamily: "var(--font-ios)", ["--sb-frame" as string]: "54px", ["--sb-bottom-frame" as string]: "34px" } as CSSProperties,
   },
-  threadClass: "px-4 pt-[calc(var(--sb)+112px)] pb-2 bg-white",
+  threadClass: "px-4 pt-[calc(var(--sb)+76px)] pb-2 bg-[var(--ios-bg)]",
   sheet: "ios",
-  why: { ink: "#1d1d1f", mute: GRAY, surface: "rgba(255,255,255,.96)", line: "rgba(60,60,67,.16)" },
   StatusBar,
   Header,
   DateStamp,
@@ -510,5 +519,5 @@ export const iphone: Skin = {
   UnknownNotice,
   CallScreen,
   RichCard,
-  rich: { ink: "#000", mute: GRAY, accent: BLUE, onAccent: "#fff", line: "rgba(0,0,0,.1)", danger: RED, track: "rgba(0,0,0,.1)" },
+  rich: { ink: "var(--ios-recv-ink)", mute: GRAY, accent: BLUE, onAccent: "#fff", line: "var(--ios-sep)", danger: RED, track: "var(--ios-fill)" },
 };

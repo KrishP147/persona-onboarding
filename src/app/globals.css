@@ -1,5 +1,8 @@
 @import "tailwindcss";
 
+/* dark: follows html[data-theme], set before paint by the script in layout.tsx */
+@custom-variant dark (&:where([data-theme="dark"], [data-theme="dark"] *));
+
 /* persona site tokens, lifted from yourpersona.com (see docs/design/persona-site.md).
    the site chrome uses these; the phone skins keep their own os colors. */
 :root {
@@ -18,6 +21,25 @@
   --p-hairline-warm: #e5e5e1;
   --ease-house: cubic-bezier(0.16, 1, 0.3, 1);
   --ease-press: cubic-bezier(0.32, 0.72, 0, 1);
+  --p-scrollbar: #c7c7cc;
+}
+
+/* persona has no dark site; this is its system turned over: near-black ground, apple's dark
+   greys for surfaces and hairlines, #f5f5f7 ink, the same blues */
+html[data-theme="dark"] {
+  --p-canvas: #0b0b0c;
+  --p-alt: #1c1c1e;
+  --p-step-200: #2c2c2e;
+  --p-step-300: #3a3a3c;
+  --p-ink: #f5f5f7;
+  --p-ink-mute: #a1a1a6;
+  --p-ink-faint: #8e8e93;
+  --p-black: #f5f5f7;
+  --p-blue: #0a84ff;
+  --p-blue-card: #2997ff;
+  --p-warm: #0f0f0e;
+  --p-hairline-warm: #2c2c2a;
+  --p-scrollbar: #48484a;
 }
 
 @theme inline {
@@ -46,7 +68,7 @@ body {
 
 * {
   scrollbar-width: thin;
-  scrollbar-color: #c7c7cc transparent;
+  scrollbar-color: var(--p-scrollbar) transparent;
 }
 
 /* phone skins: os type stacks (each skin sets its own; never the page's) */
@@ -54,6 +76,228 @@ body {
   --font-ios: -apple-system, "SF Pro Text", "SF Pro", system-ui, var(--font-inter), "Helvetica Neue", Arial, sans-serif;
   --font-android: "Google Sans Text", "Google Sans", var(--font-roboto-flex), Roboto, system-ui, sans-serif;
   --font-samsung: "SamsungOne", "Samsung Sans", var(--font-inter), Roboto, system-ui, sans-serif;
+}
+
+/* ---------------------------------------------------------------------------------------------
+   per-skin palettes. each skin puts one class on its screen root (and its call screen root) and
+   reads only its own --<skin>-* vars; light on the class, dark under html[data-theme="dark"].
+   vars only here: ground/ink go on the root as tailwind classes (bg-[var(..)]) so they stay in the
+   utilities layer and can still be overridden.
+   sources + measurements: docs/design/phone-ui-spec.md "fidelity pass".
+   --------------------------------------------------------------------------------------------- */
+
+/* iphone: imessage on ios 26. hig 2025 system colors; light bubbles measured off apple press +
+   real screenshots; dark received bubble derived (no real ios 26 dark thread found) */
+.sk-ios {
+  --ios-bg: #ffffff;
+  --ios-ink: #000000; /* label */
+  --ios-gray: #8a8a8e; /* secondaryLabel on white */
+  --ios-gray3: #c7c7cc; /* systemGray3: chevrons */
+  --ios-placeholder: rgba(60, 60, 67, 0.3); /* tertiaryLabel */
+  --ios-blue: #0088ff; /* systemBlue */
+  --ios-red: #ff383c;
+  --ios-green: #34c759;
+  --ios-recv: #e9e9eb; /* measured, 3 refs agree */
+  --ios-recv-ink: #000000;
+  --ios-sent-ink: #ffffff;
+  /* real sent bubbles shade by screen height (measured #00b4fe top / #017efe bottom in press,
+     #2599fb / #0e8ffd real); we paint flat systemBlue, see .sk-ios-sent */
+  --ios-sent: #0088ff;
+  --ios-sep: rgba(60, 60, 67, 0.18); /* hairlines inside cards */
+  --ios-fill: rgba(0, 0, 0, 0.08); /* voice-note knob, progress track */
+  --ios-fill-ink: rgba(0, 0, 0, 0.45);
+  --ios-glass: rgba(255, 255, 255, 0.62);
+  --ios-glass-rim: rgba(255, 255, 255, 0.7);
+  --ios-glass-shadow: 0 1px 4px rgba(0, 0, 0, 0.1), 0 4px 16px -4px rgba(0, 0, 0, 0.08), inset 0 1px 0 rgba(255, 255, 255, 0.8);
+  --ios-field: rgba(255, 255, 255, 0.92);
+  --ios-field-rim: rgba(60, 60, 67, 0.08);
+  --ios-edge: 255, 255, 255; /* scroll-edge fade under the header (rgb triplet) */
+  --ios-info-bg: #f2f2f7;
+  --ios-info-ink: #3c3c43;
+  --ios-err-bg: #fff1f0;
+  --ios-err-ink: #c4271f;
+  --ios-avatar: linear-gradient(#a5abb8, #858994); /* monogram / unknown */
+  /* call screen: dark in both themes, like the phone app over a poster (not flipped below) */
+  --ios-call-bg: linear-gradient(#2c2c2e, #1c1c1e);
+  --ios-call-poster: radial-gradient(120% 70% at 50% 20%, #5b6270 0%, #2c2f36 55%, #17181c 100%);
+  --ios-call-glass: rgba(255, 255, 255, 0.14);
+  --ios-call-rim: rgba(255, 255, 255, 0.22);
+}
+html[data-theme="dark"] .sk-ios {
+  --ios-bg: #000000;
+  --ios-ink: #ffffff;
+  --ios-gray: #8d8d93; /* secondaryLabel (ebebf5 @ 60%) on black */
+  --ios-gray3: #48484a;
+  --ios-placeholder: rgba(235, 235, 245, 0.3);
+  --ios-blue: #0091ff;
+  --ios-red: #ff4245;
+  --ios-green: #30d158;
+  --ios-recv: #262628; /* between systemGray5 #2c2c2e and systemGray6 #1c1c1e; ios 13-18 measured #262629 */
+  --ios-recv-ink: #ffffff;
+  --ios-sent: #0091ff;
+  --ios-sep: rgba(84, 84, 88, 0.6); /* separator dark */
+  --ios-fill: rgba(255, 255, 255, 0.14);
+  --ios-fill-ink: rgba(255, 255, 255, 0.6);
+  --ios-glass: rgba(44, 44, 46, 0.62);
+  --ios-glass-rim: rgba(255, 255, 255, 0.12);
+  --ios-glass-shadow: 0 1px 4px rgba(0, 0, 0, 0.5), inset 0 1px 0 rgba(255, 255, 255, 0.1);
+  --ios-field: rgba(36, 36, 38, 0.86);
+  --ios-field-rim: rgba(255, 255, 255, 0.1);
+  --ios-edge: 0, 0, 0;
+  --ios-info-bg: #1c1c1e;
+  --ios-info-ink: rgba(235, 235, 245, 0.75);
+  --ios-err-bg: #3a1715;
+  --ios-err-ink: #ff6961;
+  --ios-avatar: linear-gradient(#6c6f78, #4b4d54);
+}
+/* sent bubble + its tail share this one fill. ios shades sent bubbles by screen height; a
+   background-attachment: fixed gradient would do it, but the phone screen is transformed
+   (translateZ) so chrome paints fixed as scroll and each bubble got its own banded gradient.
+   flat until a scroll-driven version is worth it */
+.sk-ios-sent {
+  background: var(--ios-sent);
+}
+
+/* pixel: google messages (m3 expressive chat, aug 2025) + pixel phone. dark = measured off the
+   user's own pixel (dynamic color, purple-gray seed); light = google's gm3 baseline (the scheme
+   google apps use without a wallpaper seed), mapped onto the same roles the dark screenshots show:
+   app bar, received bubble and composer pill share surfaceContainer; thread = surface */
+.sk-gm {
+  --gm-app: #f0f4f9; /* surfaceContainer: status bar, app bar, screen ground */
+  --gm-surface: #ffffff; /* surface: thread, composer strip */
+  --gm-ink: #1f1f1f; /* onSurface */
+  --gm-mute: #444746; /* onSurfaceVariant: icons, placeholder, stamps */
+  --gm-recv: #f0f4f9;
+  --gm-recv-ink: #1f1f1f;
+  --gm-sent: #0b57d0; /* primary; m3e light sent = primary + onPrimary */
+  --gm-sent-ink: #ffffff;
+  --gm-primary: #0b57d0;
+  --gm-on-primary: #ffffff;
+  --gm-fab: #d3e3fd; /* primaryContainer */
+  --gm-fab-ink: #041e49;
+  --gm-high: #e9eef6; /* surfaceContainerHigh: banners, notice, reaction pill */
+  --gm-line: rgba(31, 31, 31, 0.12);
+  --gm-track: rgba(31, 31, 31, 0.1);
+  --gm-hover: rgba(31, 31, 31, 0.08);
+  --gm-error: #b3261e;
+  --gm-err-bg: #f9dedc;
+  --gm-err-ink: #410e0b;
+  --gm-rec: #b3261e;
+  --gm-rec-ink: #ffffff;
+  --gm-green: #146c2e;
+  --gm-unknown: #fcc934; /* default contact avatar, measured */
+  --gm-unknown-ink: #1f1f23;
+  /* pixel phone */
+  --gm-call-bg: #f8fafd;
+  --gm-call-panel: #e9eef6;
+  --gm-call-btn: #ffffff;
+  --gm-call-on: #0b57d0;
+  --gm-call-on-ink: #ffffff;
+  --gm-cookie: #d3e3fd;
+  --gm-cookie-live: #a8c7fa;
+  --gm-end: #ed665a; /* measured (dark); same red in light, no light capture */
+  --gm-end-ink: #1f1f1f;
+  --gm-answer: #5aba75;
+  --gm-answer-ink: #1f1f1f;
+}
+html[data-theme="dark"] .sk-gm {
+  --gm-app: #1f1f23; /* measured */
+  --gm-surface: #131317; /* measured */
+  --gm-ink: #e3e2e7; /* measured */
+  --gm-mute: #c5c6d0; /* measured */
+  --gm-recv: #1f1f23; /* measured */
+  --gm-recv-ink: #e3e2e7; /* measured */
+  --gm-sent: #394668; /* measured */
+  --gm-sent-ink: #ffffff; /* measured */
+  --gm-primary: #b7c4f2; /* est: primary tone 80 of the measured seed */
+  --gm-on-primary: #202f55;
+  --gm-fab: #513f66; /* measured: tertiaryContainer */
+  --gm-fab-ink: #efdbff; /* measured */
+  --gm-high: #2a2a2e;
+  --gm-line: rgba(255, 255, 255, 0.12);
+  --gm-track: rgba(255, 255, 255, 0.14);
+  --gm-hover: rgba(255, 255, 255, 0.1);
+  --gm-error: #f2b8b5;
+  --gm-err-bg: #601410;
+  --gm-err-ink: #ffdad6;
+  --gm-rec: #8c1d18;
+  --gm-rec-ink: #ffdad6;
+  --gm-green: #6dd58c;
+  --gm-call-bg: #131317;
+  --gm-call-panel: #1f1f23;
+  --gm-call-btn: #0e0e12; /* the ref's off buttons sit darker than the panel */
+  --gm-call-on: #d9e0fa;
+  --gm-call-on-ink: #202f55;
+  --gm-cookie: #2e3446;
+  --gm-cookie-live: #3f4a6a;
+}
+
+/* galaxy: samsung messages + samsung phone, one ui 8. light = measured off samsung's own
+   screenshots (sammobile bubble emoji settings page, sammy fans one ui 8.5 thread); dark = the
+   how2shout photo (hue only, camera-shifted) + one ui dark grounds. low confidence on received
+   bubble fills in both themes: no clean screenshot shows one */
+.sk-sam {
+  --sam-bg: #fcfcfc; /* measured, one ui 8.5 thread */
+  --sam-ink: #111111;
+  --sam-mute: #7b7b7b; /* dates, receipts, times */
+  --sam-icon: #3d3d3f; /* header + composer glyphs */
+  --sam-accent: #387afe; /* measured: one ui switch / link blue */
+  --sam-sent: #3b7cf2; /* measured, bubble emoji screenshot */
+  --sam-sent-ink: #ffffff;
+  --sam-recv: #eeeef0; /* est: one ui list-card gray */
+  --sam-recv-ink: #111111;
+  --sam-card: #eeeef0; /* rich cards, link cards, contact card */
+  --sam-field: #f0f0f2; /* composer pill, measured #f2f2f2 */
+  --sam-placeholder: #9a9a9f;
+  --sam-send-off: #c9ccd1;
+  --sam-line: rgba(0, 0, 0, 0.08);
+  --sam-hover: rgba(0, 0, 0, 0.05);
+  --sam-red: #e5372f;
+  --sam-green: #2fb65a;
+  --sam-fail: #e59148; /* measured: failed-send "!" */
+  --sam-unknown: #e3e8f0;
+  --sam-unknown-ink: #a3acba;
+  --sam-chip: #ffffff; /* reaction pill */
+  --sam-chip-rim: #e3e3e3;
+  --sam-info-ink: #3c3c43;
+  --sam-err-bg: #fdecec;
+  --sam-err-ink: #b3261e;
+  --sam-knob: rgba(255, 255, 255, 0.25); /* voice note inside a sent (blue) bubble */
+  --sam-knob-recv: rgba(0, 0, 0, 0.1);
+  /* samsung phone: dark in both themes (the call screen paints the call background, not the app
+     theme); panel + end measured off sammyguru's one ui 8 capture. not flipped below */
+  --sam-call-bg: linear-gradient(172deg, #0f0c17 0%, #1d1a2e 30%, #3a2f4f 58%, #5a4a66 80%, #7b7483 100%);
+  --sam-call-panel: rgba(44, 48, 56, 0.92); /* #2c3038 */
+  --sam-call-pill: rgba(255, 255, 255, 0.14);
+  --sam-end: #dc3c34;
+  --sam-answer: #34b359;
+}
+html[data-theme="dark"] .sk-sam {
+  --sam-bg: #000000; /* one ui dark: true black */
+  --sam-ink: #fafafa;
+  --sam-mute: #8e8e93;
+  --sam-icon: #e3e3e6;
+  --sam-accent: #5b95ff;
+  --sam-sent: #3a82f0; /* photo reads #3a86ec-#3c87ee */
+  --sam-sent-ink: #ffffff;
+  --sam-recv: #33363c; /* est: photo reads a cool mid-dark gray (#424e62 camera-shifted) */
+  --sam-recv-ink: #fafafa;
+  --sam-card: #1f2024;
+  --sam-field: #1c1c1e;
+  --sam-placeholder: #7c7c82;
+  --sam-send-off: #3a3a3e;
+  --sam-line: rgba(255, 255, 255, 0.1);
+  --sam-hover: rgba(255, 255, 255, 0.08);
+  --sam-red: #ff5a52;
+  --sam-green: #4cd07a;
+  --sam-unknown: #3a3f48;
+  --sam-unknown-ink: #8a93a3;
+  --sam-chip: #33363c;
+  --sam-chip-rim: #3a3a3e;
+  --sam-info-ink: rgba(250, 250, 250, 0.75);
+  --sam-err-bg: #3a1715;
+  --sam-err-ink: #ff8a80;
+  --sam-knob-recv: rgba(255, 255, 255, 0.14);
 }
 
 /* status bar + home area: the real safe areas on a phone, the mock ones in a frame */
@@ -97,4 +341,16 @@ body {
 @media (prefers-reduced-motion: reduce) {
   .sk-pulse, .sk-bounce, .sk-wave, .sk-spin, .sk-pop { animation: none; }
   .sk-sheet-ios, .sk-sheet-m3 { animation: sk-fade 80ms linear; }
+}
+
+/* reasoning pill: a soft glow when a new turn lands; with reduced motion, a count badge instead */
+@keyframes rz-glow {
+  0% { box-shadow: 0 0 0 0 color-mix(in srgb, var(--p-blue) 45%, transparent); }
+  100% { box-shadow: 0 0 0 10px color-mix(in srgb, var(--p-blue) 0%, transparent); }
+}
+.rz-glow { animation: rz-glow 1.2s var(--ease-house) 1; }
+.rz-count { display: none; }
+@media (prefers-reduced-motion: reduce) {
+  .rz-glow { animation: none; }
+  .rz-count { display: inline-flex; }
 }

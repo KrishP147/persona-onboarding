@@ -1,22 +1,26 @@
 "use client";
-// google messages on android 16, material 3 expressive, dark. values from docs/design/phone-ui-spec.md A2
+// google messages on android 16, material 3 expressive, light + dark. colors are --gm-* vars on .sk-gm
+// (globals.css): dark measured off the user's own pixel, light = gm3 baseline. see phone-ui-spec.md fidelity pass
 import type { CSSProperties, ReactNode } from "react";
-import type { BubbleProps, CallProps, ComposerProps, HeaderProps, Pos, RichCardProps, Skin } from "./types";
+import type { BubbleProps, CallProps, ComposerProps, HeaderProps, Pos, RichCardProps, Skin, UnknownProps } from "./types";
 import { AGENT_NUMBER, BubbleBody, BubbleIcon, GoogleG, MicIcon, PauseIcon, PersonaLogo, PersonSilhouette, PhoneIcon, RecTimer, callLog, eventKind, isToday, time, useClock, useElapsed } from "./shared";
 
 const C = {
-  app: "#111318",
-  container: "#1A1C21",
-  sent: "#004A77",
-  sentInk: "#C2E7FF",
-  recv: "#2B2F36",
-  recvInk: "#E3E3E3",
-  primary: "#A8C7FA",
-  onPrimary: "#062E6F",
-  fab: "#004A77",
-  mute: "#C4C7C5",
-  high: "#33373E",
-  error: "#F2B8B5",
+  app: "var(--gm-app)",
+  surface: "var(--gm-surface)",
+  ink: "var(--gm-ink)",
+  sent: "var(--gm-sent)",
+  sentInk: "var(--gm-sent-ink)",
+  recv: "var(--gm-recv)",
+  recvInk: "var(--gm-recv-ink)",
+  primary: "var(--gm-primary)",
+  onPrimary: "var(--gm-on-primary)",
+  fab: "var(--gm-fab)",
+  fabInk: "var(--gm-fab-ink)",
+  mute: "var(--gm-mute)",
+  high: "var(--gm-high)",
+  error: "var(--gm-error)",
+  green: "var(--gm-green)",
 };
 
 // m3 grouping: inner corners flatten to 4 inside a run
@@ -29,12 +33,13 @@ function corners(mine: boolean, pos: Pos): CSSProperties {
     ? { borderRadius: `${r}px ${top}px ${bot}px ${r}px` }
     : { borderRadius: `${top}px ${r}px ${r}px ${bot}px` };
 }
-const gapOf = (pos: Pos) => (pos === "single" || pos === "first" ? "pt-3" : "pt-[2px]");
+// measured: 3 inside a run, 16 between runs
+const gapOf = (pos: Pos) => (pos === "single" || pos === "first" ? "pt-4" : "pt-[3px]");
 
 function StatusBar() {
   const t = useClock();
   return (
-    <div className="absolute inset-x-0 top-0 z-30 h-[44px] flex items-center px-4 text-[14px] font-medium text-[#E3E3E3] pointer-events-none" aria-hidden>
+    <div className="sk-gm absolute inset-x-0 top-0 z-30 h-[44px] flex items-center px-4 text-[14px] font-medium text-[var(--gm-ink)] pointer-events-none" aria-hidden>
       <span className="pt-[2px] tracking-[0.1px]">{t}</span>
       <span className="flex-1" />
       <span className="flex items-center gap-[5px] pt-[2px]">
@@ -55,13 +60,13 @@ function StatusBar() {
 
 function UnknownAvatar({ size }: { size: number }) {
   return (
-    <div className="rounded-full flex items-center justify-center shrink-0" style={{ width: size, height: size, background: "#7FCFFF" }} aria-hidden>
-      <PersonSilhouette size={size * 0.56} color="#003549" />
+    <div className="rounded-full flex items-center justify-center shrink-0" style={{ width: size, height: size, background: "var(--gm-unknown)", color: "var(--gm-unknown-ink)" }} aria-hidden>
+      <PersonSilhouette size={size * 0.56} />
     </div>
   );
 }
 
-const iconBtn = "w-12 h-12 rounded-full flex items-center justify-center text-[#E3E3E3] hover:bg-white/10 disabled:opacity-40";
+const iconBtn = "w-12 h-12 rounded-full flex items-center justify-center text-[var(--gm-ink)] hover:bg-[var(--gm-hover)] disabled:opacity-40";
 
 function Header({ name, saved, onCall, callDisabled, onMenu }: HeaderProps) {
   return (
@@ -72,7 +77,7 @@ function Header({ name, saved, onCall, callDisabled, onMenu }: HeaderProps) {
         </svg>
       </span>
       {saved ? <PersonaLogo size={40} /> : <UnknownAvatar size={40} />}
-      <div className="flex-1 min-w-0 pl-4 text-[22px] leading-7 text-[#E3E3E3] truncate">{name}</div>
+      <div className="flex-1 min-w-0 pl-4 text-[22px] leading-7 text-[var(--gm-ink)] truncate">{name}</div>
       <button aria-label="Call" disabled={callDisabled} onClick={onCall} className={iconBtn}>
         <PhoneIcon size={24} />
       </button>
@@ -104,17 +109,17 @@ function DateStamp({ ts }: { ts: number; first: boolean }) {
 // 2026 read receipt: a small circle off the last sent bubble's bottom-right corner
 function ReceiptDot({ state }: { state: NonNullable<BubbleProps["receipt"]> }) {
   return (
-    <span className="absolute -right-[6px] -bottom-[6px] w-4 h-4 rounded-full flex items-center justify-center" style={{ background: C.container }} aria-label={state}>
+    <span className="absolute -right-1 -bottom-1 w-4 h-4 rounded-full flex items-center justify-center" style={{ background: C.surface }} aria-label={state}>
       <svg width="16" height="16" viewBox="0 0 16 16" aria-hidden>
         {state === "seen" ? (
           <>
-            <circle cx="8" cy="8" r="7" fill={C.primary} />
-            <path d="M4.8 8.2 7 10.4l4.3-4.6" fill="none" stroke={C.onPrimary} strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" />
+            <circle cx="8" cy="8" r="7" style={{ fill: C.primary }} />
+            <path d="M4.8 8.2 7 10.4l4.3-4.6" fill="none" style={{ stroke: C.onPrimary }} strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" />
           </>
         ) : (
           <>
-            <circle cx="8" cy="8" r="6.3" fill="none" stroke={C.mute} strokeWidth="1.3" />
-            {state === "delivered" && <path d="M4.8 8.2 7 10.4l4.3-4.6" fill="none" stroke={C.mute} strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />}
+            <circle cx="8" cy="8" r="6.3" fill="none" style={{ stroke: C.mute }} strokeWidth="1.3" />
+            {state === "delivered" && <path d="M4.8 8.2 7 10.4l4.3-4.6" fill="none" style={{ stroke: C.mute }} strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />}
           </>
         )}
       </svg>
@@ -126,7 +131,7 @@ function Bubble({ m, mine, pos, reaction, receipt, highlight }: BubbleProps) {
   return (
     <div data-role={m.role} className={`${gapOf(pos)} flex ${mine ? "justify-end" : "justify-start"} ${reaction ? "pb-3" : ""}`}>
       <div
-        className="relative max-w-[78%] px-[14px] py-[10px] text-[16px] leading-[22px] whitespace-pre-wrap break-words"
+        className="relative max-w-[82%] px-4 py-[9px] text-[16px] leading-6 whitespace-pre-wrap break-words"
         style={{ ...corners(mine, pos), background: mine ? C.sent : C.recv, color: mine ? C.sentInk : C.recvInk, outline: highlight ? `2px solid ${highlight}` : "2px solid transparent", outlineOffset: 2 }}
       >
         {m.channel === "voice" && (
@@ -136,7 +141,7 @@ function Bubble({ m, mine, pos, reaction, receipt, highlight }: BubbleProps) {
         )}
         <BubbleBody m={m} />
         {reaction && (
-          <span className="absolute -bottom-[16px] right-3 h-6 px-1.5 rounded-full flex items-center text-[14px]" style={{ background: C.high, boxShadow: `0 0 0 2px ${C.container}` }} aria-label="reaction">
+          <span className="absolute -bottom-[16px] right-3 h-6 px-1.5 rounded-full flex items-center text-[14px]" style={{ background: C.high, boxShadow: `0 0 0 2px ${C.surface}` }} aria-label="reaction">
             {reaction}
           </span>
         )}
@@ -148,8 +153,8 @@ function Bubble({ m, mine, pos, reaction, receipt, highlight }: BubbleProps) {
 
 function Typing() {
   return (
-    <div className="pt-3">
-      <div className="w-14 h-9 rounded-[20px] flex items-center justify-center gap-[5px]" style={{ background: C.recv }} role="status" aria-label="typing">
+    <div className="pt-4">
+      <div className="w-14 h-[42px] rounded-[20px] flex items-center justify-center gap-[5px]" style={{ background: C.recv }} role="status" aria-label="typing">
         {[0, 1, 2].map((i) => (
           <span key={i} className="w-[6px] h-[6px] rounded-full sk-bounce" style={{ background: C.mute, animationDelay: `${i * 160}ms` }} />
         ))}
@@ -162,22 +167,22 @@ function Composer({ draft, setDraft, onSubmit, onAttach, canSend, recording, tra
   return (
     <form
       className="flex items-center gap-2 px-3 pt-2 pb-[calc(var(--sb-bottom)+8px)]"
-      style={{ background: C.container }}
+      style={{ background: C.surface }}
       onSubmit={(e) => {
         e.preventDefault();
         onSubmit();
       }}
     >
-      <div className="flex-1 min-w-0 h-12 rounded-full flex items-center pl-1 pr-2" style={{ background: C.recv }}>
-        <button type="button" aria-label="Attach" onClick={onAttach} className="w-10 h-10 rounded-full flex items-center justify-center text-[#E3E3E3] hover:bg-white/10">
+      <div className="flex-1 min-w-0 h-[52px] rounded-full flex items-center pl-1.5 pr-3" style={{ background: C.recv }}>
+        <button type="button" aria-label="Attach" onClick={onAttach} className="w-10 h-10 rounded-full flex items-center justify-center text-[var(--gm-mute)] hover:bg-[var(--gm-hover)]">
           <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" aria-hidden>
             <circle cx="12" cy="12" r="9" />
             <path d="M12 8v8M8 12h8" strokeLinecap="round" />
           </svg>
         </button>
         {recording ? (
-          <span className="flex-1 pl-2 flex items-center gap-2 text-[16px] text-[#F2B8B5]">
-            <span className="w-2 h-2 rounded-full bg-[#F2B8B5] sk-pulse" />
+          <span className="flex-1 pl-2 flex items-center gap-2 text-[16px] text-[var(--gm-error)]">
+            <span className="w-2 h-2 rounded-full bg-[var(--gm-error)] sk-pulse" />
             <RecTimer startedAt={recording.startedAt} />
           </span>
         ) : (
@@ -186,10 +191,10 @@ function Composer({ draft, setDraft, onSubmit, onAttach, canSend, recording, tra
             onChange={(e) => setDraft(e.target.value)}
             placeholder={hint ?? "RCS message"}
             aria-label="Message"
-            className="flex-1 min-w-0 bg-transparent outline-none pl-2 text-[16px] text-[#E3E3E3] placeholder:text-[#C4C7C5]"
+            className="flex-1 min-w-0 bg-transparent outline-none pl-2 text-[16px] text-[var(--gm-ink)] placeholder:text-[var(--gm-mute)]"
           />
         )}
-        <span className="flex items-center gap-3 text-[#E3E3E3] pl-2" aria-hidden>
+        <span className="flex items-center gap-4 text-[var(--gm-mute)] pl-2" aria-hidden>
           <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8">
             <circle cx="12" cy="12" r="9" />
             <circle cx="9" cy="10" r="1" fill="currentColor" />
@@ -203,7 +208,7 @@ function Composer({ draft, setDraft, onSubmit, onAttach, canSend, recording, tra
         </span>
       </div>
       {canSend && !recording ? (
-        <button type="submit" aria-label="Send" className="w-12 h-12 shrink-0 rounded-full flex items-center justify-center sk-pop" style={{ background: C.primary, color: C.onPrimary }}>
+        <button type="submit" aria-label="Send" className="w-[52px] h-[52px] shrink-0 rounded-full flex items-center justify-center sk-pop" style={{ background: C.primary, color: C.onPrimary }}>
           <svg width="22" height="22" viewBox="0 0 24 24" fill="currentColor" aria-hidden>
             <path d="M3 20.5 21 12 3 3.5l.01 6.6L15 12 3.01 13.9z" />
           </svg>
@@ -214,8 +219,8 @@ function Composer({ draft, setDraft, onSubmit, onAttach, canSend, recording, tra
           aria-label={recording ? "Stop and send voice note" : "Record a voice note"}
           onClick={onMic}
           disabled={transcribing}
-          className="w-12 h-12 shrink-0 rounded-full flex items-center justify-center disabled:opacity-60"
-          style={recording ? { background: "#8C1D18", color: "#FFDAD6" } : { background: C.fab, color: C.sentInk }}
+          className="w-[52px] h-[52px] shrink-0 rounded-full flex items-center justify-center disabled:opacity-60"
+          style={recording ? { background: "var(--gm-rec)", color: "var(--gm-rec-ink)" } : { background: C.fab, color: C.fabInk }}
         >
           {recording ? (
             <span className="w-3 h-3 rounded-[3px] bg-current" aria-hidden />
@@ -244,7 +249,7 @@ function EventRow({ text }: { text: string }) {
   const c = callLog(text);
   return (
     <div className="flex justify-center items-center gap-2 py-3 text-[12px] leading-4" style={{ color: C.mute }}>
-      <span style={{ color: c.declined ? C.error : "#6DD58C" }}>
+      <span style={{ color: c.declined ? C.error : C.green }}>
         <PhoneIcon size={16} down={c.declined} />
       </span>
       {c.declined ? "Declined call" : `Voice call${c.ended ? ` · ${c.dur}` : ""}`}
@@ -253,7 +258,7 @@ function EventRow({ text }: { text: string }) {
 }
 
 function Card({ pos, children, footer, onClick, disabled, href }: { pos: Pos; children: ReactNode; footer: ReactNode; onClick?: () => void; disabled?: boolean; href?: string }) {
-  const cls = "block w-[78%] overflow-hidden text-left hover:brightness-110";
+  const cls = "block w-[82%] overflow-hidden text-left hover:brightness-[.97] dark:hover:brightness-110";
   const style = { ...corners(false, pos), background: C.recv };
   const body = (
     <>
@@ -323,12 +328,12 @@ function ContactCard({ name, saved, onSave, pos }: { name: string; saved: boolea
   return (
     <div data-role="agent" className={`${gapOf(pos)} flex justify-start`}>
       <div className="flex items-center gap-3 pl-3 pr-2 py-3" style={{ ...corners(false, pos), background: C.recv, color: C.recvInk }}>
-        <div className="w-10 h-10 rounded-full bg-[#e8665a] flex items-center justify-center text-[18px] text-white shrink-0">{name.charAt(0).toUpperCase()}</div>
+        <div className="w-10 h-10 rounded-full bg-[#ee675c] flex items-center justify-center text-[18px] text-white shrink-0">{name.charAt(0).toUpperCase()}</div>
         <div className="min-w-0">
           <div className="text-[16px] truncate">{name}</div>
           <div className="text-[12px]" style={{ color: C.mute }}>{AGENT_NUMBER}</div>
         </div>
-        <button onClick={onSave} disabled={saved} className="ml-2 h-10 px-4 rounded-full text-[14px] font-medium hover:bg-white/10 disabled:hover:bg-transparent" style={{ color: saved ? "#6DD58C" : C.primary }}>
+        <button onClick={onSave} disabled={saved} className="ml-2 h-10 px-4 rounded-full text-[14px] font-medium hover:bg-[var(--gm-hover)] disabled:hover:bg-transparent" style={{ color: saved ? C.green : C.primary }}>
           {saved ? "Saved ✓" : "Save"}
         </button>
       </div>
@@ -352,7 +357,7 @@ function RichCard({ title, children, pos = "single" }: RichCardProps) {
 
 function Media({ src }: { src: string }) {
   return (
-    <div data-role="agent" className="pt-3 flex justify-start">
+    <div data-role="agent" className="pt-4 flex justify-start">
       {/* eslint-disable-next-line @next/next/no-img-element */}
       <img src={src} alt="animated reaction" className="rounded-[20px] max-w-[60%] max-h-48 object-cover" style={{ background: C.recv }} loading="lazy" />
     </div>
@@ -361,8 +366,29 @@ function Media({ src }: { src: string }) {
 
 function Banner({ tone, children }: { tone: "info" | "error"; children: ReactNode }) {
   return (
-    <div className="mx-3 mb-1 rounded-2xl px-4 py-2.5 text-[13px] leading-[18px]" style={tone === "error" ? { background: "#601410", color: "#FFDAD6" } : { background: C.high, color: C.recvInk }}>
+    <div className="mx-3 mb-1 rounded-2xl px-4 py-2.5 text-[13px] leading-[18px]" style={tone === "error" ? { background: "var(--gm-err-bg)", color: "var(--gm-err-ink)" } : { background: C.high, color: C.recvInk }}>
       {children}
+    </div>
+  );
+}
+
+// google messages: unknown-sender card over the composer. its real row is add contact / report spam;
+// only add contact does something here, so the other slot dismisses
+function UnknownNotice({ onAdd, onDismiss }: UnknownProps) {
+  return (
+    <div className="mx-1 mt-4 mb-1 rounded-[20px] px-4 pt-3 pb-2" style={{ background: C.high, color: C.recvInk }} role="region" aria-label="Unknown sender">
+      <div className="text-[14px] leading-5 font-medium">Not in your contacts</div>
+      <div className="text-[12.5px] leading-[18px]" style={{ color: C.mute }}>
+        Add them to see their name when they text or call.
+      </div>
+      <div className="mt-1.5 flex justify-end gap-1">
+        <button type="button" onClick={onDismiss} className="h-10 px-4 rounded-full text-[14px] font-medium hover:bg-[var(--gm-hover)]" style={{ color: C.primary }}>
+          Dismiss
+        </button>
+        <button type="button" onClick={onAdd} className="h-10 px-4 rounded-full text-[14px] font-medium" style={{ background: C.primary, color: C.onPrimary }}>
+          Add contact
+        </button>
+      </div>
     </div>
   );
 }
@@ -378,48 +404,51 @@ function Cookie({ size, color }: { size: number; color: string }) {
   }
   return (
     <svg width={size} height={size} viewBox="0 0 100 100" className="absolute inset-0 sk-spin" aria-hidden>
-      <polygon points={pts.join(" ")} fill={color} />
+      <polygon points={pts.join(" ")} style={{ fill: color }} />
     </svg>
   );
 }
 
+// pixel phone (m3 expressive): status/timer line, big name, "Mobile", then the photo; controls sit
+// in a rounded-top panel. follows the page theme like the real phone app
 function CallScreen(p: CallProps) {
   const timer = useElapsed(p.startedAt);
   const holdTimer = useElapsed(p.heldAt ?? null);
   const state = p.held ? "" : p.muted ? "muted" : p.speaking ? "speaking" : p.listening ? "listening" : "";
-  const oval = "w-24 h-16 rounded-full flex items-center justify-center transition-[border-radius] active:rounded-[20px]";
+  const oval = "w-20 h-16 rounded-full flex items-center justify-center transition-[border-radius] active:rounded-[20px]";
   return (
     <div
-      className="relative h-full w-full flex flex-col items-center text-[#E3E3E3]"
-      style={{ background: `linear-gradient(${C.app}, #0c0e12)`, fontFamily: "var(--font-android)" }}
+      className="sk-gm relative h-full w-full flex flex-col items-center text-[var(--gm-ink)] bg-[var(--gm-call-bg)]"
+      style={{ fontFamily: "var(--font-android)" }}
       role={p.status === "ringing" ? "alertdialog" : undefined}
       aria-label={p.status === "ringing" ? `Incoming call from ${p.name}` : "Call"}
     >
-      <div className="pt-[calc(var(--sb)+72px)] text-center px-6">
-        <div className="text-[14px] mb-6" style={{ color: C.mute }}>
-          {p.status === "ringing" ? "Incoming call" : p.status === "ended" ? "Call ended" : p.status === "connecting" ? "Calling…" : "Call"}
-        </div>
-        <div className="relative mx-auto w-[132px] h-[132px] flex items-center justify-center">
-          <Cookie size={132} color={p.speaking ? "#3F4A5E" : "#2B3140"} />
-          <div className="relative">{p.saved ? <PersonaLogo size={104} /> : <UnknownAvatar size={104} />}</div>
-        </div>
-        <div className="mt-6 text-[36px] leading-[44px]">{p.name}</div>
-        <div className="text-[16px] mt-1" style={{ color: C.mute }} role="status">
-          {p.status === "ringing" && "Mobile"}
-          {p.status === "connecting" && "connecting…"}
+      <div className="pt-[calc(var(--sb)+56px)] text-center px-6">
+        <div className="h-6 flex items-center justify-center gap-2 text-[16px] tracking-[0.5px]" style={{ color: C.mute }} role="status">
+          {p.status === "active" && <PhoneIcon size={18} />}
+          {p.status === "ringing" && "Incoming call"}
+          {p.status === "connecting" && "Calling…"}
           {p.status === "active" && (
-            <>
+            <span>
               <span className="tabular-nums">{p.held ? `on hold · ${holdTimer}` : timer}</span>
               {state && ` · ${state}`}
-            </>
+            </span>
           )}
-          {p.status === "ended" && "call ended"}
+          {p.status === "ended" && "Call ended"}
+        </div>
+        <div className="mt-2 text-[40px] leading-[48px]">{p.name}</div>
+        <div className="text-[16px] mt-1" style={{ color: C.mute }}>
+          {p.saved ? `Mobile ${AGENT_NUMBER}` : "Mobile"}
+        </div>
+        <div className="relative mx-auto mt-8 w-[136px] h-[136px] flex items-center justify-center">
+          <Cookie size={136} color={p.speaking ? "var(--gm-cookie-live)" : "var(--gm-cookie)"} />
+          <div className="relative">{p.saved ? <PersonaLogo size={108} /> : <UnknownAvatar size={108} />}</div>
         </div>
       </div>
       {p.status === "active" && !p.held && (
-        <div className="mt-6 px-8 space-y-3 text-[15px] leading-[21px] text-center">
+        <div className="mt-5 px-8 space-y-3 text-[15px] leading-[21px] text-center">
           {p.said && (
-            <div data-caption="agent" className="text-[#E3E3E3]">
+            <div data-caption="agent" className="text-[var(--gm-ink)]">
               {p.said}
             </div>
           )}
@@ -428,44 +457,50 @@ function CallScreen(p: CallProps) {
       )}
       <div className="flex-1" />
       {p.status === "ringing" ? (
-        <div className="flex gap-6 pb-[calc(var(--sb-bottom)+72px)]">
-          <button onClick={p.onDecline} aria-label="Decline" className="w-32 h-[72px] rounded-full flex items-center justify-center gap-2 text-[15px] font-medium" style={{ background: "#DC362E", color: "#fff" }}>
-            <PhoneIcon size={24} down /> <span aria-hidden>Decline</span>
-          </button>
-          <button onClick={p.onAccept} aria-label="Accept" className="w-32 h-[72px] rounded-full flex items-center justify-center gap-2 text-[15px] font-medium" style={{ background: "#6DD58C", color: "#0A3818" }}>
-            <PhoneIcon size={24} /> <span aria-hidden>Answer</span>
-          </button>
+        <div className="w-full flex justify-between px-12 pb-[calc(var(--sb-bottom)+64px)]">
+          <div className="flex flex-col items-center gap-2">
+            <button onClick={p.onDecline} aria-label="Decline" className="w-[84px] h-[68px] rounded-full flex items-center justify-center" style={{ background: "var(--gm-end)", color: "var(--gm-end-ink)" }}>
+              <PhoneIcon size={26} down />
+            </button>
+            <span className="text-[16px] font-medium" aria-hidden>Decline</span>
+          </div>
+          <div className="flex flex-col items-center gap-2">
+            <button onClick={p.onAccept} aria-label="Accept" className="w-[84px] h-[68px] rounded-full flex items-center justify-center" style={{ background: "var(--gm-answer)", color: "var(--gm-answer-ink)" }}>
+              <PhoneIcon size={26} />
+            </button>
+            <span className="text-[16px] font-medium" aria-hidden>Answer</span>
+          </div>
         </div>
       ) : (
-        <div className="flex flex-col items-center gap-6 pb-[calc(var(--sb-bottom)+56px)]">
+        <div className="w-full flex flex-col items-center gap-8 pt-8 rounded-t-[28px] bg-[var(--gm-call-panel)] pb-[calc(var(--sb-bottom)+40px)]">
           <div className="flex gap-4">
             {p.onHide && p.status === "active" && (
-              <div className="lg:hidden flex flex-col items-center gap-1.5">
-                <button onClick={p.onHide} aria-label={p.unread ? `Messages, ${p.unread} new` : "Messages"} className={`relative ${oval}`} style={{ background: C.recv }}>
+              <div className="lg:hidden flex flex-col items-center gap-2">
+                <button onClick={p.onHide} aria-label={p.unread ? `Messages, ${p.unread} new` : "Messages"} className={`relative ${oval}`} style={{ background: "var(--gm-call-btn)" }}>
                   <BubbleIcon size={24} />
                   {!!p.unread && <span className="absolute -top-1 right-1 min-w-5 h-5 px-1 rounded-full text-[11px] font-medium flex items-center justify-center" style={{ background: C.primary, color: C.onPrimary }}>{p.unread}</span>}
                 </button>
-                <span className="text-[12px]" aria-hidden>Messages</span>
+                <span className="text-[14px]" style={{ color: C.mute }} aria-hidden>Messages</span>
               </div>
             )}
             {p.onMute && p.status === "active" && (
-              <div className="flex flex-col items-center gap-1.5">
-                <button onClick={p.onMute} aria-pressed={!!p.muted} aria-label={p.muted ? "Unmute" : "Mute"} className={oval} style={p.muted ? { background: C.primary, color: C.onPrimary, borderRadius: 20 } : { background: C.recv }}>
+              <div className="flex flex-col items-center gap-2">
+                <button onClick={p.onMute} aria-pressed={!!p.muted} aria-label={p.muted ? "Unmute" : "Mute"} className={oval} style={p.muted ? { background: "var(--gm-call-on)", color: "var(--gm-call-on-ink)", borderRadius: 20 } : { background: "var(--gm-call-btn)" }}>
                   <MicIcon off={p.muted} size={24} />
                 </button>
-                <span className="text-[12px]" aria-hidden>{p.muted ? "Unmute" : "Mute"}</span>
+                <span className="text-[14px]" style={{ color: C.mute }} aria-hidden>{p.muted ? "Unmute" : "Mute"}</span>
               </div>
             )}
             {p.onHold && p.status === "active" && (
-              <div className="flex flex-col items-center gap-1.5">
-                <button onClick={p.onHold} aria-pressed={!!p.held} aria-label={p.held ? "Unhold" : "Hold"} className={oval} style={p.held ? { background: C.primary, color: C.onPrimary, borderRadius: 20 } : { background: C.recv }}>
+              <div className="flex flex-col items-center gap-2">
+                <button onClick={p.onHold} aria-pressed={!!p.held} aria-label={p.held ? "Unhold" : "Hold"} className={oval} style={p.held ? { background: "var(--gm-call-on)", color: "var(--gm-call-on-ink)", borderRadius: 20 } : { background: "var(--gm-call-btn)" }}>
                   <PauseIcon size={24} />
                 </button>
-                <span className="text-[12px]" aria-hidden>{p.held ? "Unhold" : "Hold"}</span>
+                <span className="text-[14px]" style={{ color: C.mute }} aria-hidden>{p.held ? "Unhold" : "Hold"}</span>
               </div>
             )}
           </div>
-          <button onClick={p.onHangup} disabled={p.status === "ended"} className="w-24 h-16 rounded-full flex items-center justify-center" style={{ background: "#DC362E", color: "#fff" }} aria-label="Hang up">
+          <button onClick={p.onHangup} disabled={p.status === "ended"} className="w-[168px] h-16 rounded-full flex items-center justify-center" style={{ background: "var(--gm-end)", color: "var(--gm-end-ink)" }} aria-label="Hang up">
             <PhoneIcon size={28} down />
           </button>
         </div>
@@ -478,12 +513,11 @@ export const pixel: Skin = {
   id: "pixel",
   label: "Pixel",
   screen: {
-    className: "text-[#E3E3E3]",
-    style: { background: C.app, fontFamily: "var(--font-android)", ["--sb-frame" as string]: "44px", ["--sb-bottom-frame" as string]: "24px" } as CSSProperties,
+    className: "sk-gm bg-[var(--gm-app)] text-[var(--gm-ink)]",
+    style: { fontFamily: "var(--font-android)", ["--sb-frame" as string]: "44px", ["--sb-bottom-frame" as string]: "24px" } as CSSProperties,
   },
-  threadClass: "px-4 pb-3 rounded-t-[28px] bg-[#1A1C21]",
+  threadClass: "px-2 pb-3 rounded-t-[20px] bg-[var(--gm-surface)]",
   sheet: "m3",
-  why: { ink: "#E3E3E3", mute: C.mute, surface: "#23262C", line: "rgba(255,255,255,.12)" },
   StatusBar,
   Header,
   DateStamp,
@@ -497,7 +531,8 @@ export const pixel: Skin = {
   Media,
   UnknownAvatar,
   Banner,
+  UnknownNotice,
   CallScreen,
   RichCard,
-  rich: { ink: C.recvInk, mute: C.mute, accent: C.primary, onAccent: C.onPrimary, line: "rgba(255,255,255,.1)", danger: C.error, track: "rgba(255,255,255,.14)" },
+  rich: { ink: C.recvInk, mute: C.mute, accent: C.primary, onAccent: C.onPrimary, line: "var(--gm-line)", danger: C.error, track: "var(--gm-track)" },
 };
