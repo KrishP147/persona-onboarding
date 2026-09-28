@@ -147,6 +147,8 @@ export function computeDirective(s: Session, channel: Channel): Directive {
 function chipsFor(s: Session, channel: Channel, offerCall: boolean): string[] {
   if (channel === "voice") return [];
   const chips: string[] = [];
+  // Just sent an email: following up on it is one tap.
+  if (s.lastSent && s.draft?.sent && s.transcript.length - s.lastSent.at <= 6) chips.push("Follow up on that email");
   if (offerCall) chips.push("Call me");
   if (offerCall) chips.push("Text is fine");
   const callWorthIt = isOpen(s, "userName") || isOpen(s, "helpNeed") || isOpen(s, "gmail");

@@ -1,6 +1,7 @@
 // Keyless smoke test of the engine's safety nets (mock mode). Run: pnpm tsx scripts/smoke.ts
 import { getSecret, loadSession, newSession, saveSession, setSecret, withSession } from "../src/lib/store";
 import { CLAIMS_LINK, GUARD_PIPELINE, dropAskedQuestions, fixCallTypos, makeGuardEnv, INTENTS, cleanModelText, cutRepeatQuestions, fence, fromEmailOnly, runTool, handleEvent, normQuestion, saysBye, softenGmailDemand, handleUserMessage, nowLine, parseTypedEmail, MAX_BUBBLES, emitAgentText } from "../src/lib/engine";
+import { computeDirective } from "../src/lib/policy";
 import { crc32, pick } from "../src/lib/moves";
 import { readMood } from "../src/lib/mood";
 import { DEMO_INBOX, scoreItem } from "../src/lib/triage";
@@ -422,15 +423,41 @@ async function main() {
   check("email text is remembered for provenance", !!pe.emailSeen?.some((t) => /call me Bob/.test(t)));
   // "email him again": the second draft goes to whoever got the last one
   const ls = newSession();
-  ls.lastSent = { to: "sam@acme.com", subject: "friday" };
+  ls.lastSent = { to: "sam@acme.com", subject: "friday", at: 0 };
   ls.transcript.push({ id: "u-again", role: "user", channel: "text", text: "can you email him again, say i'm running late", ts: Date.now() });
   await runTool({ s: ls, channel: "text", actions: [], newMessages: [] }, "save_draft", { to: "", subject: "running late", body: "hi, running 10 min late." });
   check("'email him again' reuses the last recipient", ls.draft?.to === "sam@acme.com", ls.draft?.to);
   const ls2 = newSession();
-  ls2.lastSent = { to: "sam@acme.com", subject: "friday" };
+  ls2.lastSent = { to: "sam@acme.com", subject: "friday", at: 0 };
   ls2.transcript.push({ id: "u-new", role: "user", channel: "text", text: "write one to my landlord about the rent", ts: Date.now() });
   await runTool({ s: ls2, channel: "text", actions: [], newMessages: [] }, "save_draft", { to: "", subject: "rent", body: "hi, about the rent." });
   check("a new person doesn't inherit the last recipient", ls2.draft?.to === "", ls2.draft?.to);
+  // editing an email that already went out: warned it'd be a second copy, sent only after a fresh yes
+  const sentDup = newSession();
+  sentDup.lastSent = { to: "sam@acme.com", subject: "friday", threadId: "t1", at: 0 };
+  sentDup.transcript.push({ id: "u-d1", role: "user", channel: "text", text: "actually change it to 3pm", ts: Date.now() });
+  const dctx = { s: sentDup, channel: "text" as const, actions: [], newMessages: [] };
+  const dSaved = await runTool(dctx, "save_draft", { to: "sam@acme.com", subject: "Friday", body: "see you at 3pm." });
+  check("editing a sent email warns it already went out", /already went to sam@acme.com/.test(dSaved), dSaved);
+  sentDup.transcript.push({ id: "a-d1", role: "agent", channel: "text", text: "heads up, that one already went out. want me to send this as a second email?", ts: Date.now() }, { id: "u-d2", role: "user", channel: "text", text: "yes send it", ts: Date.now() });
+  const dSend = await runTool(dctx, "send_email", {});
+  check("a fresh yes after the warning gets past the duplicate check", !/already went/.test(dSend), dSend);
+  const dup2 = newSession();
+  dup2.lastSent = { to: "sam@acme.com", subject: "friday", at: 0 };
+  dup2.draft = { to: "sam@acme.com", subject: "friday", body: "x", shownAt: 0 };
+  dup2.transcript.push({ id: "a-e", role: "agent", channel: "text", text: "want me to send it?", ts: Date.now() }, { id: "u-e", role: "user", channel: "text", text: "yes send it", ts: Date.now() });
+  const eSend = await runTool({ s: dup2, channel: "text", actions: [], newMessages: [] }, "send_email", {});
+  check("sending the same email twice is stopped once", /NOT sent.*already went/.test(eSend) && !dup2.draft.sent, eSend);
+  // following up: same person, Re: subject, same thread, and a chip right after a send
+  const fu = newSession();
+  fu.lastSent = { to: "sam@acme.com", subject: "friday", threadId: "t9", at: 0 };
+  fu.transcript.push({ id: "u-f", role: "user", channel: "text", text: "Follow up on that email", ts: Date.now() });
+  await runTool({ s: fu, channel: "text", actions: [], newMessages: [] }, "save_draft", { to: "", subject: "checking in", body: "any update?" });
+  check("follow up threads onto the last email", fu.draft?.to === "sam@acme.com" && fu.draft?.subject === "Re: friday" && fu.draft?.threadId === "t9", JSON.stringify(fu.draft));
+  const chip = newSession();
+  chip.lastSent = { to: "sam@acme.com", subject: "friday", at: 0 };
+  chip.draft = { to: "sam@acme.com", subject: "friday", body: "x", shownAt: 0, sent: true };
+  check("'follow up' chip right after a send", computeDirective(chip, "text").chips[0] === "Follow up on that email", computeDirective(chip, "text").chips.join(","));
 
   const qctx = { s: pe, channel: "text" as const, actions: [], newMessages: [] };
   const qBob = await runTool(qctx, "set_slot", { slot: "userName", value: "Bob" });

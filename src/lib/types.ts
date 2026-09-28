@@ -79,8 +79,8 @@ export interface Session {
   pendingVoice?: VoiceStyle; // agent renamed mid-call: applies from the next call
   gmailEmail?: string;
   tz?: string; // their browser's time zone (IANA), for dates and times
-  draft?: { id?: string; to: string; subject: string; body: string; shownAt: number; sent?: boolean }; // latest email draft (gmail drafts id when saved there)
-  lastSent?: { to: string; subject: string }; // last email that went out: "email him again" means this person
+  draft?: { id?: string; to: string; subject: string; body: string; shownAt: number; sent?: boolean; threadId?: string; dupWarnedAt?: number }; // latest email draft (gmail drafts id when saved there)
+  lastSent?: { to: string; subject: string; threadId?: string; at: number }; // last email that went out: "email him again" / "follow up" means this one
   gmailUnread?: number; // small value moment at connect time; tokens are never stored
   gmailVerified?: { email: string; unread?: number; demo?: boolean; inbox?: InboxItem[] }; // set by the oauth callback, consumed by the gmail_connected event
   alerts?: Alert[];
