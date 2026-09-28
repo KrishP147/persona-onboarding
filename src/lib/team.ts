@@ -34,13 +34,14 @@ export function teamActive(s: Session): string | null {
 // their yes, answered in code before the model's reply
 // on a call: fuller sentences, punctuation that carries the emphasis ("no way!" lands; "no way, an honor!" came out flat)
 export const teamYesVoice = (key: string) => (key === "jason" ? "no way! named after a file extension, right? honestly, it's an honor." : "no way! honestly, it's an honor.");
-export const teamLineVoice = (key: string) => `whoa. wait, is this THE ${key}? ${TEAM[key].asks}? it's a real pleasure to meet you.`;
+export const teamLineVoice = (key: string) => `whoa. wait, is this THE ${key}? ${TEAM[key].asks}? or just a great name? either way, it's a real pleasure to meet you.`;
 
 export const teamYes = (key: string) => (key === "jason" ? "no way, named after a file extension? an honor!" : "no way, an honor!");
 
 // one sentence with the role in it: "is this THE zach?" and "is this THE julia?" alone read as the same question
 // to the no-repeat guard, which dropped the second
-export const teamLine = (key: string) => `woah, is this THE ${key}, ${TEAM[key].asks}? pleasure to meet you!`;
+// "or just a great name?": a real julia shouldn't come away thinking we mistook her for someone
+export const teamLine = (key: string) => `woah, is this THE ${key}, ${TEAM[key].asks}? or just a great name? either way, pleasure to meet you!`;
 
 // After a yes: what the model may know about them (public info only), for a moment of recognition.
 export const teamNote = (key: string) =>

@@ -600,6 +600,20 @@ async function main() {
   await handleEvent(nb, { type: "call_started" });
   const nbR = await handleUserMessage(nb, "voice", "no i'm not busy, don't hang up");
   check("...'not busy, don't hang up' keeps the call", !nbR.actions.some((a) => a.type === "end_call"), said(nbR));
+  // persona's review: a question isn't skipping the name, "hi" keeps the name question, mic line in the right tense
+  const wq = newSession();
+  await handleEvent(wq, { type: "open" });
+  const wqR = await handleUserMessage(wq, "text", "what can you do?");
+  check("'what can you do?' after the name question isn't a skip", !wq.agentNameDefaulted && !/go by persona/.test(said(wqR)), said(wqR));
+  const hiS = newSession();
+  await handleEvent(hiS, { type: "open" });
+  const hiR = await handleUserMessage(hiS, "text", "hi");
+  check("'hi' after the name question: hi back, name question kept", /call me|go by/.test(said(hiR)) && hiS.lastAskedSlot === "agentName", said(hiR));
+  const mic2 = newSession();
+  await handleEvent(mic2, { type: "open" });
+  await handleUserMessage(mic2, "text", "julia");
+  const micR = await handleEvent(mic2, { type: "mic_denied" });
+  check("no mic: code line, no 'trying to ring you now'", /mic isn't coming through/.test(said(micR)) && !/trying to ring/i.test(said(micR)), said(micR));
   const ph = newSession();
   await handleEvent(ph, { type: "open" });
   await handleUserMessage(ph, "text", "nova");

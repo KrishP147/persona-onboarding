@@ -301,12 +301,11 @@ export const EVENT_HANDLERS: { [K in SessionEvent["type"]]: EventHandler<K> } = 
     s.callOffers = MAX_CALL_OFFERS; // no mic: don't keep offering calls
     s.call = { ...s.call, active: false, endedReason: "error" };
     if (s.phase === "on_call" || s.phase === "call_offered") s.phase = "intro";
-    return turn(
-      s,
-      "text",
-      "The call couldn't start because their microphone isn't available. No problem: carry on over text.",
-      "your mic isn't coming through, no problem. we can do this over text.",
-    );
+    const ctx: Ctx = { s, channel: "text", actions: [], newMessages: [], move: EVENT_MOVES.honest };
+    const next = s.slots.userName.status === "missing" ? " what's your name, by the way?" : s.slots.helpNeed.status === "missing" ? " so what's been taking up most of your time lately?" : "";
+    emitAgentText(ctx, `looks like your mic isn't coming through, no worries. we can do this over text.${next}`);
+    recordAsk(s, next ? (s.slots.userName.status === "missing" ? "userName" : "helpNeed") : null, !!next);
+    return { session: s, newMessages: ctx.newMessages, chips: computeDirective(s, "text").chips, actions: [] };
   },
   gmail_connected: async ({ s, e, idle }) => {
     // Only trust what the oauth callback verified (test runs may pass an email explicitly).

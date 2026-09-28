@@ -604,6 +604,14 @@ export async function handleUserMessageInner(
   const heard = extract(s, clean);
   // "call you nova, and can you check my email": the name and its contact card come first, then the rest.
   const early = named ? null : await nameFirst(s, channel, clean, heard);
+  // "hi" right after "what do you want to call me?": say hi back and keep the question (a run's "hey! what's up"
+  // dropped it, and the name never came up again).
+  if (channel === "text" && !s.call.active && s.slots.agentName.status === "missing" && s.lastAskedSlot === "agentName" && nameAskIsNewest(s, userMsg) && /^\s*(hi+|hey+|hello|yo+|sup|hiya|heya|howdy)[!.\s]*$/i.test(clean)) {
+    const ctx: Ctx = { s, channel, actions: [], newMessages: [], move: EVENT_MOVES.named };
+    emitAgentText(ctx, pick(s, "hi-back", ["hey! so what do you want to call me? anything works", "hi! first thing, what should i go by?", "hey hey. what do you want to call me?"]));
+    recordAsk(s, "agentName");
+    return { session: s, newMessages: [userMsg, ...(early?.msgs ?? []), ...ctx.newMessages], chips: computeDirective(s, channel).chips, actions: [] };
+  }
   // Pure laughter or thanks, over text, when a gif is allowed: answer with one.
   if (channel === "text" && !s.call.active && (LAUGH.test(clean) || THANKS.test(clean)) && gifAllowed(s)) {
     const gif = makeGif(s, LAUGH.test(clean) ? "lol" : "ok");
@@ -799,7 +807,7 @@ export async function handleUserMessageInner(
   // They answered something else instead of naming it ("i need help with my inbox"): follow them, then a
   // double text takes "persona" as a default they can change. A short "hi" or "?" gets one more chance.
   let skippedName = false;
-  if (channel === "text" && !s.call.active && s.phase !== "graduated" && s.slots.agentName.status === "missing" && s.lastAskedSlot === "agentName" && !repliedElsewhere(s, userMsg) && !OWN_NAME.test(clean.trim()) && !DELEGATE.test(clean) && !LAUGH.test(clean) && !NAME_HINT.test(clean)) {
+  if (channel === "text" && !s.call.active && s.phase !== "graduated" && s.slots.agentName.status === "missing" && s.lastAskedSlot === "agentName" && !repliedElsewhere(s, userMsg) && !/\?\s*$/.test(clean.trim()) && !OWN_NAME.test(clean.trim()) && !DELEGATE.test(clean) && !LAUGH.test(clean) && !NAME_HINT.test(clean)) {
     const askIdx = s.transcript.findLastIndex((m) => m.role === "agent" && NAME_ASK.test(m.text));
     const replies = s.transcript.slice(askIdx + 1).filter((m) => m.role === "user").length;
     const e0 = await heard.catch(() => null);
