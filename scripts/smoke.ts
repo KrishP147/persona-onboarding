@@ -2,6 +2,7 @@
 import { getSecret, loadSession, newSession, saveSession, setSecret, withSession } from "../src/lib/store";
 import { CLAIMS_LINK, GUARD_PIPELINE, dropAskedQuestions, fixCallTypos, makeGuardEnv, INTENTS, cleanModelText, cutRepeatQuestions, fence, fromEmailOnly, runTool, handleEvent, normQuestion, saysBye, softenGmailDemand, handleUserMessage, nowLine, parseTypedEmail, MAX_BUBBLES, emitAgentText } from "../src/lib/engine";
 import { computeDirective } from "../src/lib/policy";
+import { KNOW_ASK } from "../src/lib/engine/turn";
 import { crc32, pick } from "../src/lib/moves";
 import { readMood } from "../src/lib/mood";
 import { DEMO_INBOX, scoreItem } from "../src/lib/triage";
@@ -432,6 +433,31 @@ async function main() {
   ls2.transcript.push({ id: "u-new", role: "user", channel: "text", text: "write one to my landlord about the rent", ts: Date.now() });
   await runTool({ s: ls2, channel: "text", actions: [], newMessages: [] }, "save_draft", { to: "", subject: "rent", body: "hi, about the rent." });
   check("a new person doesn't inherit the last recipient", ls2.draft?.to === "", ls2.draft?.to);
+  // replay (user retest): an invented address, a typed link out of view, a named subject, the card's edit/discard
+  const ec = newSession();
+  ec.transcript.push(
+    { id: "u-e1", role: "user", channel: "voice", text: "her email address is j doe at example dot org", ts: Date.now() },
+    { id: "u-e2", role: "user", channel: "text", text: "https://demo.example.com/", ts: Date.now() },
+    { id: "u-e3", role: "user", channel: "voice", text: "Perfect. Make the subject of this email quick hello.", ts: Date.now() },
+  );
+  const ectx = { s: ec, channel: "voice" as const, actions: [], newMessages: [] };
+  const made = await runTool(ectx, "save_draft", { to: "jane@acme.com", subject: "", body: "please test it: [Vercel link]." });
+  check("an address nobody gave is dropped", ec.draft?.to === "" && /isn't an address they gave/.test(made), made);
+  check("[link] filled from the link they typed", ec.draft?.body === "please test it: https://demo.example.com/.", ec.draft?.body);
+  check("the subject they named is used", ec.draft?.subject === "quick hello", ec.draft?.subject);
+  const spoke = await runTool(ectx, "save_draft", { to: "jdoe@example.org", subject: "Test Email", body: "hi" });
+  check("a spoken address counts as given", ec.draft?.to === "jdoe@example.org", ec.draft?.to);
+  check("a different subject gets a nudge, not a silent swap", ec.draft?.subject === "Test Email" && /subject should be "quick hello"/.test(spoke), spoke);
+  const before = ec.transcript.length;
+  await runTool(ectx, "show_draft", {});
+  check("show_draft re-posts the draft as the newest message", ec.transcript.length === before + 1 && ec.draft?.shownAt === ec.transcript.length);
+  const edited = await handleEvent(ec, { type: "draft_edit", to: "jdoe@example.org", subject: "hello", body: "edited body" });
+  check("draft_edit updates the draft and its message in place", ec.draft?.body === "edited body" && edited.newMessages.length === 1 && /subject: hello/.test(edited.newMessages[0].text), said(edited));
+  const gone = await handleEvent(ec, { type: "draft_discard" });
+  check("draft_discard clears it and marks the message", !ec.draft && gone.newMessages[0]?.discarded === true);
+  const dn = newSession();
+  dn.transcript.push({ id: "u-k", role: "user", channel: "text", text: "what do you know about me?", ts: Date.now() });
+  check("'what do you know about me' shows the card", KNOW_ASK.test("what do you know about me?") && !KNOW_ASK.test("what do you know about paris"));
   // editing an email that already went out: warned it'd be a second copy, sent only after a fresh yes
   const sentDup = newSession();
   sentDup.lastSent = { to: "sam@acme.com", subject: "friday", threadId: "t1", at: 0 };

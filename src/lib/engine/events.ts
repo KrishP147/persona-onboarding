@@ -9,6 +9,7 @@ import { metered } from "../usage";
 import { setSecret } from "../store";
 import { type Ctx, emitAgentText, eventMsg, heardThemThisCall, msg, recapFallback, shortNeed } from "./context";
 import { OFFERED_CALL, asTurnBy, saysBye } from "./intents";
+import { discardDraft, editDraft } from "./tools";
 import { linkPending, rememberEmails, sealGoodbye } from "./guards";
 import { DEMO_ASK, DEMO_MARK, INTRO_CAPABILITIES, noteMetrics, turn } from "./turn";
 
@@ -23,7 +24,9 @@ export type SessionEvent =
   | { type: "mic_denied" }
   | { type: "gmail_connected"; email?: string }
   | { type: "gmail_failed"; error: string }
-  | { type: "forget_slot"; slot: Exclude<SlotKey, "agentName"> }; // "forget" on the what-i-know card
+  | { type: "forget_slot"; slot: Exclude<SlotKey, "agentName"> } // "forget" on the what-i-know card
+  | { type: "draft_edit"; to: string; subject: string; body: string } // edited in place on the draft card
+  | { type: "draft_discard" }; // discard on the draft card
 
 export async function handleEvent(s: Session, e: SessionEvent): Promise<TurnResult> {
   const start = s.transcript.length;
@@ -115,30 +118,36 @@ export const EVENT_HANDLERS: { [K in SessionEvent["type"]]: EventHandler<K> } = 
     }
     const secs = Math.round(((s.call.endedAt ?? 0) - (s.call.startedAt ?? 0)) / 1000);
     eventMsg(s, `Call ended (${secs}s)`);
+    // They hung up once things were settled (a bye, or our last line wasn't waiting on them): on purpose, not a drop.
+    const lastVoice = s.transcript.findLast((m) => m.channel === "voice" && m.role !== "event");
+    const onPurpose = e.reason === "user_hangup" && !!lastVoice && (lastVoice.role === "user" ? saysBye(lastVoice.text) : !/\?\s*$/.test(lastVoice.text.trim()));
     const how =
       e.reason === "agent_ended"
         ? "You ended it after saying goodbye, so don't say you got cut off."
-        : e.reason === "user_hangup"
-          ? "They hung up (maybe on purpose, maybe not)."
-          : "The line dropped on our side.";
+        : onPurpose
+          ? "They hung up once you'd wrapped up, on purpose. Don't say you got cut off."
+          : e.reason === "user_hangup"
+            ? "They hung up (maybe on purpose, maybe not)."
+            : "The line dropped on our side.";
+    const draftNote = s.draft && !s.draft.sent ? ` Their email${s.draft.to ? ` to ${s.draft.to}` : ""} is still an unsent draft: remind them in a few words (they can send it or keep working on it); don't paste it.` : "";
     // One strict pass over the call fills slots still empty (never overwrites); the recap says what it caught.
     const caught = await reconcileCall(s);
     // Nothing to recap (no need heard): written in code. The model once "remembered" job applications nobody mentioned.
     const r: TurnResult = !s.slots.helpNeed.value
       ? (() => {
           const ctx: Ctx = { s, channel: "text", actions: [], newMessages: [], move: EVENT_MOVES.recap, guards: ["recap written by code (nothing to recap)"] };
-          emitAgentText(ctx, recapFallback(s, e.reason));
+          emitAgentText(ctx, recapFallback(s, onPurpose ? "agent_ended" : e.reason));
           return { session: s, newMessages: ctx.newMessages, chips: computeDirective(s, "text").chips, actions: [] };
         })()
-      : await turn(s, "text", `${RECAP_INSTRUCTION} ${how} Call lasted ${secs}s.${Object.keys(caught).length ? " A separate line after yours says what you caught from the call; don't repeat it." : ""}`, recapFallback(s, e.reason), {
+      : await turn(s, "text", `${RECAP_INSTRUCTION} ${how}${draftNote} Call lasted ${secs}s.${Object.keys(caught).length ? " A separate line after yours says what you caught from the call; don't repeat it." : ""}`, recapFallback(s, onPurpose ? "agent_ended" : e.reason), {
       move: EVENT_MOVES.recap,
-      avoid: e.reason === "agent_ended" ? /\b(cut off|dropped|lost you|got disconnected)\b/i : undefined,
+      avoid: e.reason === "agent_ended" || onPurpose ?/\b(cut off|dropped|lost you|got disconnected)\b/i : undefined,
     });
     // A text always follows a call. If the model's recap got filtered to nothing, the code-written one goes out.
     const recaps = r.newMessages.filter((m) => m.role === "agent" && m.channel === "text" && !m.kind);
     if (!recaps.length) {
       const ctx: Ctx = { s, channel: "text", actions: [], newMessages: [], move: EVENT_MOVES.recap, guards: ["recap written by code"] };
-      emitAgentText(ctx, recapFallback(s, e.reason));
+      emitAgentText(ctx, recapFallback(s, onPurpose ? "agent_ended" : e.reason));
       r.newMessages.push(...ctx.newMessages);
     } else if (recaps.length > 1) {
       // Exactly one recap text: extra bubbles fold into the first.
@@ -236,6 +245,14 @@ export const EVENT_HANDLERS: { [K in SessionEvent["type"]]: EventHandler<K> } = 
     emitAgentText(ctx, `no rush${name ? ` ${name}` : ""}, i'm around whenever`);
     recordAsk(s, null);
     return { session: s, newMessages: ctx.newMessages, chips: computeDirective(s, "text").chips, actions: [] };
+  },
+  draft_edit: async ({ s, e, idle }) => {
+    const m = await editDraft(s, e);
+    return m ? { ...idle(), newMessages: [m] } : idle();
+  },
+  draft_discard: async ({ s, idle }) => {
+    const m = discardDraft(s);
+    return m ? { ...idle(), newMessages: [m] } : idle();
   },
   forget_slot: async ({ s, e, idle }) => {
     const slot = s.slots[e.slot];
