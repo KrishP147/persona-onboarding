@@ -1,6 +1,6 @@
 // Keyless smoke test of the engine's safety nets (mock mode). Run: pnpm tsx scripts/smoke.ts
 import { getSecret, loadSession, newSession, saveSession, setSecret, withSession } from "../src/lib/store";
-import { CLAIMS_LINK, GUARD_PIPELINE, fixCallTypos, makeGuardEnv, INTENTS, cleanModelText, cutRepeatQuestions, fence, fromEmailOnly, runTool, handleEvent, normQuestion, saysBye, softenGmailDemand, handleUserMessage, nowLine, parseTypedEmail, MAX_BUBBLES, emitAgentText } from "../src/lib/engine";
+import { CLAIMS_LINK, GUARD_PIPELINE, dropAskedQuestions, fixCallTypos, makeGuardEnv, INTENTS, cleanModelText, cutRepeatQuestions, fence, fromEmailOnly, runTool, handleEvent, normQuestion, saysBye, softenGmailDemand, handleUserMessage, nowLine, parseTypedEmail, MAX_BUBBLES, emitAgentText } from "../src/lib/engine";
 import { crc32, pick } from "../src/lib/moves";
 import { readMood } from "../src/lib/mood";
 import { DEMO_INBOX, scoreItem } from "../src/lib/triage";
@@ -625,6 +625,17 @@ async function main() {
   const endR = await handleEvent(lis.c, { type: "call_ended", reason: "user_hangup" });
   const recapT = endR.newMessages.filter((m) => m.role === "agent" && m.channel === "text" && !m.kind);
   check("no need heard: one code-written recap, nothing invented", recapT.length === 1 && !/job|application|recruit/i.test(recapT[0].text) && !!recapT[0].guards?.some((g) => g.startsWith("recap written by code")), recapT.map((m) => m.text).join(" | "));
+
+  // code-written lines never repeat a question either (fuzz found the decline line and the fallback doing it)
+  const dec = newSession();
+  await handleEvent(dec, { type: "open" });
+  await handleUserMessage(dec, "text", "luna");
+  const d1 = await handleEvent(dec, { type: "call_declined" });
+  const d2 = await handleEvent(dec, { type: "call_declined" });
+  check("second decline doesn't re-ask 'what's on your mind?'", /what's on your mind\?/.test(said(d1)) && !/what's on your mind\?/.test(said(d2)) && said(d2).trim().length > 0, `${said(d1)} || ${said(d2)}`);
+  dec.askedQuestions = [normQuestion("what's up?")];
+  const onlyQ = dropAskedQuestions(dec, "what's up?", "voice");
+  check("a line that was only a repeated question becomes a short non-question, never empty", onlyQ.length > 0 && !onlyQ.includes("?"), onlyQ);
 
   // the guard pipeline runs in a fixed, named order (goodbye before hangup comes before the gmail rules, etc.)
   const order = GUARD_PIPELINE.map((g) => g.name);

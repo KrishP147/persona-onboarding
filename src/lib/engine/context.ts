@@ -3,6 +3,7 @@ import { type Channel, type ClientAction, type Msg, type Session } from "../type
 
 import { type Move } from "../types";
 import { STAGE_BRACKETS, TOOL_NAMES, capBubbles, capSentences, keepFillIns, stopAtRepeat } from "./text";
+import { dropAskedQuestions, rememberQuestions } from "./guards";
 
 // A reply is at most two texts: a double text is fine, a triple reads like a wall.
 export const MAX_BUBBLES = 2;
@@ -71,7 +72,12 @@ export function recapFallback(s: Session, reason: string) {
 
 export function emitAgentText(ctx: Ctx, raw: string) {
   // House style: no em dashes, no stage directions like "(waiting for reply)".
-  const text = stopAtRepeat(raw.replace(TOOL_NAMES, " ").replace(STAGE_BRACKETS, keepFillIns)).replace(/\s*[—]\s*/g, ", ").replace(/\((?:[a-z]+ ){0,3}(?:on|in) (?:the |our )?(?:call|chat)\)\s*/gi, "").replace(/^\s*\*?\([^)]*\)\*?\s*$/gm, "").trim();
+  let text = stopAtRepeat(raw.replace(TOOL_NAMES, " ").replace(STAGE_BRACKETS, keepFillIns)).replace(/\s*[—]\s*/g, ", ").replace(/\((?:[a-z]+ ){0,3}(?:on|in) (?:the |our )?(?:call|chat)\)\s*/gi, "").replace(/^\s*\*?\([^)]*\)\*?\s*$/gm, "").trim();
+  // Never the same question twice, scripted lines too ("what's on your mind?" after every decline).
+  const deduped = dropAskedQuestions(ctx.s, text, ctx.channel);
+  if (deduped !== text) guard(ctx, "blocked repeat question");
+  text = deduped;
+  rememberQuestions(ctx.s, text);
   // On a call, three sentences is already a lot to listen to; trim anything longer.
   const spoken = ctx.channel === "voice" ? capSentences(text.replace(/\n+/g, " ").trim(), 3) : text;
   // An email typed out in the reply stays one bubble (split per paragraph it read like several texts).

@@ -2,7 +2,6 @@
 // events, checking invariants after every step. Run: pnpm fuzz [runs] [seed]
 import { newSession } from "../src/lib/store";
 import { handleEvent, handleUserMessage, normQuestion, type SessionEvent } from "../src/lib/engine";
-import { EVENT_MOVES } from "../src/lib/moves";
 import { DEMO_INBOX } from "../src/lib/triage";
 import type { Msg, Session, TurnResult } from "../src/lib/types";
 
@@ -65,7 +64,7 @@ const known = (() => {
   f.report = () => [...seen].sort((x, y) => y[1] - x[1]);
   return f;
 })();
-const EVENT_IDS = new Set(Object.values(EVENT_MOVES).map((m) => m.id));
+
 function fail(inv: string, detail: string) {
   const f = failures.get(inv);
   if (f) f.count++;
@@ -107,9 +106,8 @@ async function main() {
           if (!k) continue;
           if (asked.has(k)) {
             // Lines written in code (event replies, scripted fallbacks) skip the model's no-repeat step: known, reported.
-            const scripted = (m.move && EVENT_IDS.has(m.move.id)) || m.guards?.some((g) => /scripted line/.test(g));
-            if (scripted) known(`code-written line repeats a question: "${q}"`);
-            else fail("never the same question twice", `"${q}" | ${where()}`);
+            // Code-written lines included (emitAgentText drops repeats for every line).
+            fail("never the same question twice", `"${q}" | ${where()}`);
           }
           asked.set(k, step);
         }

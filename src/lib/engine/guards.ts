@@ -1,6 +1,6 @@
 import { type Channel, type InboxItem, type Move, type Session, type TurnResult } from "../types";
 import { provider, quick } from "../llm";
-import { EVENT_MOVES } from "../moves";
+import { EVENT_MOVES, pick } from "../moves";
 import { type Ctx, emitAgentText, ensureCard, goodbyeLine, guard, msg, shortNeed } from "./context";
 import { CARD_ASK, NAME_ASK, SEND_REQUEST, SETUP_Q, gmailConsent, saidNow, userWrappingUp } from "./intents";
 import { runTool } from "./tools";
@@ -52,6 +52,20 @@ export function sameQuestion(a: string, b: string) {
   return shared / Math.max(A.size, B.size) >= 0.8;
 }
 export const questionsIn = (text: string) => text.split(SENTENCE_BREAK).filter((x) => x.trim().endsWith("?"));
+
+// Every line, scripted ones included: a question it already asked is dropped (paragraphs kept). If that
+// leaves nothing, a short line that asks nothing takes its place (never an empty turn, never the repeat).
+export function dropAskedQuestions(s: Session, text: string, channel: Channel = "text") {
+  const asked = s.askedQuestions ?? [];
+  if (!asked.length) return text;
+  const kept = text
+    .split(/\n\s*\n/)
+    .map((p) => p.split(SENTENCE_BREAK).filter((x) => !(x.trim().endsWith("?") && asked.some((a) => sameQuestion(normQuestion(x), a)))).join(" ").trim())
+    .filter(Boolean)
+    .join("\n\n");
+  if (kept) return kept;
+  return pick(s, "dedupe", channel === "voice" ? ["i'm here.", "take your time.", "mm-hm, i'm listening."] : ["no rush, i'm here.", "take your time.", "i'm around whenever."]);
+}
 
 export function rememberQuestions(s: Session, text: string) {
   const qs = questionsIn(text).map(normQuestion).filter(Boolean);
