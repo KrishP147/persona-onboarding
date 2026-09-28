@@ -49,9 +49,9 @@ flowchart TD
 
 ## the guards
 
-the guards run as one ordered pipeline (`src/lib/engine/guards.ts`). every guard that changes a reply tags it, and the "examine reasoning" panel shows the tags as "checks that ran" chips. there are 31:
+the guards run as one ordered pipeline (`src/lib/engine/guards.ts`). every guard that changes a reply tags it, and the "examine reasoning" panel shows the tags as "checks that ran" chips. there are 33:
 
-- **honesty:** dropped unsupported claim, blocked a false 'sent' claim, dropped a false 'link sent' claim, sent the link it said it sent
+- **honesty:** dropped unsupported claim (including calendar access it doesn't have, and naming the model behind it), blocked a false 'sent' claim, blocked a false 'connected' claim, dropped a false 'link sent' claim, sent the link it said it sent, sent the link they said yes to before letting them go
 - **leaks:** leak filtered (notes about the system), narration dropped (the user in the third person, the agent narrating its own plan), tool names stripped, blocked a line not allowed here
 - **tone:** dropped an accusing line, dropped a guess stated as fact, name held back (used it just now)
 - **not a form:** blocked repeat question, rewrote a repeat question, cut a double question, blocked a third question in a row, blocked repeat name question

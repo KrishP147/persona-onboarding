@@ -607,6 +607,10 @@ async function main() {
   const esR = await handleUserMessage(es, "text", "Sí, mándame el link porfa");
   check("'sí, mándame el link' sends the link", esR.newMessages.some((m) => m.kind === "gmail_link"), said(esR));
   check("'sending it now' / 'el link te llegó' count as link claims", CLAIMS_LINK.test("okay, sending it now.") && CLAIMS_LINK.test("ya está, el link te llegó en los textos"));
+  const callNo = newSession();
+  callNo.transcript.push(msg("agent", "text", "want me to give you a quick call?"), msg("user", "text", "nah let's just text, easier for me rn"));
+  await applyExtracted(callNo, { agentName: null, userName: null, helpNeed: null, declined: ["gmail"] }, async () => {});
+  check("turning down the call never marks gmail declined", callNo.slots.gmail.status === "missing", callNo.slots.gmail.status);
   const trash = cleanModelText("i can trash the promos for you. i can draft replies too.");
   check("no 'i can trash' (no delete tool)", !/trash/.test(trash) && trash.includes("draft replies"), trash);
   const vendor = cleanModelText("I'm Claude, an AI assistant made by Anthropic. So, what should I call you?");
