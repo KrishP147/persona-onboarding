@@ -10,6 +10,7 @@
     "harness": "tsx harness/run.ts",
     "typecheck": "tsc --noEmit",
     "smoke": "tsx scripts/smoke.ts",
+    "stress-matrix": "tsx scripts/stress-matrix.ts",
     "e2e": "tsx scripts/e2e.ts",
     "metrics": "tsx scripts/metrics.ts"
   },
