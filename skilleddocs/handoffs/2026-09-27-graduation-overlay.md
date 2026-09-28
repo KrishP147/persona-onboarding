@@ -16,7 +16,8 @@ branch `krish/graduation-overlay` (worktree C:\Users\User\_worktrees\persona-onb
 
 ## not done / gaps
 - when grad card is pinned at the end (resumed session, no stored anchor) it sits after later texts too (seen after "yes, send it"). setup time is hidden in that case.
-- after graduation the original draft message shows as a plain bubble and the actionable card sits under the grad card, so the email text appears twice.
+- fixed by manager (e147040): a pre-graduation draft moves under the grad card and its original bubble is hidden; a draft shown after graduation stays in place.
+- not rebased on origin/master (65124f4, redesign merged): rebase was blocked for the manager. run `git rebase --onto origin/master 12762bd`; merge-tree shows no conflicts in our files. after: type guards via `Msg.guards` (now in src/lib/types.ts) instead of the loose cast, rerun typecheck/lint/smoke/`pnpm stress-matrix` + `git diff --exit-code STRESS_TESTS.md`/build.
 - journal 14 still says why cards sit level with their bubbles; 15 notes the change.
 - gmail "Edit" = reconnect popup (connectGmail); not tested against real oauth.
 - e2e not run; no screen reader pass.
