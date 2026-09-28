@@ -20,8 +20,8 @@ a draft email used to arrive as a long text. when gmail is connected it's now a 
 ## smaller things
 
 - first visit shows a short note for reviewers: what this is, use chrome or edge for the call, and three things to try. it never blocks the opening texts, which arrive underneath. esc or a tap outside closes it and it stays closed; `?intro=1` brings it back.
-- the reasoning lane on desktop is folded by default ("show reasoning"), and remembered. its cards now stack from the top under the header instead of floating level with their bubbles; hover and j / k still tie a card to its bubble.
-- when the server sends them, each why card lists the checks that ran on that reply, as small chips with a shield, and the how it decides panel shows turns, cost and p50 for the session.
+- reasoning is off by default and remembered. (this used to be a folded lane of cards beside the phone; 17 replaced it with a map you open from a pill.)
+- when the server sends them, the checks that ran on a reply show as small shield chips beside its node in the map, and the node's detail has the how it decides panel with turns, cost and p50 for the session.
 
 ## sources
 
