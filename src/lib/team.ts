@@ -19,10 +19,16 @@ export const TEAM: Record<string, TeamMember> = {
   yasser: { full: "Yasser Drif", handle: "@Yasser_Drif__", asks: "product engineering at persona", bio: "product engineering at Persona, bringing autonomous AI agents to life" },
 };
 
-// Their first name is on the team, and we haven't asked about that name yet.
+const firstName = (s: Session) => (s.slots.userName.value ?? "").trim().split(/\s+/)[0]?.toLowerCase() ?? "";
+// Their first name is on the team, and we haven't asked about that name before (going back to one doesn't re-ask).
 export function teamMatch(s: Session): string | null {
-  const first = (s.slots.userName.value ?? "").trim().split(/\s+/)[0]?.toLowerCase();
-  return first && TEAM[first] && s.teamGuess !== first ? first : null;
+  const first = firstName(s);
+  return first && TEAM[first] && !(s.teamAsked ?? []).includes(first) ? first : null;
+}
+// The team member they currently are, if they said yes to that name.
+export function teamActive(s: Session): string | null {
+  const first = firstName(s);
+  return (s.teamYes ?? []).includes(first) ? first : null;
 }
 
 // their yes, answered in code before the model's reply

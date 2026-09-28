@@ -823,12 +823,13 @@ export function useVoiceCall(opts: {
     // question or request can get a "hmm", then "let me think about that" once it's clearly taking a while.
     clear(fillerTimer);
     const stillWaiting = () => waitingRef.current && queueRef.current === 0 && !micOff() && activeRef.current && !hushed;
-    const thinking = needsThought(text);
+    const kind = pauseKind(text);
+    const thinking = kind !== "plain";
     fillerTimer.current = setTimeout(() => {
       if (!stillWaiting()) return;
       if (thinking && Math.random() < 0.35) void speak(pickFiller(SHORT_FILLERS, lastFillerRef), true);
       fillerTimer.current = setTimeout(() => {
-        if (stillWaiting()) void speak(pickFiller(thinking ? LONG_FILLERS : HOLD_FILLERS, lastFillerRef), true);
+        if (stillWaiting()) void speak(pickFiller(kind === "lookup" ? LOOKUP_FILLERS : kind === "inbox" ? INBOX_FILLERS : thinking ? LONG_FILLERS : HOLD_FILLERS, lastFillerRef), true);
       }, thinking ? 2000 : 2600);
     }, 1100);
     optsRef.current.onUtterance(text, interrupted, heardBefore).finally(() => {
@@ -1112,10 +1113,16 @@ const SHORT_FILLERS = ["hmm.", "hmm, okay."];
 const LONG_FILLERS = ["let me think about that for a second.", "good question, give me a second."];
 // a slow reply to something simple: just hold, no pretend thinking
 const HOLD_FILLERS = ["one sec.", "hold on."];
-// a question, or a request with some meat to it (not "i'm zach", "yeah", "sure")
-function needsThought(t: string) {
+// say what's actually happening when it's slow: a lookup, the inbox, real thinking, or just a hold
+const LOOKUP_FILLERS = ["let me look that up.", "one sec, let me check."];
+const INBOX_FILLERS = ["let me check your inbox.", "one sec, looking at your email."];
+// what the wait is probably for, from their words (the reply arrives all at once, so the browser has to guess)
+function pauseKind(t: string): "lookup" | "inbox" | "think" | "plain" {
   const w = t.trim().split(/\s+/).length;
-  return /\?\s*$/.test(t.trim()) || (w >= 6 && /\b(how|why|what|which|should|could|can you|help|find|plan|compare|explain|figure)\b/i.test(t));
+  if (/\b(inbox|e-?mails?|gmail|unread)\b/i.test(t) && /\b(check|look|read|any|what|show|find|urgent|new|sort|go through)\b/i.test(t)) return "inbox";
+  if (/\b(weather|forecast|hours|price|prices|cost|near me|nearby|news|score|flights?|restaurants?|look (it |that )?up|search|google)\b/i.test(t)) return "lookup";
+  if (/\?\s*$/.test(t.trim()) || (w >= 6 && /\b(how|why|what|which|should|could|can you|help|find|plan|compare|explain|figure)\b/i.test(t))) return "think";
+  return "plain";
 }
 function pickFiller(list: string[], last: { current: string }) {
   const options = list.filter((f) => f !== last.current);

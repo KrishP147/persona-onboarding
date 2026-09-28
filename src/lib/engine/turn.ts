@@ -8,7 +8,7 @@ import { connectDemo } from "../google";
 import { EVENT_MOVES, chooseMove, markUsed, pick, withAngle } from "../moves";
 import { applyExtracted, extract } from "../extract";
 import { webEnabled } from "../web";
-import { teamLine, teamLineVoice, teamMatch, teamNote, teamYes, teamYesVoice } from "../team";
+import { teamActive, teamLine, teamLineVoice, teamMatch, teamNote, teamYes, teamYesVoice } from "../team";
 
 import { currentMeter, metered, percentile, recordTurn, type Meter } from "../usage";
 import { type Ctx, emitAgentText, ensureCard, goodbyeLine, guard, msg, outageLine } from "./context";
@@ -77,7 +77,8 @@ export async function generate(ctx: Ctx, extraInstruction?: string): Promise<str
   const typed = s.transcript.filter((m) => m.role === "user" && m.channel === "text");
   const keep = [...new Set([...typed.filter((m) => /https?:\/\/|www\.|\S@\S/.test(m.text)).slice(-4), ...(s.call.active ? typed.slice(-3) : [])])];
   if (keep.length) state += `\nTHEY TYPED IN THE CHAT (recent; "the link i sent" means these): ${keep.map((m) => JSON.stringify(m.text.slice(0, 240))).join(", ")}`;
-  if (s.teamMember) state += `\n${teamNote(s.teamMember)}`;
+  const member = teamActive(s);
+  if (member) state += `\n${teamNote(member)}`;
   if (extraInstruction) state += `\n\nINSTRUCTION: ${extraInstruction}`;
   if (!extraInstruction || ctx.softInstruction) {
     // One research-backed move per turn, chosen in code, so the principles actually get applied.
@@ -412,19 +413,20 @@ export async function nameAmbiguity(s: Session, channel: Channel, text: string, 
 export async function handleUserMessage(...args: Parameters<typeof handleUserMessageInner>): Promise<TurnResult> {
   const [s, channel, text] = args;
   // easter egg follow up: a yes to "is this THE zach?" (anything else just moves on)
-  if (s.teamGuess && !s.teamMember && s.transcript.findLast((m) => m.role === "agent" && (!m.kind || m.kind === "text"))?.move?.id === "team") {
-    if (YES.test(text.replace(LAUGH_LEAD, "")) || /\b(it'?s me|that'?s me|the one|in the flesh|guilty)\b/i.test(text)) s.teamMember = s.teamGuess;
+  const guess = s.teamGuess;
+  if (guess && !(s.teamYes ?? []).includes(guess) && s.transcript.findLast((m) => m.role === "agent" && (!m.kind || m.kind === "text"))?.move?.id === "team") {
+    if (YES.test(text.replace(LAUGH_LEAD, "")) || /\b(it'?s me|that'?s me|the one|in the flesh|guilty)\b/i.test(text)) (s.teamYes ??= []).push(guess);
   }
-  const justMet = !!s.teamMember && !s.teamGreeted;
-  if (justMet) s.teamGreeted = true;
+  const justMet = !!guess && (s.teamYes ?? []).includes(guess) && !(s.teamGreetedFor ?? []).includes(guess);
+  if (justMet) (s.teamGreetedFor ??= []).push(guess);
   const [r, meter] = await metered(async () => sealGoodbye(s, await asTurnBy(s, "user", () => handleUserMessageInner(...args))));
   noteMetrics(s, meter);
   // their name is on the persona team: "woah, is this THE zach?" in place of this turn's words (cards, links,
   // a ringing call or a send stay; then it's back to normal)
   // a yes to "is this THE zach?": a code-written "no way" first (a run's model skipped straight to the call offer)
-  if (justMet && s.teamMember) {
+  if (justMet && guess) {
     const ctx: Ctx = { s, channel: s.call.active ? "voice" : channel, actions: [], newMessages: [], move: { id: "team", label: "a familiar name", source: "easter egg" } };
-    emitAgentText(ctx, ctx.channel === "voice" ? teamYesVoice(s.teamMember) : teamYes(s.teamMember));
+    emitAgentText(ctx, ctx.channel === "voice" ? teamYesVoice(guess) : teamYes(guess));
     const [m] = ctx.newMessages;
     const first = r.newMessages.findIndex((x) => x.role === "agent");
     s.transcript.splice(s.transcript.indexOf(m), 1);
@@ -435,8 +437,8 @@ export async function handleUserMessage(...args: Parameters<typeof handleUserMes
   }
   const key = teamMatch(s);
   if (key) {
-    // a new name ("actually i'm julia") is a new ask; the old yes doesn't carry over
-    if (s.teamGuess) s.teamMember = s.teamGreeted = undefined;
+    // a new name ("actually i'm julia") is a new ask; a yes stays with its name (back to zach: still zach)
+    (s.teamAsked ??= []).push(key);
     s.teamGuess = key;
     const busy = r.actions.some((a) => a.type === "start_call" || a.type === "end_call") || !!s.lastSent;
     const words = busy ? [] : r.newMessages.filter((m) => m.role === "agent" && (!m.kind || m.kind === "text") && !m.move?.id?.startsWith("default"));

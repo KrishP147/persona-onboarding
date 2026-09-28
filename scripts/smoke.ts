@@ -554,7 +554,7 @@ async function main() {
   const egg1 = await handleUserMessage(egg, "text", "i'm zach");
   check("team name: 'woah, is this THE zach, founder of persona?'", /is this THE zach, founder of persona\?/.test(said(egg1)) && egg.teamGuess === "zach", said(egg1));
   await handleUserMessage(egg, "text", "haha yes");
-  check("...a yes: they're recognized (bio goes to the model), asked only once", egg.teamMember === "zach" && !/is this THE/.test(said(await handleUserMessage(egg, "text", "anyway i need help with email"))));
+  check("...a yes: they're recognized (bio goes to the model), asked only once", (egg.teamYes ?? []).includes("zach") && !/is this THE/.test(said(await handleUserMessage(egg, "text", "anyway i need help with email"))));
   check("...the yes gets a code-written 'no way, an honor!'", egg.transcript.some((m) => m.role === "agent" && m.text === "no way, an honor!"));
   // "can you call my dentist?" is a call for someone else, never a ring to them; "can you call?" is
   const dent = newSession();
@@ -571,7 +571,11 @@ async function main() {
   // (keyless: no extractor to re-read the name, so set it as prod's extractor would)
   egg.slots.userName = { ...egg.slots.userName, value: "Julia" };
   const eggJ = await handleUserMessage(egg, "text", "actually im julia");
-  check("...switching to another team name asks again ('is this THE julia?')", /is this THE julia, from talent at persona\?/.test(said(eggJ)) && egg.teamGuess === "julia" && !egg.teamMember, said(eggJ));
+  check("...switching to another team name asks again ('is this THE julia?')", /is this THE julia, from talent at persona\?/.test(said(eggJ)) && egg.teamGuess === "julia" && !(egg.teamYes ?? []).includes("julia"), said(eggJ));
+  // ...and back to zach: no third ask (a repeat would have been blocked into "i'm here."), the earlier yes still counts
+  egg.slots.userName = { ...egg.slots.userName, value: "Zach" };
+  const eggZ = await handleUserMessage(egg, "text", "jk i'm zach");
+  check("zach -> julia -> zach: no re-ask, still recognized as zach", !/is this THE|i'm here/.test(said(eggZ)) && (egg.teamAsked ?? []).join() === "zach,julia" && (egg.teamYes ?? []).includes("zach"), said(eggZ));
   const ph = newSession();
   await handleEvent(ph, { type: "open" });
   await handleUserMessage(ph, "text", "nova");
