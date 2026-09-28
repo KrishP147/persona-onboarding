@@ -51,7 +51,7 @@ export const TOOLS: ToolDef[] = [
   {
     name: "read_inbox",
     description:
-      "Read their Gmail (only after it's connected): returns the latest messages matching a Gmail search, with sender, subject, date and a short preview. Use it whenever they ask about their email; never guess what's in there. "top" or "latest" emails means query "in:inbox", not keywords.",
+      "Read their Gmail (only after it's connected): returns the latest messages matching a Gmail search, with sender, subject, date and a short preview. Use it whenever they ask about their email; never guess what's in there. 'top' or 'latest' emails means query in:inbox, not keywords.",
     schema: {
       type: "object",
       properties: {
