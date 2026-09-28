@@ -2,7 +2,7 @@
 // the email draft as a confirm card: send only on a yes, with 5 seconds to take it back
 import { useEffect, useRef, useState } from "react";
 import type { Session } from "@/lib/types";
-import type { Skin } from "../skins/types";
+import type { Pos, Skin } from "../skins/types";
 import type { Chat } from "../useChat";
 
 const UNDO_MS = 5000;
@@ -18,7 +18,7 @@ export function draftMsgId(s: Session | null): string | null {
 
 type Stage = "ask" | "counting" | "sending" | "later";
 
-export function DraftCard({ skin, chat }: { skin: Skin; chat: Chat }) {
+export function DraftCard({ skin, chat, pos }: { skin: Skin; chat: Chat; pos?: Pos }) {
   const d = chat.session?.draft;
   const T = skin.rich;
   const [stage, setStage] = useState<Stage>("ask");
@@ -63,7 +63,7 @@ export function DraftCard({ skin, chat }: { skin: Skin; chat: Chat }) {
   const collapsed = stage === "later" && !sent;
 
   return (
-    <skin.RichCard title={sent ? "Email sent" : "Draft email"}>
+    <skin.RichCard title={sent ? "Email sent" : "Draft email"} pos={pos}>
       <div className="px-3.5 pt-1 pb-2 border-t text-[13px] leading-[18px]" style={{ borderColor: T.line }}>
         <div className="truncate">
           <span style={{ color: T.mute }}>To </span>
