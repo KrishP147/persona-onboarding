@@ -4,6 +4,9 @@ import { type Channel, type ClientAction, type Msg, type Session } from "../type
 import { type Move } from "../types";
 import { STAGE_BRACKETS, TOOL_NAMES, capBubbles, capSentences, keepFillIns, stopAtRepeat } from "./text";
 
+// A reply is at most two texts: a double text is fine, a triple reads like a wall.
+export const MAX_BUBBLES = 2;
+
 export function msg(role: Msg["role"], channel: Channel, text: string, extra: Partial<Msg> = {}): Msg {
   return { id: nanoid(10), role, channel, text, ts: Date.now(), ...extra };
 }
@@ -78,7 +81,7 @@ export function emitAgentText(ctx: Ctx, raw: string) {
       ? [spoken]
       : isEmail
         ? [text.replace(/^\s*-{3,}\s*$/gm, "").replace(/\n{3,}/g, "\n\n").trim()]
-        : capBubbles(text.split(/\n\s*\n/).map((b) => b.trim()).filter(Boolean), 3);
+        : capBubbles(text.split(/\n\s*\n/).map((b) => b.trim()).filter(Boolean), MAX_BUBBLES);
   for (const b of bubbles.filter(Boolean)) {
     const m = msg("agent", ctx.channel, b, { ...(ctx.move ? { move: ctx.move } : {}), ...(ctx.guards?.length ? { guards: [...ctx.guards] } : {}) });
     ctx.newMessages.push(m);

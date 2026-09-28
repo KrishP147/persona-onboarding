@@ -1,5 +1,5 @@
 import { type Msg, type Session, type SlotKey, type TurnResult } from "../types";
-import { computeDirective, recordAsk, MAX_CALL_OFFERS, MAX_SILENCE_STRIKES } from "../policy";
+import { computeDirective, recordAsk, MAX_CALL_OFFERS, MAX_SILENCE_STRIKES, SILENCE_BEFORE_WARN_MS, SILENCE_SECOND_MS, SILENCE_WARN_GAP_MS, SILENCE_WARN_STRIKE } from "../policy";
 import { RECAP_INSTRUCTION } from "../prompt";
 
 import { DEMO_INBOX, triageInbox } from "../triage";
@@ -7,10 +7,10 @@ import { EVENT_MOVES, pick } from "../moves";
 import { reconcileCall } from "../extract";
 import { metered } from "../usage";
 import { setSecret } from "../store";
-import { type Ctx, emitAgentText, eventMsg, heardThemThisCall, msg, recapFallback } from "./context";
+import { type Ctx, emitAgentText, eventMsg, heardThemThisCall, msg, recapFallback, shortNeed } from "./context";
 import { OFFERED_CALL, asTurnBy, saysBye } from "./intents";
 import { linkPending, rememberEmails, sealGoodbye } from "./guards";
-import { DEMO_ASK, DEMO_MARK, INTRO_CAPABILITIES, SKIPPED_NAME, defaultAgentName, noteMetrics, turn } from "./turn";
+import { DEMO_ASK, DEMO_MARK, INTRO_CAPABILITIES, noteMetrics, turn } from "./turn";
 
 export type SessionEvent =
   | { type: "open" }
@@ -149,72 +149,75 @@ export const EVENT_HANDLERS: { [K in SessionEvent["type"]]: EventHandler<K> } = 
   silence: async ({ s, idle }) => {
     if (!s.call.active) return idle();
     s.call.silenceStrikes += 1;
+    const strike = s.call.silenceStrikes;
     const name = s.slots.userName.value;
-    // Quiet is fine. Only after a real while does it check in, once; if it's still quiet after
-    // that, it says it's hanging up and does (never waits forever, never hangs up without warning).
-    if (s.call.silenceStrikes >= MAX_SILENCE_STRIKES) {
-      const ctx: Ctx = { s, channel: "voice", actions: [], newMessages: [], move: EVENT_MOVES.silence };
-      emitAgentText(ctx, `i haven't heard anything for a bit, so i'm going to hang up now. i'll text you, and you can call me back anytime. bye${name ? ` ${name}` : ""}!`);
+    const n = name ? `, ${name}` : "";
+    const ctx: Ctx = { s, channel: "voice", actions: [], newMessages: [], move: EVENT_MOVES.silence };
+    const out = () => ({ session: s, newMessages: ctx.newMessages, chips: computeDirective(s, "voice").chips, actions: ctx.actions });
+    // Quiet is fine, for a long time. The ladder (client waits 25s for the first, 45s after "hold on"):
+    // a check-in that picks up where they were, a softer one 30s later, a heads-up at about two minutes,
+    // then a goodbye and a hangup 12s after that. Never re-pitches setup, never hangs up without warning.
+    if (strike >= MAX_SILENCE_STRIKES) {
+      emitAgentText(ctx, `okay, talk soon${name ? ` ${name}` : ""}! i'll text you.`);
       ctx.actions.push({ type: "end_call" });
-      return { session: s, newMessages: ctx.newMessages, chips: computeDirective(s, "voice").chips, actions: ctx.actions };
+      return out();
     }
-    // When the conversation has just run out, pick it back up gently instead of "still there?".
-    const line = !heardThemThisCall(s)
-      ? "hello? can you hear me okay?"
-      : s.call.holding
-        ? "still there? no rush."
-        : "is there anything you wanted to ask me, about setup or anything else? i'm here to help, and we can always just text if that's easier.";
-    const ctx: Ctx = { s, channel: "voice", actions: [{ type: "patience", ms: s.call.holding ? 30000 : 20000 }], newMessages: [], move: EVENT_MOVES.silence };
+    if (strike === SILENCE_WARN_STRIKE) {
+      emitAgentText(ctx, `i haven't heard anything for a bit${n}, so i'll hang up in a few seconds. i'll text you, and you can call me back anytime.`);
+      ctx.actions.push({ type: "patience", ms: SILENCE_WARN_GAP_MS });
+      return out();
+    }
+    const need = shortNeed(s);
+    const line =
+      strike === 1
+        ? !heardThemThisCall(s)
+          ? `hello${name ? ` ${name}` : ""}? can you hear me okay?`
+          : s.call.holding
+            ? `still there${n}? no rush.`
+            : need
+              ? `still thinking about ${need}${n}? no rush.`
+              : `no rush${n}. what's on your mind?`
+        : `i'm still here${n}, take your time. we can also just text if that's easier.`;
+    ctx.actions.push({ type: "patience", ms: strike === 1 ? SILENCE_SECOND_MS : SILENCE_BEFORE_WARN_MS });
     emitAgentText(ctx, line);
-    return { session: s, newMessages: ctx.newMessages, chips: computeDirective(s, "voice").chips, actions: ctx.actions };
+    return out();
   },
   text_idle: async ({ s, idle }) => {
-    // Left on read over text. A friend doesn't go silent and doesn't nag: one easy double text,
-    // a lighter one much later, then quiet until they're back.
+    // Left on read over text. A friend doesn't go silent and doesn't nag: at most one easy double text,
+    // then quiet until they're back. Silence never names the agent (only answering something else does).
     if (s.call.active) return idle();
     const lastUserIdx = s.transcript.findLastIndex((m) => m.role === "user");
     const since = s.transcript.slice(lastUserIdx + 1);
     const lastAgent = since.findLast((m) => m.role === "agent" && (!m.kind || m.kind === "text"));
-    if (!lastAgent || Date.now() - lastAgent.ts < IDLE_MIN_MS) return idle(); // their message is newer, or another tab just nudged
-    const nudges = countNudges(since);
-    if (nudges >= MAX_IDLE_NUDGES) return idle();
+    const firstTime = lastUserIdx < 0;
+    // Before their first message they may still be reading the intro: only after a real while.
+    if (!lastAgent || Date.now() - lastAgent.ts < (firstTime ? IDLE_FIRST_MS : IDLE_MIN_MS)) return idle();
+    if (countNudges(since) >= MAX_IDLE_NUDGES) return idle();
     // They signed off ("thanks, bye"), or we already said goodbye: nothing to chase.
-    if (lastUserIdx >= 0 && saysBye(s.transcript[lastUserIdx].text) && nudges === 0) return idle();
+    if (!firstTime && saysBye(s.transcript[lastUserIdx].text)) return idle();
     const ctx: Ctx = { s, channel: "text", actions: [], newMessages: [], move: EVENT_MOVES.nudge };
     const name = s.slots.userName.value;
-    if (nudges >= 1) {
-      // The second one never asks anything: it just leaves the door open.
-      emitAgentText(ctx, name ? `all good ${name}, no rush. i'm here whenever` : "all good, no rush. i'm here whenever");
+    if (firstTime) {
+      // One gentle line, no question, no default name: they didn't skip anything, they just haven't started.
+      emitAgentText(ctx, `no rush${name ? ` ${name}` : ""}, take your time. i'm here whenever you're ready`);
       recordAsk(s, null);
       return { session: s, newMessages: ctx.newMessages, chips: computeDirective(s, "text").chips, actions: [] };
     }
-    // They never answered "what do you want to call me?": take a default they can change, keep moving.
-    if (s.slots.agentName.status === "missing" && s.lastAskedSlot === "agentName") {
-      defaultAgentName(s);
-      ctx.move = EVENT_MOVES.defaultName;
-      const d = computeDirective(s, "text");
-      const callAsk = d.offerCall && s.callOffers === 0;
-      if (callAsk) {
-        s.callOffers = 1;
-        if (s.phase === "intro") s.phase = "call_offered";
-      }
-      emitAgentText(ctx, `${SKIPPED_NAME}${callAsk ? `\n\nwant me to give you a quick call to get you set up? way easier than typing it all out` : ""}`);
-      recordAsk(s, null, callAsk);
-      return { session: s, newMessages: ctx.newMessages, chips: computeDirective(s, "text").chips, actions: [] };
-    }
+    // Never three texts in a row without a reply: a two-bubble reply already said enough.
+    if (since.filter((m) => m.role === "agent" && (!m.kind || m.kind === "text")).length >= 2) return idle();
     // The link is sitting in their texts: they may be mid sign-in. Give room, no question.
     if (linkPending(s)) {
       // Google blocks non-test accounts on its own page and never reports back, so the way out is offered here.
       const demo = !s.demoOffered;
       s.demoOffered = true;
-      emitAgentText(ctx, demo ? `no rush on the google sign in btw. if google gives you trouble, i can use a ${DEMO_MARK} instead` : "no rush on the google sign in btw. the card's right up there whenever you're ready");
+      emitAgentText(ctx, demo ? `no rush on the google sign in${name ? `, ${name}` : " btw"}. if google gives you trouble, i can use a ${DEMO_MARK} instead` : `no rush on the google sign in${name ? `, ${name}` : " btw"}. the card's right up there whenever you're ready`);
       recordAsk(s, null);
       return { session: s, newMessages: ctx.newMessages, chips: computeDirective(s, "text").chips, actions: [] };
     }
     // An unanswered call offer: take the pressure off and keep the conversation going over text.
     if (OFFERED_CALL.test(lastAgent.text) && !s.call.active) {
       const q = s.slots.helpNeed.status === "missing" ? " what's been eating your time lately?" : "";
-      emitAgentText(ctx, `no pressure on the call btw, texting works just as well.${q}`);
+      emitAgentText(ctx, `no pressure on the call${name ? `, ${name}` : " btw"}. texting works just as well.${q}`);
       recordAsk(s, q ? "helpNeed" : null, !!q);
       return { session: s, newMessages: ctx.newMessages, chips: computeDirective(s, "text").chips, actions: [] };
     }
@@ -258,7 +261,7 @@ export const EVENT_HANDLERS: { [K in SessionEvent["type"]]: EventHandler<K> } = 
       s,
       "text",
       "The call couldn't start because their microphone isn't available. No problem: carry on over text.",
-      "looks like your mic isn't available, no problem. we can do this over text.",
+      "your mic isn't coming through, no problem. we can do this over text.",
     );
   },
   gmail_connected: async ({ s, e, idle }) => {
@@ -319,7 +322,8 @@ export const EVENT_HANDLERS: { [K in SessionEvent["type"]]: EventHandler<K> } = 
 };
 
 // Left on read over text: first double text after about 45s (client timer), a lighter one minutes later, then quiet.
-export const MAX_IDLE_NUDGES = 2;
+export const MAX_IDLE_NUDGES = 1;
+export const IDLE_FIRST_MS = 60000; // before their first message: they may still be reading the intro
 export const IDLE_MIN_MS = 20000;
 export const IDLE_INSTRUCTION =
   "They haven't answered your last text for a bit (left on read). Send ONE short, relaxed double text, like a friend who doesn't take it personally. Don't repeat or rephrase your last question and don't say \"just checking in\" or \"are you there\". Either suggest one concrete, easy next thing tied to what they told you, leading with what it gets them (a few words, no explanation), or make a light joke about the silence and leave the door open. No guilt, no pitch, no list.";

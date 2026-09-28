@@ -1,6 +1,6 @@
 // Keyless smoke test of the engine's safety nets (mock mode). Run: pnpm tsx scripts/smoke.ts
 import { getSecret, loadSession, newSession, saveSession, setSecret, withSession } from "../src/lib/store";
-import { CLAIMS_LINK, GUARD_PIPELINE, INTENTS, cleanModelText, cutRepeatQuestions, fence, fromEmailOnly, runTool, handleEvent, normQuestion, saysBye, softenGmailDemand, handleUserMessage, nowLine, parseTypedEmail } from "../src/lib/engine";
+import { CLAIMS_LINK, GUARD_PIPELINE, INTENTS, cleanModelText, cutRepeatQuestions, fence, fromEmailOnly, runTool, handleEvent, normQuestion, saysBye, softenGmailDemand, handleUserMessage, nowLine, parseTypedEmail, MAX_BUBBLES, emitAgentText } from "../src/lib/engine";
 import { crc32, pick } from "../src/lib/moves";
 import { readMood } from "../src/lib/mood";
 import { DEMO_INBOX, scoreItem } from "../src/lib/triage";
@@ -29,13 +29,21 @@ async function main() {
   await handleEvent(s, { type: "call_started" });
   check("call active", s.call.active && s.phase === "on_call");
 
-  // silence: one check-in (no hangup), then a spoken heads-up + end_call
+  // silence: a check-in, a softer one 30s later, a heads-up at ~2 min, then a goodbye and hangup 12s after
+  const patienceOf = (r: TurnResult) => (r.actions.find((a) => a.type === "patience") as { ms: number } | undefined)?.ms;
+  const noEnd = (r: TurnResult) => !r.actions.some((a) => a.type === "end_call");
+  s.transcript.push({ id: "v-s", role: "user", channel: "voice", text: "so the recruiter emails are the big thing", ts: Date.now() });
   const r1 = await handleEvent(s, { type: "silence" });
-  check("1st silence only checks in", !r1.actions.some((a) => a.type === "end_call") && r1.actions.some((a) => a.type === "patience"), said(r1));
+  check("1st silence only checks in", noEnd(r1) && patienceOf(r1) === 30000, said(r1));
+  check("check-in picks up where they were, never re-pitches setup", !/setup/i.test(said(r1)) && /no rush|what's on your mind|still thinking/.test(said(r1)), said(r1));
+  const r2 = await handleEvent(s, { type: "silence" });
+  check("2nd silence: a softer check-in, still no hangup", noEnd(r2) && patienceOf(r2) === 65000 && !/hang up/i.test(said(r2)), said(r2));
   const r3 = await handleEvent(s, { type: "silence" });
-  check("2nd silence warns and hangs up", r3.actions.some((a) => a.type === "end_call") && /hang up/i.test(said(r3)), said(r3));
-  const spoken = r3.actions.find((a) => a.type === "speak");
-  check("says goodbye before hanging up", !!spoken && /bye|talk soon|text you/i.test((spoken as { text: string }).text), said(r3));
+  check("at ~2 min: a heads-up, then a gap before the hangup", noEnd(r3) && /hang up in a few seconds/.test(said(r3)) && patienceOf(r3) === 12000, said(r3));
+  const r4 = await handleEvent(s, { type: "silence" });
+  check("then it says goodbye and hangs up", r4.actions.some((a) => a.type === "end_call"), said(r4));
+  const spoken = r4.actions.find((a) => a.type === "speak");
+  check("says goodbye before hanging up", !!spoken && /bye|talk soon|text you/i.test((spoken as { text: string }).text), said(r4));
 
   const end = await handleEvent(s, { type: "call_ended", reason: "agent_ended" });
   check("text follow-up after call", end.newMessages.some((m) => m.role === "agent" && m.channel === "text"), said(end));
@@ -226,32 +234,39 @@ async function main() {
   check("weak signal stays low confidence", conf("nah").confidence === "low");
   check("stretching raises intensity", conf("noooo").intensity === "high");
 
-  // left on read over text: default name + call offer, then one light no-question line, then quiet
+  // left on read over text: silence never names it; one gentle line before their first message (after 60s),
+  // one double text after that at most, and never three texts in a row
   const ago = (x: typeof s, ms: number) => x.transcript.forEach((m) => (m.ts -= ms));
   const idle = newSession();
   await handleEvent(idle, { type: "open" });
   const tooSoon = await handleEvent(idle, { type: "text_idle" });
   check("no double text seconds after its own text", tooSoon.newMessages.length === 0, said(tooSoon));
-  ago(idle, 60000);
+  ago(idle, 45000);
+  const earlyIdle = await handleEvent(idle, { type: "text_idle" });
+  check("still reading the intro: nothing before 60s", earlyIdle.newMessages.length === 0, said(earlyIdle));
+  ago(idle, 20000);
   const n1 = await handleEvent(idle, { type: "text_idle" });
-  check("skipped name: goes by persona, says so", idle.slots.agentName.value === "Persona" && /skipped my name/.test(said(n1)) && /rename/.test(said(n1)), said(n1));
-  check("skipped name double text offers the call with a reason", /call/.test(said(n1)) && /easier|faster/.test(said(n1)) && idle.callOffers === 1, said(n1));
+  check("before their first message: one gentle line, no question", n1.newMessages.length === 1 && !said(n1).includes("?") && /no rush/.test(said(n1)), said(n1));
+  check("silence never names the agent", idle.slots.agentName.status === "missing" && !/persona/i.test(said(n1)), said(n1));
   ago(idle, 200000);
   const n2 = await handleEvent(idle, { type: "text_idle" });
-  check("second nudge asks nothing", n2.newMessages.length === 1 && !said(n2).includes("?"), said(n2));
-  ago(idle, 200000);
-  const n3 = await handleEvent(idle, { type: "text_idle" });
-  check("then quiet until they're back", n3.newMessages.length === 0, said(n3));
-  const back = await handleUserMessage(idle, "text", "sure call me");
-  check("yes to the nudge's call offer rings", back.actions.some((a) => a.type === "start_call"), said(back));
+  check("then quiet until they're back", n2.newMessages.length === 0, said(n2));
 
-  // unanswered call offer: take the pressure off
+  // unanswered call offer: take the pressure off, but never a third text in a row
   const offer = newSession();
   await handleEvent(offer, { type: "open" });
   await handleUserMessage(offer, "text", "nova");
   ago(offer, 60000);
   const o1 = await handleEvent(offer, { type: "text_idle" });
-  check("unanswered call offer: no pressure, keep texting", /no pressure/.test(said(o1)) && offer.slots.agentName.value === "Nova", said(o1));
+  check("never three texts in a row without a reply", o1.newMessages.length === 0 && offer.slots.agentName.value === "Nova", said(o1));
+  const offer1 = newSession();
+  offer1.slots.agentName = { ...offer1.slots.agentName, value: "Nova", status: "filled" };
+  offer1.transcript.push(
+    { id: "u-o", role: "user", channel: "text", text: "hi", ts: Date.now() - 61000 },
+    { id: "a-o", role: "agent", channel: "text", text: "want me to give you a quick call? way faster than typing", ts: Date.now() - 60000 },
+  );
+  const o2 = await handleEvent(offer1, { type: "text_idle" });
+  check("unanswered call offer: no pressure, keep texting", /no pressure/.test(said(o2)), said(o2));
   const onCallIdle = newSession();
   onCallIdle.call.active = true;
   check("no text nudges during a call", (await handleEvent(onCallIdle, { type: "text_idle" })).newMessages.length === 0);
@@ -295,6 +310,7 @@ async function main() {
   const trouble = await handleUserMessage(gt, "text", "it says access blocked??");
   check("google's access-blocked wall: demo inbox offered", /demo inbox/.test(said(trouble)) && gt.demoOffered === true, said(trouble));
   const gi = newSession();
+  gi.transcript.push({ id: "u2", role: "user", channel: "text", text: "sure send the link", ts: Date.now() - 61000 });
   gi.transcript.push({ id: "l2", role: "agent", channel: "text", text: "Connect your Google account", ts: Date.now() - 60000, kind: "gmail_link" }, { id: "t2", role: "agent", channel: "text", text: "tap it whenever", ts: Date.now() - 60000 });
   const waitIdle = await handleEvent(gi, { type: "text_idle" });
   check("idle while the link is out mentions the demo inbox", /demo inbox/.test(said(waitIdle)), said(waitIdle));
@@ -457,6 +473,49 @@ async function main() {
   swap.slots.agentName = { ...swap.slots.agentName, value: "Julia", status: "filled" };
   await applyExtracted(swap, { agentName: null, userName: "Julia", helpNeed: null, declined: [] }, async () => {});
   check("'hi julia' never makes the user julia", swap.slots.userName.value !== "Julia", String(swap.slots.userName.value));
+  // language: two bubbles max, no accusations, no guesses stated as fact, the name used well
+  const step = async (name: string, ss: typeof s, text: string) => {
+    const ctx = { s: ss, channel: "text" as const, actions: [], newMessages: [] } as Parameters<typeof emitAgentText>[0];
+    const env = { ctx, s: ss, channel: "text" as const, text, failed: false, usedFallback: false, opts: {}, fix(label: string, next: string) { if (next !== env.text) { env.text = next; (ctx.guards ??= []).push(label); } } };
+    await GUARD_PIPELINE.find((g) => g.name === name)!.run(env);
+    return { text: env.text, guards: ctx.guards ?? [] };
+  };
+  const bub = newSession();
+  const bctx = { s: bub, channel: "text" as const, actions: [], newMessages: [] } as Parameters<typeof emitAgentText>[0];
+  emitAgentText(bctx, "oof, 200 unread\n\nthat's a lot\n\nwant me to sort the recruiter ones?");
+  check("a reply is at most two bubbles", MAX_BUBBLES === 2 && bctx.newMessages.length === 2 && /sort the recruiter/.test(bctx.newMessages[1].text), bctx.newMessages.map((m) => m.text).join(" | "));
+  const acc = await step("no-accusing-or-assuming", bub, "ha, you skipped my name. i'll go by persona for now");
+  check("accusing line dropped, the rest kept", acc.text === "i'll go by persona for now" && acc.guards.includes("dropped an accusing line"), acc.text);
+  const why = await step("no-accusing-or-assuming", bub, "why didn't you connect gmail? want the link again?");
+  check("\"why didn't you\" dropped", why.text === "want the link again?", why.text);
+  const guess = await step("no-accusing-or-assuming", bub, "sounds like you're swamped this week.\n\nwant me to draft the replies?");
+  check("a guess stated as fact is dropped, bubbles kept", guess.text === "want me to draft the replies?" && guess.guards.includes("dropped a guess stated as fact"), guess.text);
+  const fine = await step("no-accusing-or-assuming", bub, "sounds rough. that recruiter email sounds urgent, want a draft?");
+  check("reacting to their situation is fine", fine.guards.length === 0, fine.text);
+  check("code-written default-name line never accuses", !/skipped|never|forgot/.test(said(sk)), said(sk));
+
+  // their name: always in re-engagement lines, otherwise about once every 3 turns and never twice in a row
+  const nm = newSession();
+  nm.slots.userName = { ...nm.slots.userName, value: "Krish", status: "filled" };
+  nm.slots.agentName = { ...nm.slots.agentName, value: "Nova", status: "filled" };
+  await handleEvent(nm, { type: "call_started" });
+  nm.transcript.push({ id: "v-n", role: "user", channel: "voice", text: "hold on a sec", ts: Date.now() });
+  nm.call.holding = true;
+  const hold = await handleEvent(nm, { type: "silence" });
+  check("check-in after a pause uses their name", /still there, Krish\?/.test(said(hold)), said(hold));
+  const nobody = newSession();
+  nobody.transcript.push({ id: "u-x", role: "user", channel: "text", text: "hi", ts: Date.now() - 61000 }, { id: "a-x", role: "agent", channel: "text", text: "want me to give you a quick call? way faster than typing", ts: Date.now() - 60000 });
+  nobody.slots.agentName = { ...nobody.slots.agentName, value: "Nova", status: "filled" };
+  const noName = await handleEvent(nobody, { type: "text_idle" });
+  check("no name before they've given one", /no pressure on the call btw/.test(said(noName)), said(noName));
+  nm.transcript.push({ id: "a-k", role: "agent", channel: "text", text: "got it krish, that's a lot", ts: Date.now() });
+  const twiceName = await step("name-rate", nm, "ok krish, want me to draft it?");
+  check("name never twice in a row", twiceName.text === "ok, want me to draft it?" && twiceName.guards.includes("name held back (used it just now)"), twiceName.text);
+  const possessive = await step("name-rate", nm, "i'll keep krish's resume handy.");
+  check("name-rate leaves non-address uses alone", possessive.text === "i'll keep krish's resume handy.", possessive.text);
+  nm.transcript.push({ id: "a-1", role: "agent", channel: "text", text: "on it", ts: Date.now() }, { id: "a-2", role: "agent", channel: "text", text: "here you go", ts: Date.now() });
+  const laterName = await step("name-rate", nm, "ok krish, want me to draft it?");
+  check("name fine again after a couple of turns", laterName.text === "ok krish, want me to draft it?", laterName.text);
 
   // gmail link on a clear yes, even when the yes isn't first; "stop talking" yields (regressions from a live call)
   const onCall = async () => {
@@ -494,7 +553,7 @@ async function main() {
 
   // the guard pipeline runs in a fixed, named order (goodbye before hangup comes before the gmail rules, etc.)
   const order = GUARD_PIPELINE.map((g) => g.name);
-  check("guard pipeline order", order.join(",") === "avoid,force-end,placing-call,goodbye-before-hangup,hang-up-after-goodbye,gmail-by-the-book,no-repeat-gmail-ask,no-third-question,no-repeat-name-ask,no-false-sent,call-offer-and-link-claims,long-text-to-chat,link-said-aloud,no-repeat-questions", order.join(","));
+  check("guard pipeline order", order.join(",") === "avoid,force-end,placing-call,goodbye-before-hangup,hang-up-after-goodbye,gmail-by-the-book,no-repeat-gmail-ask,no-third-question,no-repeat-name-ask,no-accusing-or-assuming,name-rate,no-false-sent,call-offer-and-link-claims,long-text-to-chat,link-said-aloud,no-repeat-questions", order.join(","));
 
   // the intent table: every example it claims, it catches; every near miss, it doesn't
   for (const [name, d] of Object.entries(INTENTS)) {

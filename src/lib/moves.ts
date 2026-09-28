@@ -85,7 +85,7 @@ export const MOVES = {
     label: "mirror their words, reframe the real problem",
     source: "pink, to sell is human (2012): attunement + clarity; voss, never split the difference (2016): labeling",
     instruction:
-      "Play back what they said in THEIR words (short), name the real problem underneath it if there is one, and give one small piece of real advice or comfort they can use today. Specific to them, not a feature list. Don't ask for gmail in this same message.",
+      "Play back what they said in THEIR words (short), if they named a bigger problem underneath it, say it back in their words (never a guess of your own), and give one small piece of real advice or comfort they can use today. Specific to them, not a feature list. Don't ask for gmail in this same message.",
   },
   giveFirst: {
     id: "give-first",
@@ -119,7 +119,7 @@ export const MOVES = {
     label: "a light second try at a name, with a suggestion",
     source: "cialdini (1984): commitment through a small yes; brown & levinson (1987): easy to decline",
     instruction:
-      "Respond to what they said first. Then, lightly, since they never named you: suggest one name that fits what you've been doing together and ask if it works, e.g. \"btw, you never gave me a name. how about sage? or pick your own.\" One line, easy to ignore.",
+      "Respond to what they said first. Then, lightly, since there's no name for you yet: suggest one name that fits what you've been doing together and ask if it works, e.g. \"btw, want to name me? how about sage? or pick your own.\" One line, easy to ignore, never pointing out that they didn't name you.",
   },
   steerBack: {
     id: "steer-back",
@@ -174,7 +174,7 @@ export const EVENT_MOVES = {
   honest: { id: "honest-status", label: "say exactly what did and didn't happen", source: "grice (1975): maxim of quality" },
   greet: { id: "greet", label: "pick up where the texts left off", source: "dixon et al. (2013): never make them repeat themselves" },
   nudge: { id: "nudge", label: "left on read: one easy double text, then let it be", source: "pink, to sell is human (2012): buoyancy; brown & levinson (1987): low imposition" },
-  defaultName: { id: "default-name", label: "they skipped my name: a default they can change", source: "thaler & sunstein, nudge (2008): smart defaults; hulick (2014)" },
+  defaultName: { id: "default-name", label: "no name yet: a default they can change", source: "thaler & sunstein, nudge (2008): smart defaults; hulick (2014)" },
 } satisfies Record<string, Move>;
 
 export function chooseMove(s: Session, channel: Channel, opts: { callFirst: boolean; mayAsk: boolean }): MoveDef {

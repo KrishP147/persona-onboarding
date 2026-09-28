@@ -147,3 +147,9 @@ export const LAUGH_LEAD = new RegExp(`^\\s*${LAUGH_TOKEN}[!., ]+`, "iu");
 export const FENCE_TAGS = /<\/?\s*(user_said|email_content|tool_result)\b[^>]*>/gi;
 export const unfence = (t: string) => t.replace(FENCE_TAGS, "");
 export const fence = (tag: "user_said" | "email_content", t: string) => `<${tag}>${unfence(t)}</${tag}>`;
+
+// Pointing out what they didn't do reads as blame, even said lightly ("ha, you skipped my name").
+export const ACCUSING =
+  /\b(you (skipped|forgot|missed|ignored)\b|you never (gave|told|answered|named|replied|said|picked)|you (didn'?t|did not|haven'?t|have not) (answer|reply|respond|say|give|tell|name|pick|get back)|why (didn'?t|haven'?t|won'?t|wouldn'?t) you|did you forget|left me on read)/i;
+// A guess about them stated as fact. Say what they said, or ask.
+export const ASSUMING = /\b(sounds like you('re| are| have| must)|you must (be|have|feel)|you seem( to be)?|seems like you|you('re| are) (clearly|obviously|probably))\b/i;

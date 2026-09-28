@@ -4,7 +4,7 @@ import { EVENT_MOVES } from "../moves";
 import { type Ctx, emitAgentText, ensureCard, goodbyeLine, guard, msg, shortNeed } from "./context";
 import { CARD_ASK, NAME_ASK, SEND_REQUEST, gmailConsent, saidNow, userWrappingUp } from "./intents";
 import { runTool } from "./tools";
-import { CLAIMS_LINK, CLAIMS_SENT, GOODBYE, SENTENCE_BREAK, capSentences, cleanModelText } from "./text";
+import { ACCUSING, ASSUMING, CLAIMS_LINK, CLAIMS_SENT, GOODBYE, SENTENCE_BREAK, capSentences, cleanModelText } from "./text";
 
 // The gmail ask is written by code (one clear question, the reason, the reassurance, an easy no).
 export const GMAIL_ASK_MARK = "text you a link to connect your gmail";
@@ -251,6 +251,49 @@ export const GUARD_PIPELINE: GuardStep[] = [
         const kept = e.text.split(SENTENCE_BREAK).filter((x) => !NAME_ASK.test(x)).join(" ").trim();
         if (kept) e.fix("blocked repeat name question", kept);
       }
+    },
+  },
+  {
+    name: "no-accusing-or-assuming",
+    async run(e) {
+      // Never "you skipped..." / "why didn't you...", and never a guess about them stated as fact
+      // ("sounds like you're busy"). Only the offending sentence goes; bubbles keep their breaks.
+      const hits = new Set<string>();
+      const kept = e.text
+        .split(/\n\s*\n/)
+        .map((b) =>
+          b
+            .split(SENTENCE_BREAK)
+            .filter((x) => {
+              if (ACCUSING.test(x)) return !hits.add("dropped an accusing line");
+              if (ASSUMING.test(x)) return !hits.add("dropped a guess stated as fact");
+              return true;
+            })
+            .join(" ")
+            .trim(),
+        )
+        .filter(Boolean)
+        .join("\n\n");
+      if (!hits.size || !kept) return;
+      const [first, ...rest] = [...hits];
+      e.fix(first, kept);
+      for (const h of rest) guard(e.ctx, h);
+    },
+  },
+  {
+    name: "name-rate",
+    async run(e) {
+      // Their name about once every 3 turns, never twice in a row: past that it reads like a sales script.
+      // Only the name used to address them goes ("ok krish, ..."); "krish's resume" stays.
+      const n = (e.s.slots.userName.value ?? "").replace(/[^\p{L}\p{N}' -]/gu, "").trim();
+      if (n.length < 2) return;
+      const said = new RegExp(`\\b${n}\\b`, "i");
+      if (!said.test(e.text)) return;
+      const recent = e.s.transcript.filter((m) => m.role === "agent" && (!m.kind || m.kind === "text")).slice(-2);
+      if (!recent.some((m) => said.test(m.text))) return;
+      const vocative = new RegExp(`,\\s*${n}\\b(?!')|^\\s*${n},\\s*|\\b(hey|hi|ok|okay|so|sure|thanks|got it|oh|yeah)\\s+${n}\\b(?!')|\\s+${n}(?=\\s*[.!?]\\s*$)`, "gim");
+      const kept = e.text.replace(vocative, (m, w) => (w ? w : "")).replace(/\s+([.!?,])/g, "$1").trim();
+      if (kept && kept !== e.text) e.fix("name held back (used it just now)", kept);
     },
   },
   {

@@ -1,5 +1,5 @@
 import { type Attachment, type Channel, type Msg, type Session, type SlotKey, type TurnResult } from "../types";
-import { computeDirective, directiveText, recordAsk, MAX_CALL_OFFERS } from "../policy";
+import { computeDirective, directiveText, recordAsk, HOLD_MS, MAX_CALL_OFFERS } from "../policy";
 import { SYSTEM_PROMPT } from "../prompt";
 import { mockReply } from "../mock";
 import { provider, runToolLoop, type Part, type Turn } from "../llm";
@@ -268,7 +268,7 @@ export async function handleUserMessageInner(
     // "hold on a sec": a person just says "sure" and waits; no questions, no check-ins for a while.
     if (HOLD.test(clean) && clean.split(/\s+/).length <= 8) {
       s.call.holding = true;
-      const ctx: Ctx = { s, channel, actions: [{ type: "patience", ms: 90000 }], newMessages: [], move: EVENT_MOVES.silence };
+      const ctx: Ctx = { s, channel, actions: [{ type: "patience", ms: HOLD_MS }], newMessages: [], move: EVENT_MOVES.silence };
       emitAgentText(ctx, "sure, take your time.");
       return { session: s, newMessages: [userMsg, ...ctx.newMessages], chips: computeDirective(s, channel).chips, actions: ctx.actions };
     }
@@ -503,7 +503,7 @@ export async function handleUserMessageInner(
     const first = r.newMessages.findIndex((x) => x.role === "agent");
     r.newMessages.splice(first >= 0 ? first : r.newMessages.length, 0, m);
   }
-  if (channel === "voice" && s.call.holding && s.call.active) r.actions.push({ type: "patience", ms: 90000 });
+  if (channel === "voice" && s.call.holding && s.call.active) r.actions.push({ type: "patience", ms: HOLD_MS });
   // Image bytes were for this one reply; storing them would bloat every later read and write.
   if (userMsg.attachments?.some((a) => a.dataUrl)) {
     const i = s.transcript.indexOf(userMsg);
@@ -556,8 +556,7 @@ export function nameAck(name: string) {
   return INSULT_NAME.test(name.trim()) ? `ouch, ${name.toLowerCase()}? harsh, but i'll wear it. ${name} it is.` : `${name} it is.`;
 }
 
-export const SKIPPED_NAME = "hey, looks like you skipped my name. i'll go by persona for now, you can rename me anytime";
-export const SKIPPED_NAME_REPLY = "ha, you skipped my name. i'll go by persona for now, rename me anytime";
+export const SKIPPED_NAME_REPLY = "i'll go by persona for now, rename me anytime";
 
 // They didn't pick a name: go by "Persona" (a default they can change with one text) instead of stalling on it.
 export function defaultAgentName(s: Session) {

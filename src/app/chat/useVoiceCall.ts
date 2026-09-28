@@ -30,7 +30,7 @@ type Rec = {
 
 // People tolerate a lot more quiet on a call with someone who is there for them than a form does;
 // quiet is fine: the only check-in comes after 20s (10s at the start of a call, in case they can't hear us).
-const SILENCE_MS = 20000;
+const SILENCE_MS = 25000; // first silence window; later windows come from the server (policy.ts silence ladder)
 const TURN_END_COMPLETE_MS = 700;
 const TURN_END_MIDPHRASE_MS = 850;
 const TURN_END_SPELLING_MS = 1400;
