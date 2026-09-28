@@ -2,11 +2,59 @@
 
 [![CI](https://github.com/KrishP147/persona-onboarding/actions/workflows/ci.yml/badge.svg)](https://github.com/KrishP147/persona-onboarding/actions/workflows/ci.yml)
 
-an onboarding for a persona style personal assistant, built as a phone simulator in the browser: a text thread plus a voice call. it tries to learn four things (a name for the agent, a name for the user, a connected gmail, and something they need help with), gets the agent's name over text, and tries the rest over a call. mostly though, it tries to feel like meeting a genuinely helpful person, and to hold up when people don't play along.
+**live: https://persona-onboarding-gold.vercel.app** (chrome or edge for the call; the reasoning map runs side by side with the phone from 1024px up)
 
-live: https://persona-onboarding-gold.vercel.app (chrome or edge for the call)
+<!-- GIF placeholder: 20s loop of a text, the call, a hangup mid-sentence, and the recap text landing. record it last, save as docs/design/demo.gif, and add ![demo](docs/design/demo.gif) here. -->
 
-if you only read one thing, read the journal. it's how my understanding of this challenge changed, and why the bot behaves the way it does.
+a landing page in persona's own design language, then an onboarding for a persona style personal assistant, built as a phone in the browser: a text thread plus a voice call. the landing page says plainly, top and bottom, that it's *"a trial demo by Krish for Persona, not the real product"*, with a link to the real yourpersona.com.
+
+- **it meets you like a person.** it texts in one or two short bubbles, jokes a little, never guesses about you or points out what you didn't do, double texts once if you leave it on read (only when it's actually waiting on an answer from you), and says a real goodbye before every hangup, then texts you after every call.
+- **it gets four things without feeling like a form:** a name for the agent, your name, what you need help with, and your gmail (real sign-in, or a demo inbox if google won't let you in). you can skip ahead anytime.
+- **it helps before it asks.** once gmail is in, it triages your inbox and only interrupts for something that costs you if you wait. it drafts replies (`save_draft`) and only sends (`send_email`) after you've seen the draft and said "send", with 5 seconds to undo. a reply or follow-up reuses the same gmail thread and the last person you emailed, a "follow up on that email" chip shows up right after a send, and editing an email that already went out gets a plain warning that a second send would be a duplicate, not silence. a "what i know about you" card, shown at your first graduation or whenever you ask, lets you edit or forget any of it.
+- **it's a phone you can pick.** iphone, pixel or galaxy skins, light/dark/system theme, typing hints you can turn off, and a restart, all from the top bar (or the ⋮ menu on phones).
+
+most onboarding bots hide their logic in a prompt, so you find out what they do by poking at them. this one's logic is in code you can watch: the "examine reasoning" pill (top right on desktop, in the ⋮ menu on phones) opens the move it made for that turn, the research behind it, and every time code stepped in to fix a reply (a leaked internal note, a claim it couldn't back up, a missing goodbye) as "checks that ran" chips. the model writes the words. code decides what has to happen.
+
+> **coming next, not yet on master (`krish/draft-card-composer`):** the draft card collapses with an expand arrow, and gets `Edit` (inline, in place of asking for changes over chat) and `Discard` next to `Send` / `Not yet`, plus an auto-growing composer with a character count. <!-- TODO-verify: confirm this shipped, then fold it into the `save_draft`/`send_email` bullet above and delete this callout. -->
+
+## try to break it
+
+[STRESS_TESTS.md](STRESS_TESTS.md) lists 15 ways people break onboardings (silence, hanging up mid-sentence, refusing every question, "haha" as an answer, prompt injection, a poisoned email) with the code that handles each, the smoke check that proves it, and its harness score. the table is generated from the source, and CI fails if it goes stale. please try the same things on the live link.
+
+## numbers
+
+| what | number | source |
+|---|---|---|
+| time to first value | **median 50s** from opening the chat to inbox triage or a draft (23 sessions) | [FUNNEL.md](FUNNEL.md) |
+| harness score | **8.9 / 10** avg over 16 simulated difficult users (round 3; 7.9 in round 1) | [harness/ROUNDS.md](harness/ROUNDS.md) |
+| cost | **$0.0152 per onboarding**, $0.0030 per reply (claude haiku 4.5, the model used for the harness runs above) | `pnpm metrics` |
+| latency | **p50 2.0s, p95 4.8s** per reply | `pnpm metrics` |
+| checks | 229 keyless smoke checks in CI (`pnpm -s smoke \| grep -c PASS`), 25 browser checks with a fake mic, 23 manual scripts | `pnpm smoke`, `pnpm e2e`, [docs/manual-tests.md](docs/manual-tests.md) |
+| post-fix funnel | _placeholder: `pnpm funnel --since <deploy time>` after friends try it_ | [FUNNEL.md](FUNNEL.md) |
+| eval | _placeholder: final harness round_ | [harness/ROUNDS.md](harness/ROUNDS.md) |
+
+honest caveats: the funnel is a development-period baseline (our own testing plus a few friends), and the latency number is turn time read from transcripts, so it runs a little high. new sessions record real model latency and cost per turn in `session.metrics`.
+
+## how it's built
+
+every message, typed or spoken, goes through the same five steps:
+
+1. **parse** (code): what did they actually say? names, yes or no, bye, "no calls", "skip this". a small model pass pulls out names and needs in parallel.
+2. **decide** (code): what's still missing, whether to offer a call, and which one conversation move to make this turn (e.g. "ask about a specific recent moment", from *the mom test*).
+3. **generate** (model): gemini 2.5 flash by default (free tier, with a chain of fallback gemini models), or claude when `LLM_PROVIDER=anthropic` is set, writes the words and can use tools (look something up, read the inbox, draft an email). what the user typed, what tools returned, and email text all reach it fenced as data, never instructions.
+4. **guard** (code): 31 named safety nets, run as one ordered pipeline in `guards.ts`, check the reply. a leaked internal note gets dropped, a "sent!" that wasn't sent gets corrected, a third question in a row gets cut, a hangup without a goodbye gets one. the email tools add their own checks on top: no address that wasn't given by the user or a real inbox, and a plain warning before anything that would be a duplicate send.
+5. **commit** (code): the session is saved, with the move, the guards, and the turn's cost and latency.
+
+the engine lives in `src/lib/engine/` (turn, events, tools, intents, guards, text). text and voice share one redis session, so anything said on the call is known in the texts and the other way round. links you get in text stay usable if you move to a call, and a link the agent says is in your texts is only claimed once it's actually there. the call is a browser simulation: deepgram listens, elevenlabs (then cartesia, then deepgram aura) speaks, and both fall back to the browser's own speech apis.
+
+**code decides:** when to offer a call and when to ring, the gmail ask's wording and timing (including sending the link mid-call), goodbyes, the recap after every call, when to hang up on silence, what counts as a yes, what's worth interrupting you for, sending email, refusing anything that only came from an email, and refusing to send to an address the user never gave.
+**the model decides:** the words, how to help with whatever you bring, and what to look up.
+
+one page with the diagram, the guard list, failure modes and costs: [docs/architecture.md](docs/architecture.md). what i'd do in my first 30 days at persona: [docs/first-30-days.md](docs/first-30-days.md).
+
+## how i thought about it
+
+the journal is how my understanding changed, and why the bot behaves the way it does.
 
 - [01. reading the brief (and then reading it again)](docs/journal/01-reading-the-brief.md)
 - [02. trying their onboarding](docs/journal/02-trying-their-onboarding.md)
@@ -20,82 +68,34 @@ if you only read one thing, read the journal. it's how my understanding of this 
 - [10. being there](docs/journal/10-being-there.md)
 - [11. persona calls persona](docs/journal/11-persona-calls-persona.md)
 - [12. the user leads](docs/journal/12-the-user-leads.md)
+- [13. left on read](docs/journal/13-left-on-read.md)
+- [14. phone skins and "why it said that"](docs/journal/14-phone-skins-and-why.md)
+- [15. the graduation card, and a yes you can take back](docs/journal/15-graduation-card.md)
+- [16. dead mic](docs/journal/16-dead-mic.md)
+- [17. checking who's actually there](docs/journal/17-typing-presence.md)
+- [18. reasoning map and dark mode](docs/journal/18-reasoning-map-and-dark-mode.md)
 - [reading list](docs/reading-list.md)
+
+## how i built it with agents
+
+i built this with ai agents, the way i'd want a small team to work. one orchestrator session held the plan and split it into lanes (engine, voice, ui, safety, docs), and planner, implementer and verifier agents picked up one task each, on their own branch or worktree, each ending in a short handoff document so the next session (agent or me) could pick the thread back up without re-reading the whole codebase. early on, merges waited on the local smoke checks; once CI existed, they waited for it to pass on the exact commit being merged. every change had to hold up against the same smoke checks, harness personas and stress matrix, which is a big part of why those exist. the commit log is the honest record of that process: small, one-change-at-a-time commits, several of them explicitly "fixes from user retest" after i drove the live app myself and something didn't hold up.
 
 ## running it
 
 ```bash
 pnpm install
-cp .env.example .env.local   # add GEMINI_API_KEY (or ANTHROPIC_API_KEY). with neither, it runs in a mock mode
+cp .env.example .env.local   # GEMINI_API_KEY for the default path, or ANTHROPIC_API_KEY + LLM_PROVIDER=anthropic. with neither, a mock mode
 pnpm dev                      # http://localhost:3000 (chrome or edge for the voice call)
-pnpm smoke                    # checks the safety nets, no key needed
-pnpm harness                  # 15 simulated difficult users vs the live bot, graded (dev server running, ALLOW_TEST_EVENTS=1). prints its cost
+pnpm smoke                    # 229 keyless checks of the safety nets
+pnpm stress-matrix            # regenerates STRESS_TESTS.md from the source
+pnpm harness                  # 16 simulated difficult users vs a local dev server, graded (ALLOW_TEST_EVENTS=1). prints its cost
 pnpm metrics                  # latest harness run as one table: p50/p95 latency, $ per onboarding
-pnpm e2e                      # real chrome walkthrough with a fake mic: 25 checks + screenshots in harness/e2e/
-# with a real mic: docs/manual-tests.md (19 voice + text scripts)
+pnpm funnel                   # real-user funnel from prod sessions (read-only, aggregate only)
+pnpm e2e                      # real chrome walkthrough with a fake mic: 25 checks + screenshots
 ```
 
-## how it fits together
+## tests and CI
 
-```
-browser: phone ui, text thread, call screen
-   │  voice: mic → deepgram (short lived token from /api/voice/token), speech ← cartesia (/api/voice/tts)
-   │         both fall back to the browser's own speech apis
-   │  /api/chat      what the user said (typed or spoken)
-   │  /api/session   things that happened (call started, hung up, silence, gmail connected...)
-   ▼
-engine
-   ├─ policy (plain code): what's missing, how many times we've asked, when to offer a call, when to graduate
-   ├─ mood gauge (plain code): how the person seems right now, which changes how the agent talks
-   └─ llm (gemini by default, claude optional): writes the words, uses a few tools (save a name, send the gmail link, start or end a call, graduate)
-   ▼
-one session per person, shared by text and voice
-```
+every push and PR to `master` runs `.github/workflows/ci.yml`, keyless (no api keys, mock mode): `next typegen`, `tsc` typecheck, lint, the 229 smoke checks, 2000 seeded fuzzed event sequences with invariants checked after each step, a regenerate-and-diff of `STRESS_TESTS.md` (fails if the table has drifted from the source), and a production build. the harness (`pnpm harness`, 16 simulated difficult users, LLM-graded) and the real-browser `pnpm e2e` walkthrough need a model key and aren't run in CI; they're run by hand and recorded in [harness/ROUNDS.md](harness/ROUNDS.md).
 
-models: gemini 2.5 flash by default, walking a chain of gemini models when one is out of free quota, with an optional capped claude fallback (`LLM_FALLBACK=anthropic`, see `.env.example`). the free tier is small (some models allow 20 requests a day), so don't run the full harness on the key the demo uses.
-
-the short version of the philosophy: the model talks, code decides. anything that must always happen (a goodbye before hanging up, a text after every call, never asking the same thing three times) lives in code, not in a prompt.
-
-## where things are
-
-- `src/lib/prompt.ts`: who the agent is and how it treats people
-- `src/lib/policy.ts`: the onboarding rules
-- `src/lib/mood.ts`: reading the user
-- `src/lib/engine.ts`: turns, tools, events, the goodbye and recap safety nets
-- `src/lib/llm.ts`: the model layer (gemini or claude)
-- `src/lib/triage.ts`: what in their inbox deserves an interruption, and logging whether it was acted on
-- `src/app/chat/useVoiceCall.ts`: turn taking on the call (pauses, interruptions, silence, locked voice), deepgram and cartesia
-- `src/app/api/voice/`: speech token and text to speech routes
-- `harness/`: the difficult users and the grader
-- `scripts/smoke.ts`: keyless checks
-
-## numbers
-
-from the last full harness run (`pnpm metrics`, claude haiku 4.5 as the agent):
-
-| metric | value |
-|---|---|
-| p50 latency | 2.0s |
-| p95 latency | 4.8s |
-| $ / onboarding | $0.0152 |
-| $ / reply | $0.0030 |
-
-that run predates the turn meter, so latency there is turn time read from transcripts (their text to our next one, extractor included), a little high. new sessions record real model latency and $ per turn in `session.metrics`.
-
-## status
-
-- [x] text thread, call screen, shared session, events
-- [x] silence ladder, guaranteed goodbye and recap, interruptions, locked voice, mood gauge
-- [x] keyless smoke test, stress harness
-- [x] run the harness with a real key and tune from the results (journal 06)
-- [x] google sign in for gmail in a popup so the call survives it (demo account when no client is configured)
-- [x] offline retry, multi tab sync, call me back, deploy ready session store
-- [x] better voice: deepgram streaming speech to text, cartesia text to speech, one fixed voice per style
-- [x] deploy (vercel + upstash, auto deploys from master)
-- [x] persona's own flow: scripted intro with the legal link, name first, save contact card, "calling you now", call on a second phone
-- [x] feels like texting a person: instant send, read receipts, typing pace, 👀 on long messages, the occasional gif
-- [x] research as code: one conversation move per turn, shown in the "why it said that" panel (journal 03)
-- [x] inbox triage: interrupt only when waiting costs them something (journal 07)
-- [x] browser end to end test with a fake mic (`pnpm e2e`)
-- [ ] a real voice call with a real mic, tested by a person
-- [ ] loom walkthrough
+prod runs on vercel + upstash, auto-deploying from `master`, on gemini 2.5 flash by default. the harness numbers above were measured on claude haiku 4.5 (`LLM_PROVIDER=anthropic`) under a hard spend cap (`CLAUDE_BUDGET_USD`, checked before every call), since that's the config the grading actually ran against.
