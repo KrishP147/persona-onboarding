@@ -100,8 +100,14 @@ export default function HeroPhone() {
         style={{ width: W, height: H, transform: `scale(${scale})`, transformOrigin: "top center", marginLeft: `calc(50% - ${W / 2}px)` }}
       >
         <div className="relative h-[687px] w-[596.443px] shrink-0">
-          {/* vignetted landscape */}
-          <div className="pointer-events-none absolute left-0 top-0 h-[640.29px] w-[596.443px] rounded-[199px] opacity-40 dark:opacity-30">
+          {/* vignetted landscape (light). in dark the misty photo just reads as murk, so a soft cool glow
+              stands in for it, like light off the band's ring */}
+          <div
+            aria-hidden
+            className="pointer-events-none absolute left-0 top-0 hidden h-[640.29px] w-[596.443px] dark:block"
+            style={{ background: "radial-gradient(closest-side, rgba(126,150,210,.22), rgba(126,150,210,.08) 55%, transparent)" }}
+          />
+          <div className="pointer-events-none absolute left-0 top-0 h-[640.29px] w-[596.443px] rounded-[199px] opacity-40 dark:hidden">
             <div className="absolute inset-0 overflow-hidden rounded-[199px]">
               <img
                 src="/brand/hero-landscape.jpg"

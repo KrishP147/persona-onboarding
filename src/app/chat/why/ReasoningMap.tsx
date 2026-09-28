@@ -130,6 +130,16 @@ export function ReasoningMap({
     setPopH(popRef.current ? popRef.current.offsetHeight + 8 : 0);
   }, [activeId, how, w]);
 
+  // once the graph overflows, leave one row of room after it, so scrolling can always stop on a
+  // row's top edge (a sliced row under the track read as a glitch). no room when it all fits.
+  const [tail, setTail] = useState(0);
+  useLayoutEffect(() => {
+    const box = boxRef.current;
+    const g = graphRef.current;
+    if (!box || !g) return;
+    setTail(g.offsetHeight > box.clientHeight - 24 ? NODE_H + GAP : 0);
+  }, [graphH, w, turns.length, popH]);
+
   // keep the open or focused node in view inside the map's own scroller
   const reveal = (id: string, withPop = false) => {
     const box = boxRef.current;
@@ -145,8 +155,8 @@ export function ReasoningMap({
     else if (bottom > box.scrollTop + box.clientHeight) {
       // land on a step's top edge, so the first row in view is whole, not sliced under the track
       const need = bottom - box.clientHeight;
-      const edge = steps.map((x) => g.offsetTop + x.y - 12).find((y) => y >= need && y - need < NODE_H);
-      // no room below to snap (the end of the graph): stop at need; the top fade softens the cut
+      const edge = steps.map((x) => g.offsetTop + x.y - 12).find((y) => y >= need);
+      // the tail spacer leaves room to snap; if it still can't, stop at need
       const room = box.scrollHeight - box.clientHeight;
       box.scrollTo({ top: Math.min(top, edge !== undefined && edge <= room ? edge : need), behavior });
     }
@@ -256,6 +266,7 @@ export function ReasoningMap({
       <div
         ref={boxRef}
         onScroll={(e) => setScrolled(e.currentTarget.scrollTop > 2)}
+        style={{ paddingBottom: 20 + tail }}
         className={`relative min-h-0 overflow-y-auto overscroll-contain px-5 pb-5 pt-1 border-t transition-[border-color] duration-150 ${scrolled ? "border-step-200 [mask-image:linear-gradient(to_bottom,transparent,#000_28px)]" : "border-transparent"}`}
       >
         <div
