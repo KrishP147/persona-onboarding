@@ -2,7 +2,7 @@
 // imessage on ios 26 (liquid glass), light. values from docs/design/phone-ui-spec.md A1
 import type { CSSProperties, ReactNode } from "react";
 import type { BubbleProps, CallProps, ComposerProps, HeaderProps, Pos, RichCardProps, Skin } from "./types";
-import { AGENT_NUMBER, BubbleBody, BubbleIcon, GoogleG, MicIcon, PersonaLogo, PersonSilhouette, PhoneIcon, RecTimer, callLog, eventKind, isToday, time, useClock, useElapsed } from "./shared";
+import { AGENT_NUMBER, BubbleBody, BubbleIcon, GoogleG, MicIcon, PauseIcon, PersonaLogo, PersonSilhouette, PhoneIcon, RecTimer, callLog, eventKind, isToday, time, useClock, useElapsed } from "./shared";
 
 const BLUE = "#0088FF";
 const RECV = "#E9E9EB";
@@ -390,7 +390,8 @@ function UnknownNotice() {
 
 function CallScreen(p: CallProps) {
   const timer = useElapsed(p.startedAt);
-  const state = p.muted ? "muted" : p.speaking ? "speaking" : p.listening ? "listening" : "";
+  const holdTimer = useElapsed(p.heldAt ?? null);
+  const state = p.held ? "" : p.muted ? "muted" : p.speaking ? "speaking" : p.listening ? "listening" : "";
   const circle = "w-[72px] h-[72px] rounded-full flex items-center justify-center";
   const glassDark: CSSProperties = { background: "rgba(255,255,255,.16)", backdropFilter: "blur(20px)", WebkitBackdropFilter: "blur(20px)", border: ".5px solid rgba(255,255,255,.18)" };
   return (
@@ -410,14 +411,14 @@ function CallScreen(p: CallProps) {
           {p.status === "connecting" && "calling…"}
           {p.status === "active" && (
             <>
-              <span className="tabular-nums">{timer}</span>
+              <span className="tabular-nums">{p.held ? `on hold · ${holdTimer}` : timer}</span>
               {state && <span className="text-white/50"> · {state}</span>}
             </>
           )}
           {p.status === "ended" && "Call Ended"}
         </div>
       </div>
-      {p.status === "active" && (
+      {p.status === "active" && !p.held && (
         <div className="mt-8 px-8 space-y-3 text-[16px] leading-[21px] text-center max-w-full">
           {p.said && (
             <div data-caption="agent" className="text-white/90">
@@ -460,6 +461,14 @@ function CallScreen(p: CallProps) {
                   <MicIcon off={p.muted} size={26} />
                 </button>
                 <span className="text-[12px]" aria-hidden>{p.muted ? "Unmute" : "Mute"}</span>
+              </div>
+            )}
+            {p.onHold && p.status === "active" && (
+              <div className="flex flex-col items-center gap-1.5">
+                <button onClick={p.onHold} aria-pressed={!!p.held} aria-label={p.held ? "Unhold" : "Hold"} className={`${circle} ${p.held ? "bg-white text-black" : ""}`} style={p.held ? undefined : glassDark}>
+                  <PauseIcon size={26} />
+                </button>
+                <span className="text-[12px]" aria-hidden>{p.held ? "Unhold" : "Hold"}</span>
               </div>
             )}
           </div>

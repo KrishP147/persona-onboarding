@@ -54,6 +54,9 @@ export interface CallProps {
   onHangup: () => void;
   muted?: boolean;
   onMute?: () => void;
+  held?: boolean;
+  heldAt?: number | null;
+  onHold?: () => void;
   onHide?: () => void;
   unread?: number;
 }

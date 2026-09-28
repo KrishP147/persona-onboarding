@@ -10,6 +10,18 @@ a quiet room is not silent. even with noise suppression on, a live mic has a noi
 
 it also listens to the track itself: the browser says "mute" when the os stops sending audio and "ended" when the device goes away. either one counts right away. when sound comes back, the prompt goes away on its own.
 
+## what that got wrong
+
+the first version fired on people who were just being quiet. the analyser was reading the call's own stream, the one with echo cancelling, noise suppression and auto gain turned on. in a quiet room chrome's noise suppression does its job too well: it gates the floor down to nothing, and after the 16 bit step (about 3e-5) that is exact zeros. so rms under 1e-4 for 4 seconds was true for a working mic and a person thinking. the thing i called "no signal" was really "the cleanup ate the signal".
+
+now zeros on the processed stream only mean "go check". the rules:
+
+- the track ended: dead, right away.
+- the track says muted and stays muted for 4 seconds: dead. a blip of mute while the os switches something is not.
+- the processed stream is exact zeros (peak under 1e-6, not an rms) for 4 seconds: open a second, raw capture of the same mic with all the processing off, and listen for about a second. a live mic always has some hiss on the raw side. if the raw side hears anything, it's a quiet person, and it doesn't check again for 30 seconds. only if the raw side is zeros too is the mic dead. if the raw capture can't open, it doesn't nag.
+
+quiet is left to the silence timer, which checks in and eventually offers to hang up. the mic prompt is only for a mic that sends nothing.
+
 muting yourself in the call is different. that's on purpose, so the check pauses while you're muted and starts over when you unmute. it never nags you about a mic you switched off.
 
 ## what it asks
@@ -27,6 +39,7 @@ one audio context per call, closed on hangup, every listener removed. nothing ab
 ## known gaps
 
 - with deepgram, a swap opens a fresh session on the new mic and closes the old one once the new one is up. one socket, one recording, so deepgram never sees a second audio header mid stream and its clock starts at the new session. if the new session can't open, the call falls back to browser speech. there's a short overlap where both sockets are open, and i haven't run it against the real service yet.
+- the raw check opens the same mic a second time with different processing. chrome allows that, but i haven't confirmed on real hardware it never nudges the call's own echo cancelling for that second. it only runs after 4 seconds of exact zeros, at most every 30 seconds.
 - the browser speech fallback uses its own mic (the system default), so picking a mic there changes what the level check hears, not what the recognizer hears.
 
 ## sources
