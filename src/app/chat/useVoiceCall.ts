@@ -403,14 +403,20 @@ export function useVoiceCall(opts: {
       el.play().catch(() => finish(false));
     });
 
-  const armSilence = useCallback(() => {
+  const flushRef = useRef<() => void>(() => {}); // flushTurn, set once it exists below
+  const armSilence = useCallback(function arm() {
     clear(silenceTimer);
     if (micOff()) return; // unmute / unhold arms it again
     const wait = patienceRef.current ?? SILENCE_MS;
     silenceTimer.current = setTimeout(() => {
       patienceRef.current = null;
-      const idle = activeRef.current && !micOff() && !waitingRef.current && queueRef.current === 0 && !bufferRef.current;
-      if (idle) optsRef.current.onSilence();
+      if (!activeRef.current || micOff()) return;
+      const idle = !waitingRef.current && queueRef.current === 0 && !bufferRef.current;
+      if (idle) return optsRef.current.onSilence();
+      // Not idle when it fired: this used to drop the ladder for good (a call sat silent for 4 minutes after one
+      // check-in). Speech stuck in the buffer (a turn that never went out) goes now; otherwise look again later.
+      if (bufferRef.current.trim() && !waitingRef.current && queueRef.current === 0) flushRef.current();
+      else arm();
     }, wait);
   }, []);
 
@@ -828,6 +834,9 @@ export function useVoiceCall(opts: {
       if (queueRef.current === 0) armSilence();
     });
   }, [armSilence, speak]);
+  useEffect(() => {
+    flushRef.current = flushTurn;
+  }, [flushTurn]);
 
   // Mic off or on: the track goes silent, the deepgram recorder pauses (nothing is sent), and the
   // fallback recognizer stops; back on, all of it resumes.
