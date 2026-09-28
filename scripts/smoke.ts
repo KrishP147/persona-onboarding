@@ -1,6 +1,6 @@
 // Keyless smoke test of the engine's safety nets (mock mode). Run: pnpm tsx scripts/smoke.ts
 import { loadSession, newSession, saveSession, withSession } from "../src/lib/store";
-import { cleanModelText, fence, handleEvent, softenGmailDemand, handleUserMessage, nowLine, parseTypedEmail } from "../src/lib/engine";
+import { cleanModelText, fence, handleEvent, saysBye, softenGmailDemand, handleUserMessage, nowLine, parseTypedEmail } from "../src/lib/engine";
 import { readMood } from "../src/lib/mood";
 import { DEMO_INBOX, scoreItem } from "../src/lib/triage";
 import type { TurnResult } from "../src/lib/types";
@@ -179,6 +179,10 @@ async function main() {
   const later = await handleEvent(g3, { type: "gmail_connected" });
   const laterMsg = later.newMessages.find((m) => m.role === "agent" && !m.kind);
   check("intent only read on their own turn", !later.actions.some((a) => a.type === "end_call" || a.type === "graduate") && !!laterMsg?.guards?.includes("ignored: not user-said") && g3.turnBy === undefined, JSON.stringify(laterMsg?.guards));
+  // bye only as their last words, never negated, and "call me back" is a callback
+  const byes = ["ok thanks, bye", "that's all for now. talk soon!", "gotta go"];
+  const notByes = ["don't hang up yet", "bye! oh wait, one more thing", "call me back later", "i'm not done", "i'll do the rest later, can you check my inbox?"];
+  check("bye only as their last words", byes.every((x) => saysBye(x)) && !notByes.some((x) => saysBye(x)), [...byes.filter((x) => !saysBye(x)), ...notByes.filter((x) => saysBye(x))].join(" | "));
   const cancel = await handleEvent(newSession(), { type: "gmail_failed", error: "access_denied" });
   check("oauth cancel treated as a choice", /no worries/.test(said(cancel)), said(cancel));
 

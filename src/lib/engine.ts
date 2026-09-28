@@ -278,11 +278,27 @@ export function guard(ctx: Ctx, label: string) {
   if (!g.includes(label)) g.push(label);
 }
 
+// The phrases that hang up a call with no model involved (stricter than USER_BYE: no bare "later" or "i'm good").
+const CLEAR_BYE = /\b(end (the |this )?call|hang up|you can go|let'?s end|bye|goodbye|gotta go|got to go|talk (to you )?(soon|later)|see (you|ya)|that'?s all|that'?s it)\b/i;
 const WANTS_OUT = /\b(skip|not now|later|no more questions|stop asking|just (help|do|get)|let'?s (just )?(start|go)|that'?s (it|all)|i'?m good|i'?m done|enough setup|just let me (use|try)|stop)\b/i;
 // They're wrapping up: only then does the agent hang up on its own.
-const USER_BYE = /\b(end (the |this )?call|hang up|you can go|let'?s end|that'?s enough|bye|goodbye|gotta go|got to go|have to go|need to go|talk (to you )?(soon|later)|that'?s (all|it)|i'?m (done|good|all set)|see (you|ya)|later|hang up|nothing else)\b/i;
+const USER_BYE = /\b(end (the |this )?call|hang up|you can go|let'?s end|that'?s enough|bye|goodbye|gotta go|got to go|have to go|need to go|talk (to you )?(soon|later)|that'?s (all|it)|i'?m (done|good|all set)|see (you|ya)|catch you later|later then|laters|hang up|nothing else)\b/i;
+// "don't hang up", "i'm not done", "no need to go": the opposite of a bye.
+const DONT_BYE = /\b(don'?t|do not|not|never|no need to)\b[^.!?]{0,12}\b(hang up|go|end|leave|done|bye)\b/i;
+// "call me back later" asks for a callback, not a goodbye.
+const CALLBACK = /\b(call|ring) me (back|later|tomorrow|tonight|again|in (a|an|\d))/i;
+// A bye counts only as their last words: "bye! oh wait, one more thing" is still talking.
+export function saysBye(text: string, phrases: RegExp = USER_BYE) {
+  const t = text.trim();
+  if (!t || DONT_BYE.test(t) || CALLBACK.test(t)) return false;
+  const parts = t.split(SENTENCE_BREAK).filter((x) => x.trim());
+  const last = parts[parts.length - 1] ?? "";
+  // A question at the end means they're still talking ("i'll do it later, can you check my inbox?").
+  if (last.trim().endsWith("?")) return false;
+  return phrases.test(last) && last.split(/\s+/).length <= 10;
+}
 function userWrappingUp(s: Session) {
-  return USER_BYE.test(saidNow(s));
+  return saysBye(saidNow(s));
 }
 
 // The gmail link goes out only after a yes: they asked for it, or said yes to our question about it.
@@ -1011,7 +1027,7 @@ async function handleUserMessageInner(
     // "i'll let you know once it's connected": they're off doing something, so wait like after "hold on".
     s.call.holding = WAITING_ON_THEM.test(clean);
     // They said bye: say it back (always, and audibly), then hang up. No model, nothing to go wrong.
-    if (/\b(end (the |this )?call|hang up|you can go|let'?s end|bye|goodbye|gotta go|got to go|talk (to you )?(soon|later)|see (you|ya)|that'?s all|that'?s it)\b/i.test(clean) && !/\b(don'?t|do not|not)\b[^.!?]{0,10}\b(hang up|end)/i.test(clean) && clean.split(/\s+/).length <= 12 && s.call.active) {
+    if (saysBye(clean, CLEAR_BYE) && clean.split(/\s+/).length <= 12 && s.call.active) {
       const name = s.slots.userName.value;
       const ctx: Ctx = { s, channel, actions: [], newMessages: [], move: EVENT_MOVES.recap };
       emitAgentText(ctx, `okay, bye${name ? ` ${name}` : ""}! i'll text you a quick recap.`);
@@ -1407,7 +1423,7 @@ async function handleEventInner(s: Session, e: SessionEvent): Promise<TurnResult
       const nudges = countNudges(since);
       if (nudges >= MAX_IDLE_NUDGES) return idle();
       // They signed off ("thanks, bye"), or we already said goodbye: nothing to chase.
-      if (lastUserIdx >= 0 && USER_BYE.test(s.transcript[lastUserIdx].text) && nudges === 0) return idle();
+      if (lastUserIdx >= 0 && saysBye(s.transcript[lastUserIdx].text) && nudges === 0) return idle();
       const ctx: Ctx = { s, channel: "text", actions: [], newMessages: [], move: EVENT_MOVES.nudge };
       const name = s.slots.userName.value;
       if (nudges >= 1) {
