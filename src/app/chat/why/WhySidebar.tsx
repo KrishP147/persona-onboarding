@@ -27,67 +27,151 @@ export function WhySidebar({
   height: number;
 }) {
   const [howOpen, setHowOpen] = useState(false);
+  const boxRef = useRef<HTMLDivElement>(null); // the lane's scroller
   const laneRef = useRef<HTMLOListElement>(null);
   const cardRefs = useRef(new Map<string, HTMLLIElement>());
+  const ys = useRef(new Map<string, { y: number; h: number }>());
+  const quietUntil = useRef(0); // lane scrolls we made ourselves don't drive the thread
+  const seen = useRef("");
+  const lastSc = useRef(0);
 
-  // place each card level with its bubble; push apart on collision, the active one wins its spot
+  // thread px -> lane px (the framed phone is css-zoomed, the lane isn't)
+  const ratio = (sc: HTMLElement) => sc.getBoundingClientRect().height / (sc.offsetHeight || 1) || 1;
+
+  const scrollLane = useCallback((top: number, smooth = false) => {
+    const box = boxRef.current;
+    if (!box || Math.abs(box.scrollTop - top) < 1) return;
+    quietUntil.current = performance.now() + (smooth ? 700 : 120);
+    const reduced = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+    box.scrollTo({ top, behavior: smooth && !reduced ? "smooth" : "auto" });
+  }, []);
+
+  // bring a card fully into the lane's view
+  const showCard = useCallback(
+    (id: string, smooth = true) => {
+      const box = boxRef.current;
+      const c = ys.current.get(id);
+      if (!box || !c) return;
+      const pad = 12;
+      const foot = 32; // clear of the lane's bottom fade
+      if (c.y < box.scrollTop + pad) scrollLane(Math.max(0, c.y - pad), smooth);
+      else if (c.y + c.h > box.scrollTop + box.clientHeight - foot) scrollLane(Math.min(c.y - pad, c.y + c.h - box.clientHeight + foot), smooth);
+    },
+    [scrollLane],
+  );
+
+  // the lane scrolls with the thread; past the thread's end it keeps going on its own
+  const follow = useCallback(() => {
+    const sc = scrollRef.current;
+    const box = boxRef.current;
+    if (!sc || !box) return;
+    const target = Math.round(sc.scrollTop * ratio(sc));
+    const down = sc.scrollTop >= lastSc.current;
+    lastSc.current = sc.scrollTop;
+    // the lane may run ahead (a newer card below the thread's end): only the thread going up pulls it back
+    if (down && box.scrollTop > target) return;
+    scrollLane(target);
+  }, [scrollRef, scrollLane]);
+
+  // place each card level with its bubble (in thread content coords, so scrolling moves both together);
+  // push apart on collision, the active one wins its spot. turns without a bubble (the call) follow in order.
   const layout = useCallback(() => {
     const lane = laneRef.current;
-    if (!lane) return;
-    const top0 = lane.getBoundingClientRect().top;
+    const box = boxRef.current;
+    const sc = scrollRef.current;
+    if (!lane || !box || !sc) return;
+    const k = ratio(sc);
+    // offsetTop, not rects: bubbles animate in with transforms, and offsets don't move with scroll
+    const shift = sc.getBoundingClientRect().top - box.getBoundingClientRect().top;
     const items = turns.map((t) => {
       const el = cardRefs.current.get(t.m.id);
-      const bubble = document.querySelector(`[data-msg-id="${t.m.id}"]`);
-      return { id: t.m.id, el, h: el?.offsetHeight ?? 0, want: bubble ? bubble.getBoundingClientRect().top - top0 : null, y: 0 };
+      const bubble = sc.querySelector<HTMLElement>(`[data-msg-id="${t.m.id}"]`);
+      return { id: t.m.id, el, h: el?.offsetHeight ?? 0, want: bubble ? bubble.offsetTop * k + shift : null, y: 0 };
     });
-    let prev = -Infinity;
+    let prev = 0;
     items.forEach((it) => {
-      const want = it.want ?? (prev === -Infinity ? 0 : prev);
-      it.y = Math.max(want, prev === -Infinity ? -Infinity : prev);
+      it.y = Math.max(it.want ?? prev, prev);
       prev = it.y + it.h + GAP;
     });
     const a = items.findIndex((it) => it.id === activeId);
     if (a >= 0 && items[a].want !== null) {
-      items[a].y = items[a].want!;
+      items[a].y = Math.max(0, items[a].want!);
       for (let i = a + 1; i < items.length; i++) items[i].y = Math.max(items[i].y, items[i - 1].y + items[i - 1].h + GAP);
       for (let i = a - 1; i >= 0; i--) items[i].y = Math.min(items[i].y, items[i + 1].y - items[i].h - GAP);
+      // nothing above the lane's top: if the chain ran out of room, slide it all down
+      const over = -Math.min(0, items[0]?.y ?? 0);
+      if (over) for (const it of items) it.y += over;
     }
+    ys.current = new Map(items.map((it) => [it.id, { y: it.y, h: it.h }]));
     for (const it of items) if (it.el) it.el.style.transform = `translateY(${Math.round(it.y)}px)`;
-  }, [turns, activeId]);
+    // tall enough to follow the thread all the way down, and to reach the last card
+    const scMax = Math.max(0, sc.scrollHeight - sc.clientHeight) * k;
+    lane.style.height = `${Math.ceil(Math.max(prev + 40, scMax + box.clientHeight))}px`;
+  }, [turns, activeId, scrollRef]);
 
   useLayoutEffect(() => {
     layout();
   });
 
+  // the newest card moved or grew (a new turn, its bubble revealed): keep it in view while the thread sits at its end
+  useLayoutEffect(() => {
+    const sc = scrollRef.current;
+    const last = turns[turns.length - 1];
+    const c = last && ys.current.get(last.m.id);
+    if (!sc || !c) return;
+    const key = `${last.m.id}:${Math.round(c.y)}:${c.h}`;
+    if (key === seen.current) return;
+    seen.current = key;
+    const nearEnd = sc.scrollTop >= sc.scrollHeight - sc.clientHeight - 80;
+    if (nearEnd && !activeId) requestAnimationFrame(() => showCard(last.m.id));
+  });
+
   useEffect(() => {
     const sc = scrollRef.current;
-    const ro = new ResizeObserver(() => layout());
+    const box = boxRef.current;
+    const ro = new ResizeObserver(() => {
+      layout();
+      follow();
+    });
     cardRefs.current.forEach((el) => ro.observe(el));
+    if (box) ro.observe(box);
     if (sc) {
       ro.observe(sc);
       // bubbles change height (fonts, images) without the list scrolling
       sc.querySelectorAll("[data-msg-id]").forEach((el) => ro.observe(el));
     }
     void document.fonts?.ready.then(layout);
-    sc?.addEventListener("scroll", layout, { passive: true });
+    // wheel over the lane scrolls the thread too
+    const onLane = () => {
+      if (!sc || !box || performance.now() < quietUntil.current) return;
+      sc.scrollTop = box.scrollTop / ratio(sc);
+    };
+    sc?.addEventListener("scroll", follow, { passive: true });
+    box?.addEventListener("scroll", onLane, { passive: true });
     window.addEventListener("resize", layout);
+    follow();
     return () => {
       ro.disconnect();
-      sc?.removeEventListener("scroll", layout);
+      sc?.removeEventListener("scroll", follow);
+      box?.removeEventListener("scroll", onLane);
       window.removeEventListener("resize", layout);
     };
-  }, [layout, scrollRef, turns.length]);
+  }, [layout, follow, scrollRef, turns.length]);
 
-  // select a turn: open its card and bring its bubble to the middle of the phone
+  // select a turn: open its card, bring its bubble to the middle of the phone, and the card into view
   const select = useCallback(
     (id: string) => {
       setActive(id);
       setExpanded(id);
-      const bubble = document.querySelector(`[data-msg-id="${id}"]`);
+      const sc = scrollRef.current;
+      const bubble = sc?.querySelector<HTMLElement>(`[data-msg-id="${id}"]`);
       const reduced = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
-      bubble?.scrollIntoView({ block: "center", behavior: reduced ? "auto" : "smooth" });
+      // scroll the thread only, never the page
+      if (sc && bubble) sc.scrollTo({ top: bubble.offsetTop - (sc.clientHeight - bubble.offsetHeight) / 2, behavior: reduced ? "auto" : "smooth" });
+      // after the card has grown and the thread has glided (a call turn has no bubble: lane only)
+      window.setTimeout(() => showCard(id), bubble ? 450 : 60);
     },
-    [setActive, setExpanded],
+    [setActive, setExpanded, scrollRef, showCard],
   );
 
   // j/k (or arrows while the list has focus) walk the turns
@@ -144,7 +228,11 @@ export function WhySidebar({
           </ol>
         )}
       </div>
-      <div className="relative flex-1 min-h-0 overflow-hidden">
+      <div
+        ref={boxRef}
+        className="relative flex-1 min-h-0 overflow-y-auto overscroll-contain [scrollbar-width:thin] [scrollbar-color:var(--p-step-200)_transparent]"
+        style={{ maskImage: "linear-gradient(#000 calc(100% - 24px), transparent)", WebkitMaskImage: "linear-gradient(#000 calc(100% - 24px), transparent)" }}
+      >
         {turns.length === 0 && <p className="text-[14px] text-ink-mute pt-2">each reply gets a card here: the move code picked, and the research behind it.</p>}
         <ol ref={laneRef} className="relative" role="list" data-why-list>
           {turns.map((t) => {
