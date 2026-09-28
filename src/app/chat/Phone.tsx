@@ -196,7 +196,7 @@ export function CallPhone({ skin, chat, zoom }: { skin: Skin; chat: Chat; zoom: 
             onHold={call.toggleHold}
             captions={captions}
             onCaptions={() => setCaptions(!captions)}
-            hint={chat.session?.transcript.some((m) => m.channel === "voice" || (m.kind === "event" && /^Call/.test(m.text))) ? undefined : "answering uses your mic · works best in chrome or edge"}
+            hint={chat.session?.transcript.some((m) => m.channel === "voice" || (m.kind === "event" && /^Call/.test(m.text))) ? undefined : "answering uses your mic: tap allow when your browser asks · works best in chrome or edge"}
           />
           <MicTrouble call={call} />
         </div>

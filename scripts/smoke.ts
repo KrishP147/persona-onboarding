@@ -552,7 +552,7 @@ async function main() {
   await handleUserMessage(egg, "text", "luna");
   egg.transcript.push({ id: "a-egg", role: "agent", channel: "text", text: "and what's your name?", ts: Date.now() });
   const egg1 = await handleUserMessage(egg, "text", "i'm zach");
-  check("team name: 'woah, is this THE zach? founder of persona?'", /is this THE zach\? founder of persona\?/.test(said(egg1)) && egg.teamGuess === "zach", said(egg1));
+  check("team name: 'woah, is this THE zach, founder of persona?'", /is this THE zach, founder of persona\?/.test(said(egg1)) && egg.teamGuess === "zach", said(egg1));
   await handleUserMessage(egg, "text", "haha yes");
   check("...a yes: they're recognized (bio goes to the model), asked only once", egg.teamMember === "zach" && !/is this THE/.test(said(await handleUserMessage(egg, "text", "anyway i need help with email"))));
   check("...the yes gets a code-written 'no way, an honor!'", egg.transcript.some((m) => m.role === "agent" && m.text === "no way, an honor!"));
@@ -568,6 +568,15 @@ async function main() {
   await handleUserMessage(cq, "text", "nova");
   const cqR = await handleUserMessage(cq, "text", "can you call?");
   check("...'can you call?' does", cqR.actions.some((a) => a.type === "start_call"), said(cqR));
+  // (keyless: no extractor to re-read the name, so set it as prod's extractor would)
+  egg.slots.userName = { ...egg.slots.userName, value: "Julia" };
+  const eggJ = await handleUserMessage(egg, "text", "actually im julia");
+  check("...switching to another team name asks again ('is this THE julia?')", /is this THE julia, from talent at persona\?/.test(said(eggJ)) && egg.teamGuess === "julia" && !egg.teamMember, said(eggJ));
+  const ph = newSession();
+  await handleEvent(ph, { type: "open" });
+  await handleUserMessage(ph, "text", "nova");
+  const phR = await handleUserMessage(ph, "text", "can you call a pharmacy for me");
+  check("'can you call a pharmacy for me' doesn't ring them", !phR.actions.some((a) => a.type === "start_call"), said(phR));
   const egg2 = newSession();
   egg2.slots.userName = { value: "Sam", status: "filled", asks: 1, source: "text", updatedAt: Date.now() };
   check("...other names: nothing", !/is this THE/.test(said(await handleUserMessage(egg2, "text", "hey"))) && !egg2.teamGuess);

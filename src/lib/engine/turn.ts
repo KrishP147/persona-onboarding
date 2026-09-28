@@ -435,6 +435,8 @@ export async function handleUserMessage(...args: Parameters<typeof handleUserMes
   }
   const key = teamMatch(s);
   if (key) {
+    // a new name ("actually i'm julia") is a new ask; the old yes doesn't carry over
+    if (s.teamGuess) s.teamMember = s.teamGreeted = undefined;
     s.teamGuess = key;
     const busy = r.actions.some((a) => a.type === "start_call" || a.type === "end_call") || !!s.lastSent;
     const words = busy ? [] : r.newMessages.filter((m) => m.role === "agent" && (!m.kind || m.kind === "text") && !m.move?.id?.startsWith("default"));
