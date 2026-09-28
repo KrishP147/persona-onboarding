@@ -566,3 +566,8 @@ sources
 - Google Messages: dark primary (send button, seen receipt) estimated; light values are GM3 baseline, not a real baseline-light capture; typing indicator not captured; light in-call not captured.
 - Samsung Messages: received bubble fills (both themes) estimated; no clean One UI 8 thread screenshot; incoming call and light call not captured; current placeholder string.
 - call-screen button sizes on all three.
+
+### galaxy received bubble, verified (2026-09-28)
+
+- light received bubble = `#ededed` on a `#fcfcfc` thread, sampled from samsung's own uk support screenshots (https://www.samsung.com/uk/support/mobile-devices/how-do-i-use-text-messages-on-my-device/, images 03 and 05). the thread color matches our measured `#fcfcfc`.
+- dark received bubble stays an estimate (`#33363c`): samsung's support pages only show messages in light mode, and samsung messages was discontinued in the us on 2026-07-06 (https://www.samsung.com/us/apps/samsung-messages/), so there's no official dark capture to sample. a real one ui dark screenshot from the user would settle it.

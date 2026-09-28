@@ -244,9 +244,9 @@ html[data-theme="dark"] .sk-gm {
   --sam-accent: #387afe; /* measured: one ui switch / link blue */
   --sam-sent: #3b7cf2; /* measured, bubble emoji screenshot */
   --sam-sent-ink: #ffffff;
-  --sam-recv: #eeeef0; /* est: one ui list-card gray */
+  --sam-recv: #ededed; /* measured: samsung uk support screenshots (received bubble on #fcfcfc) */
   --sam-recv-ink: #111111;
-  --sam-card: #eeeef0; /* rich cards, link cards, contact card */
+  --sam-card: #ededed; /* rich cards, link cards, contact card: same gray as received */
   --sam-field: #f0f0f2; /* composer pill, measured #f2f2f2 */
   --sam-placeholder: #9a9a9f;
   --sam-send-off: #c9ccd1;
@@ -280,7 +280,7 @@ html[data-theme="dark"] .sk-sam {
   --sam-accent: #5b95ff;
   --sam-sent: #3a82f0; /* photo reads #3a86ec-#3c87ee */
   --sam-sent-ink: #ffffff;
-  --sam-recv: #33363c; /* est: photo reads a cool mid-dark gray (#424e62 camera-shifted) */
+  --sam-recv: #33363c; /* est, unverified: no official dark-mode samsung messages capture exists (app discontinued in the us 2026-07); photo reads a cool mid-dark gray */
   --sam-recv-ink: #fafafa;
   --sam-card: #1f2024;
   --sam-field: #1c1c1e;
