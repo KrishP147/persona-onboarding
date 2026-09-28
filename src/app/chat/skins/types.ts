@@ -37,6 +37,7 @@ export interface ComposerProps {
   recording: { startedAt: number } | null;
   transcribing: boolean;
   onMic: () => void;
+  hint?: string; // stuck-hint placeholder example; undefined means the skin's own default
 }
 
 export interface CallProps {

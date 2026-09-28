@@ -101,6 +101,7 @@ function IntroDialog({ onClose }: { onClose: () => void }) {
           <br />
           Right here in the browser.
         </h2>
+        <p className="mt-1 text-[13px] leading-[18px] text-ink-mute">a trial demo by Krish, not the real product</p>
         <p id="intro-desc" className="mt-2.5 text-[15px] leading-[23px] text-ink-mute">
           A web version of Persona&rsquo;s onboarding: it texts you, calls you, and gets you set up.
         </p>

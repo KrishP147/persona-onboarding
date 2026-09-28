@@ -74,7 +74,25 @@ export function Pill({ children, onClick, pressed }: { children: ReactNode; onCl
   );
 }
 
-export function TopBar({ skin, setSkin, showWhy, toggleWhy, onRestart, mock }: { skin: SkinId | null; setSkin: (id: SkinId) => void; showWhy: boolean; toggleWhy: () => void; onRestart: () => void; mock: boolean }) {
+export function TopBar({
+  skin,
+  setSkin,
+  showWhy,
+  toggleWhy,
+  typingHints,
+  toggleTypingHints,
+  onRestart,
+  mock,
+}: {
+  skin: SkinId | null;
+  setSkin: (id: SkinId) => void;
+  showWhy: boolean;
+  toggleWhy: () => void;
+  typingHints: boolean;
+  toggleTypingHints: () => void;
+  onRestart: () => void;
+  mock: boolean;
+}) {
   return (
     <nav aria-label="Page" className="hidden sm:grid grid-cols-[1fr_auto_1fr] items-center h-16 px-6">
       <div className="flex items-center gap-3">
@@ -88,14 +106,37 @@ export function TopBar({ skin, setSkin, showWhy, toggleWhy, onRestart, mock }: {
             {showWhy ? "Hide reasoning" : "Show reasoning"}
           </Pill>
         </span>
+        <Pill onClick={toggleTypingHints} pressed={typingHints}>
+          Typing hints
+        </Pill>
         <Pill onClick={onRestart}>Restart</Pill>
       </div>
     </nav>
   );
 }
 
-// phones: the menu is a bottom sheet with the phone picker, the reasoning entry, how it works and restart
-export function MenuSheet({ skin, setSkin, canReason, onReasoning, onRestart, onClose, mock }: { skin: SkinId | null; setSkin: (id: SkinId) => void; canReason: boolean; onReasoning: () => void; onRestart: () => void; onClose: () => void; mock: boolean }) {
+// phones: the menu is a bottom sheet with the phone picker, the reasoning entry, typing hints, how it works and restart
+export function MenuSheet({
+  skin,
+  setSkin,
+  canReason,
+  onReasoning,
+  typingHints,
+  setTypingHints,
+  onRestart,
+  onClose,
+  mock,
+}: {
+  skin: SkinId | null;
+  setSkin: (id: SkinId) => void;
+  canReason: boolean;
+  onReasoning: () => void;
+  typingHints: boolean;
+  setTypingHints: (v: boolean) => void;
+  onRestart: () => void;
+  onClose: () => void;
+  mock: boolean;
+}) {
   const headRef = useRef<HTMLHeadingElement>(null);
   useEffect(() => {
     headRef.current?.focus();
@@ -130,6 +171,20 @@ export function MenuSheet({ skin, setSkin, canReason, onReasoning, onRestart, on
           </span>
           <span aria-hidden className="text-ink-mute">›</span>
         </button>
+        <label className="mt-3 flex items-center justify-between gap-4 min-h-11">
+          <span>
+            <span className="block text-[15px] font-medium">Typing hints</span>
+            <span className="block text-[13px] text-ink-mute">an example while you wait to reply</span>
+          </span>
+          <button
+            role="switch"
+            aria-checked={typingHints}
+            onClick={() => setTypingHints(!typingHints)}
+            className={`relative w-[51px] h-[31px] rounded-full shrink-0 transition-colors duration-200 ${typingHints ? "bg-pgreen" : "bg-step-200"}`}
+          >
+            <span className={`absolute top-[2px] left-[2px] w-[27px] h-[27px] rounded-full bg-white shadow transition-transform duration-200 ease-[var(--ease-house)] ${typingHints ? "translate-x-5" : ""}`} />
+          </button>
+        </label>
         <h3 className="mt-6 text-[12.5px] font-semibold tracking-[0.09em] uppercase text-ink-mute mb-3">How it works</h3>
         <ol className="space-y-3">
           {PIPELINE.map(([title, detail], i) => (

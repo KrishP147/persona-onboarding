@@ -121,6 +121,7 @@ export function PhoneScreen({
       <S.Composer
         draft={chat.draft}
         setDraft={chat.setDraft}
+        hint={chat.hint}
         onSubmit={() => void chat.send(chat.draft)}
         onAttach={() => fileRef.current?.click()}
         canSend={!!chat.draft.trim() || chat.pending.length > 0}
