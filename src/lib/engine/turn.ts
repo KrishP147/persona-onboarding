@@ -247,10 +247,48 @@ export async function nameAmbiguity(s: Session, channel: Channel, text: string, 
   }
   // A Reply to some other message ("explain" on the intro) is about that message, never a name.
   if (repliedElsewhere(s, userMsg)) return null;
+  // The same name as ours, two separate cases (never a silent no-op or "persona instead of persona?").
+  const current = s.slots.agentName.status === "filled" ? s.slots.agentName.value : null;
+  if (current && !s.nameCheck) {
+    const lower = current.toLowerCase();
+    const word = text.trim().replace(/[.!?]+$/, "").toLowerCase();
+    const lastQ = s.transcript.slice(0, s.transcript.indexOf(userMsg)).findLast((m) => m.role === "agent" && (!m.kind || m.kind === "text"));
+    // their own name is ours ("my name is persona", or "persona" to "what's your name?"): check, it's odd
+    const theirs = ownNameIn(text) ?? (lastQ && USER_NAME_ASK.test(lastQ.text) && word === lower ? current : null);
+    if (theirs?.toLowerCase() === lower) {
+      s.nameCheck = { value: current, as: "same" };
+      emitAgentText(ctx, `wait, your name's ${lower} too? so we have the same name?`);
+      guard(ctx, "asked: their name is the same as ours");
+      return out(ctx);
+    }
+    // renaming it to what it's already called ("call you persona", or "persona" answering the name question)
+    const rename = hintedAgentName(text) ?? (word === lower && (nameAskIsNewest(s, userMsg) || s.agentNameDefaulted) ? current : null);
+    if (rename?.toLowerCase() === lower) {
+      emitAgentText(ctx, "lol that's already my name");
+      guard(ctx, "renamed to its current name: said so");
+      recordAsk(s, null);
+      return out(ctx);
+    }
+  }
   // Their answer to "is rowan your name, or what you'd like to call me?"
   const check = s.nameCheck;
   if (check) {
     s.nameCheck = undefined;
+    // "so we have the same name?": yes, it's theirs too; no, ask theirs
+    if (check.as === "same") {
+      if (/^\s*(yes|yeah|yea|ye|yep|yup|ya|sure|correct|right|mhm|lol yes|haha yes|lol yeah|haha yeah)\b/i.test(text)) {
+        s.slots.userName = { ...s.slots.userName, value: check.value, status: "filled", source: channel, updatedAt: Date.now() };
+        emitAgentText(ctx, `ha, twins then. nice to meet you, ${check.value.toLowerCase()}`);
+        recordAsk(s, null);
+        return out(ctx);
+      }
+      if (/^\s*(no|nah|nope|lol no|haha no|jk|just kidding)\b/i.test(text) && text.trim().split(/\s+/).length <= 3) {
+        emitAgentText(ctx, "haha ok, so what's your name?");
+        recordAsk(s, "userName");
+        return out(ctx);
+      }
+      return null;
+    }
     // "is 'not much' what you want to call me?": yes names it, no asks again
     if (check.as === "confirm") {
       if (/^\s*(yes|yeah|yep|yup|ya|sure|correct|right|mhm|lol yes|haha yes)\b/i.test(text)) {

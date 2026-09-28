@@ -457,6 +457,26 @@ async function main() {
   check("default name sends the persona contact card, right after its line", pcAll.includes("[card:Persona]") && /save my contact card/.test(pcAll[pcAll.indexOf("[card:Persona]") - 1] ?? ""), pcAll.join(" | "));
   const pcSame = await handleUserMessage(pc, "text", "persona");
   check("'persona' when it's already persona: no 'instead of persona?' check", !/instead of persona/.test(said(pcSame)) && !pc.nameCheck, said(pcSame));
+  // same name, two cases: renaming it to what it's called is a joke back; their own name being ours gets a check
+  const rn = newSession();
+  await handleEvent(rn, { type: "open" });
+  await handleUserMessage(rn, "text", "luna");
+  const rnR = await handleUserMessage(rn, "text", "i'll call you luna");
+  check("rename to its current name: 'lol that's already my name'", /already my name/.test(said(rnR)) && rn.slots.agentName.value === "Luna", said(rnR));
+  const tw = newSession();
+  await handleEvent(tw, { type: "open" });
+  await handleUserMessage(tw, "text", "luna");
+  tw.transcript.push({ id: "a-tw1", role: "agent", channel: "text", text: "and what's your name?", ts: Date.now() });
+  const tw1 = await handleUserMessage(tw, "text", "luna");
+  check("their name = ours: 'so we have the same name?'", /same name\?/.test(said(tw1)) && tw.slots.userName.status !== "filled", said(tw1));
+  const tw2 = await handleUserMessage(tw, "text", "yeah lol");
+  check("...yes: it's theirs too", tw.slots.userName.value === "Luna" && /twins/.test(said(tw2)), said(tw2));
+  const tw3 = newSession();
+  await handleEvent(tw3, { type: "open" });
+  await handleUserMessage(tw3, "text", "luna");
+  const tw3a = await handleUserMessage(tw3, "text", "my name is luna");
+  const tw3b = await handleUserMessage(tw3, "text", "nah");
+  check("'my name is <ours>' gets the check; 'nah' asks theirs", /same name\?/.test(said(tw3a)) && /what's your name\?/.test(said(tw3b)) && tw3.slots.userName.status !== "filled", `${said(tw3a)} || ${said(tw3b)}`);
   const yo = newSession();
   await handleEvent(yo, { type: "open" });
   await handleUserMessage(yo, "text", "yo");
@@ -771,7 +791,7 @@ async function main() {
   askedQ.slots.agentName = { ...askedQ.slots.agentName, value: "Nova", status: "filled" };
   askedQ.transcript.push({ id: "u-q", role: "user", channel: "text", text: "mostly school stuff", ts: Date.now() - 61000 }, { id: "a-q", role: "agent", channel: "text", text: "that's a lot. which class is the worst?", ts: Date.now() - 60000 });
   const aq = await handleEvent(askedQ, { type: "text_idle" });
-  check("left-on-read after a question: one code-written line", said(aq) === "no rush, i'm around whenever", said(aq));
+  check("left-on-read after a question: one code-written line", said(aq) === "btw no rush to respond, i'm available whenever", said(aq));
 
   // their name: always in re-engagement lines, otherwise about once every 3 turns and never twice in a row
   const nm = newSession();

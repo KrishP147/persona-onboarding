@@ -94,7 +94,7 @@ export interface Session {
   graduatedReason?: string;
   graduatedAt?: string; // ISO time setup ended (first time only), for the what-i-know card and setup time
   demoOffered?: boolean; // the sample inbox was offered (once) after google sign-in failed or stalled
-  nameCheck?: { value: string; as: "user" | "agent" | "confirm" }; // a bare name answered two open name questions: we leaned one way and asked which
+  nameCheck?: { value: string; as: "user" | "agent" | "confirm" | "same" }; // "same": they said their name is ours, asked "so we have the same name?" // a bare name answered two open name questions: we leaned one way and asked which
   agentNameDefaulted?: boolean; // they skipped naming it: goes by "Persona" until they pick one
   inboxToScan?: InboxItem[]; // gmail just connected over text: the inbox look happens in its own event (inbox_scan) so "connected" shows at once
   emailSeen?: string[]; // email text the agent has seen (subjects, snippets): slot values found only here are quarantined

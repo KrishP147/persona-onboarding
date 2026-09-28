@@ -218,7 +218,7 @@ export const EVENT_HANDLERS: { [K in SessionEvent["type"]]: EventHandler<K> } = 
     const name = s.slots.userName.value;
     if (firstTime) {
       // One gentle line, no question, no default name: they didn't skip anything, they just haven't started.
-      emitAgentText(ctx, `no rush${name ? ` ${name}` : ""}, take your time. i'm here whenever you're ready`);
+      emitAgentText(ctx, `btw no rush${name ? ` ${name}` : ""}, take your time. i'm here whenever you're ready`);
       recordAsk(s, null);
       return { session: s, newMessages: ctx.newMessages, chips: computeDirective(s, "text").chips, actions: [] };
     }
@@ -243,7 +243,8 @@ export const EVENT_HANDLERS: { [K in SessionEvent["type"]]: EventHandler<K> } = 
     // Nothing asked, nothing pending: they're not keeping us waiting, so there's nothing to say.
     if (!/\?\s*$/.test(lastAgent.text.trim())) return idle();
     // Written by code, never the model: a model asked for "a nudge" once narrated instead ("i'll wait for them...").
-    emitAgentText(ctx, `no rush${name ? ` ${name}` : ""}, i'm around whenever`);
+    // a double text reads like one: "btw" (a person adding a point, not a bot re-pinging)
+    emitAgentText(ctx, `btw no rush to respond${name ? ` ${name}` : ""}, i'm available whenever`);
     recordAsk(s, null);
     return { session: s, newMessages: ctx.newMessages, chips: computeDirective(s, "text").chips, actions: [] };
   },

@@ -106,22 +106,16 @@ function DateStamp({ ts }: { ts: number; first: boolean }) {
   return <div className="text-center text-[12px] leading-4 font-medium pt-4 pb-1" style={{ color: C.mute }}>{`${day} • ${time(ts)}`}</div>;
 }
 
-// 2026 read receipt: a small circle off the last sent bubble's bottom-right corner
+// read receipt off the last sent bubble's bottom-right corner: one grey check sent, two grey delivered,
+// two coloured read (never one coloured check)
 function ReceiptDot({ state }: { state: NonNullable<BubbleProps["receipt"]> }) {
+  const ink = state === "seen" ? C.primary : C.mute;
+  const tick = { fill: "none", style: { stroke: ink }, strokeWidth: 1.6, strokeLinecap: "round", strokeLinejoin: "round" } as const;
   return (
-    <span className="absolute -right-1 -bottom-1 w-4 h-4 rounded-full flex items-center justify-center" style={{ background: C.surface }} aria-label={state}>
-      <svg width="16" height="16" viewBox="0 0 16 16" aria-hidden>
-        {state === "seen" ? (
-          <>
-            <circle cx="8" cy="8" r="7" style={{ fill: C.primary }} />
-            <path d="M4.8 8.2 7 10.4l4.3-4.6" fill="none" style={{ stroke: C.onPrimary }} strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" />
-          </>
-        ) : (
-          <>
-            <circle cx="8" cy="8" r="6.3" fill="none" style={{ stroke: C.mute }} strokeWidth="1.3" />
-            {state === "delivered" && <path d="M4.8 8.2 7 10.4l4.3-4.6" fill="none" style={{ stroke: C.mute }} strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />}
-          </>
-        )}
+    <span className="absolute -right-1.5 -bottom-1 h-4 px-0.5 rounded-full flex items-center justify-center" style={{ background: C.surface }} aria-label={state === "seen" ? "read" : state}>
+      <svg width={state === "sent" ? 12 : 17} height="12" viewBox={state === "sent" ? "0 0 12 12" : "0 0 17 12"} aria-hidden>
+        <path d="M1.5 6.5 4.5 9.5 10.5 2.5" {...tick} />
+        {state !== "sent" && <path d="M7.5 8.3 8.7 9.5 14.7 2.5" {...tick} />}
       </svg>
     </span>
   );
