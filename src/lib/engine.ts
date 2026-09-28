@@ -282,7 +282,7 @@ const WANTS_OUT = /\b(skip|not now|later|no more questions|stop asking|just (hel
 // They're wrapping up: only then does the agent hang up on its own.
 const USER_BYE = /\b(end (the |this )?call|hang up|you can go|let'?s end|that'?s enough|bye|goodbye|gotta go|got to go|have to go|need to go|talk (to you )?(soon|later)|that'?s (all|it)|i'?m (done|good|all set)|see (you|ya)|later|hang up|nothing else)\b/i;
 function userWrappingUp(s: Session) {
-  return USER_BYE.test(lastUserText(s));
+  return USER_BYE.test(saidNow(s));
 }
 
 // The gmail link goes out only after a yes: they asked for it, or said yes to our question about it.
@@ -327,7 +327,7 @@ function asksForLink(text: string) {
 }
 
 function gmailConsent(s: Session) {
-  const text = lastUserText(s);
+  const text = saidNow(s);
   if (asksForLink(text)) return true;
   const users = s.transcript.map((m, i) => (m.role === "user" ? i : -1)).filter((i) => i >= 0);
   const lastUser = users[users.length - 1] ?? -1;
@@ -346,8 +346,27 @@ function lastUserText(s: Session) {
   return [...s.transcript].reverse().find((m) => m.role === "user")?.text ?? "";
 }
 
+// What they said, but only when this turn is their message. On silence, gmail, idle and other system
+// events their last words are old news: an earlier "bye" or "skip" must not fire again.
+// Marks who started this turn for the duration of fn. An event handled inside a user turn (the demo
+// inbox yes connects gmail) stays a user turn.
+async function asTurnBy<T>(s: Session, by: "user" | "event", fn: () => Promise<T>): Promise<T> {
+  const outer = s.turnBy;
+  if (!(by === "event" && outer)) s.turnBy = by;
+  try {
+    return await fn();
+  } finally {
+    if (outer) s.turnBy = outer;
+    else delete s.turnBy;
+  }
+}
+
+function saidNow(s: Session) {
+  return s.turnBy === "event" ? "" : lastUserText(s);
+}
+
 function userWantsOut(s: Session) {
-  const text = lastUserText(s);
+  const text = saidNow(s);
   if (WANTS_OUT.test(text)) return true;
   // "want to skip the rest and just start?" "yeah": that's them asking out too.
   const users = s.transcript.map((m, i) => (m.role === "user" ? i : -1)).filter((i) => i >= 0);
@@ -428,7 +447,7 @@ async function runTool(ctx: Ctx, name: string, input: Record<string, unknown>): 
       const askedSince = s.transcript.slice(lastEnd + 1).some((m) => m.role === "user" && /\b(call|ring|phone)\b/i.test(m.text) && !NEGATED_CALL.test(m.text));
       const said_no = s.callDeclinedAt !== undefined || (lastEnd >= 0 && s.call.endedReason !== "agent_ended");
       if (said_no && !askedSince) return "error: they said no to a call or just hung up. don't call again unless they ask; carry on over text";
-      const last = lastUserText(s);
+      const last = saidNow(s);
       if (!YES.test(last) && !CALL_OK.test(last)) {
         return `error: they haven't said yes to a call (they said "${last.slice(0, 60)}"). don't ring. react to what they said and ask again lightly, or carry on over text`;
       }
@@ -743,10 +762,11 @@ async function turn(
   fallback?: string,
   opts: { forceEnd?: boolean; move?: Move; avoid?: RegExp; soft?: boolean } = {},
 ): Promise<TurnResult> {
-  const resendOk = /\b(resend|send (it|the link) again|another link|new link|lost the link)\b/i.test(lastUserText(s));
+  const resendOk = /\b(resend|send (it|the link) again|another link|new link|lost the link)\b/i.test(saidNow(s));
   const ctx: Ctx = { s, channel, actions: [], newMessages: [], resendOk, move: opts.move, allowEnd: !!opts.forceEnd, softInstruction: opts.soft };
   let text = "";
   let failed = false;
+  if (s.turnBy === "event" && (USER_BYE.test(lastUserText(s)) || WANTS_OUT.test(lastUserText(s)) || SEND_REQUEST.test(lastUserText(s)))) guard(ctx, "ignored: not user-said");
   // Swap in a guarded version of the reply, and name the guard only if it changed something.
   const fix = (label: string, next: string) => {
     if (next !== text) {
@@ -805,7 +825,7 @@ async function turn(
   }
   // Gmail, by the book: the gmail turn ends with the code-written question; other turns don't pitch it.
   if ((!extraInstruction || ctx.softInstruction) && s.slots.gmail.status === "missing" && !ctx.newMessages.some((m) => m.kind === "gmail_link")) {
-    const raisedIt = /\b(gmail|email|inbox|link)\b/i.test(lastUserText(s));
+    const raisedIt = /\b(gmail|email|inbox|link)\b/i.test(saidNow(s));
     const help = text.split(SENTENCE_BREAK).filter((x) => !GMAIL_PITCH.test(x) && !(ctx.move?.id === "ask-gmail" && /\b(without your (ok|okay)|won.?t send)/i.test(x))).join(" ").trim();
     if (ctx.move?.id === "ask-gmail") {
       // On a call: one sentence of help, then the ask, so the question is never cut off.
@@ -820,7 +840,7 @@ async function turn(
   // Already connected, declined, or the link is already sitting in their texts: no more gmail asks
   // (the most common grader note: "repeated the gmail request after it was connected / agreed").
   const linkWaiting = linkPending(s) && !ctx.newMessages.some((m) => m.kind === "gmail_link");
-  if ((s.slots.gmail.status !== "missing" || linkWaiting) && !/\b(gmail|google|link|connect)\b/i.test(lastUserText(s))) {
+  if ((s.slots.gmail.status !== "missing" || linkWaiting) && !/\b(gmail|google|link|connect)\b/i.test(saidNow(s))) {
     const kept = text.split(SENTENCE_BREAK).filter((x) => !GMAIL_ASKISH.test(x)).join(" ").trim();
     if (kept) fix("repeat gmail ask dropped", kept);
   }
@@ -839,7 +859,7 @@ async function turn(
     if (kept) fix("blocked repeat name question", kept);
   }
   // "sent!" only if send_email actually went out this turn.
-  if (!ctx.sentEmail && !s.draft?.sent && SEND_REQUEST.test(lastUserText(s)) && CLAIMS_SENT.test(text)) {
+  if (!ctx.sentEmail && !s.draft?.sent && SEND_REQUEST.test(saidNow(s)) && CLAIMS_SENT.test(text)) {
     fix("blocked a false 'sent' claim", s.draft && !s.draft.sent ? "i haven't sent it yet. want me to send the draft above as is?" : "i haven't sent anything. want me to write it up as a draft first?");
   }
   const sentences = text.split(/(?<=[.!?])\s+|\n+/);
@@ -918,7 +938,7 @@ async function captureAgentName(s: Session, channel: Channel, text: string): Pro
 }
 
 export async function handleUserMessage(...args: Parameters<typeof handleUserMessageInner>): Promise<TurnResult> {
-  const [r, meter] = await metered(async () => sealGoodbye(args[0], await handleUserMessageInner(...args)));
+  const [r, meter] = await metered(async () => sealGoodbye(args[0], await asTurnBy(args[0], "user", () => handleUserMessageInner(...args))));
   noteMetrics(args[0], meter);
   return r;
 }
@@ -1250,7 +1270,7 @@ function sealGoodbye(s: Session, r: TurnResult): TurnResult {
 
 export async function handleEvent(s: Session, e: SessionEvent): Promise<TurnResult> {
   const start = s.transcript.length;
-  const [inner, meter] = await metered(() => handleEventInner(s, e));
+  const [inner, meter] = await metered(() => asTurnBy(s, "event", () => handleEventInner(s, e)));
   noteMetrics(s, meter);
   const r = sealGoodbye(s, inner);
   // Anything the event added to the transcript (e.g. "Call ended (12s)") goes out with the reply, in order.
@@ -1579,7 +1599,7 @@ async function sendEmailTool(ctx: Ctx): Promise<string> {
   if (!d.to) return "error: the draft has no recipient. ask who it goes to, then save_draft again with it";
   // Their ok has to come after they saw this exact version, and be a clear yes.
   const lastUserIdx = s.transcript.findLastIndex((m) => m.role === "user");
-  const last = lastUserText(s);
+  const last = saidNow(s);
   const prevAgent = s.transcript.slice(0, lastUserIdx).reverse().find((m) => m.role === "agent" && (!m.kind || m.kind === "text"));
   const sayingSend = /\bsend\b/i.test(last) || (!!prevAgent && /\bsend\b/i.test(prevAgent.text));
   if (lastUserIdx < d.shownAt || !SEND_OK.test(last) || SEND_HOLD.test(last) || !sayingSend) {

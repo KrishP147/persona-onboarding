@@ -172,6 +172,13 @@ async function main() {
   g2.gmailVerified = { email: "me@gmail.com", inbox: DEMO_INBOX };
   const quiet = await handleEvent(g2, { type: "gmail_connected" });
   check("budget spent: no second interruption", g2.alerts.length === 1 && !said(quiet).toLowerCase().includes("interview"), said(quiet));
+  // an old "bye" doesn't fire again on a system event, and the panel says so
+  const g3 = newSession();
+  await handleUserMessage(g3, "text", "ok that's all, bye");
+  g3.gmailVerified = { email: "me@gmail.com", inbox: [] };
+  const later = await handleEvent(g3, { type: "gmail_connected" });
+  const laterMsg = later.newMessages.find((m) => m.role === "agent" && !m.kind);
+  check("intent only read on their own turn", !later.actions.some((a) => a.type === "end_call" || a.type === "graduate") && !!laterMsg?.guards?.includes("ignored: not user-said") && g3.turnBy === undefined, JSON.stringify(laterMsg?.guards));
   const cancel = await handleEvent(newSession(), { type: "gmail_failed", error: "access_denied" });
   check("oauth cancel treated as a choice", /no worries/.test(said(cancel)), said(cancel));
 

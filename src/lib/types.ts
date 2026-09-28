@@ -92,6 +92,7 @@ export interface Session {
   demoOffered?: boolean; // the sample inbox was offered (once) after google sign-in failed or stalled
   agentNameDefaulted?: boolean; // they skipped naming it: goes by "Persona" until they pick one
   metrics?: SessionMetrics; // per-session cost and model latency (src/lib/usage.ts meter)
+  turnBy?: "user" | "event"; // transient, never saved: who started this turn (intents only read on "user")
   transcript: Msg[];
 }
 
