@@ -27,6 +27,7 @@ const Event = z.discriminatedUnion("type", [
   z.object({ type: z.literal("mic_denied") }),
   z.object({ type: z.literal("gmail_connected"), email: z.string().email().optional() }),
   z.object({ type: z.literal("gmail_failed"), error: z.string().max(200) }),
+  z.object({ type: z.literal("forget_slot"), slot: z.enum(["userName", "helpNeed", "gmail"]) }),
 ]);
 
 const Body = z.object({ sessionId: z.string().regex(/^[A-Za-z0-9_-]{6,32}$/), event: Event });
