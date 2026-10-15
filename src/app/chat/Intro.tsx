@@ -1,5 +1,5 @@
 "use client";
-// first-visit note for reviewers: what this is and what to try. never blocks the session booting underneath.
+// first-visit note for visitors: what this is and what to try. never blocks the session booting underneath.
 import { useEffect, useRef, useState, useSyncExternalStore } from "react";
 import { Wordmark } from "./chrome";
 import { useClient, usePref } from "./usePref";
@@ -101,7 +101,7 @@ function IntroDialog({ onClose }: { onClose: () => void }) {
           <br />
           Right here in the browser.
         </h2>
-        <p className="mt-1 text-[13px] leading-[18px] text-ink-mute">a trial demo by Krish, not the real product</p>
+        <p className="mt-1 text-[13px] leading-[18px] text-ink-mute">a project by Krish, not the real product</p>
         <p id="intro-desc" className="mt-2.5 text-[15px] leading-[23px] text-ink-mute">
           A web version of Persona&rsquo;s onboarding: it texts you, calls you, and gets you set up.
         </p>

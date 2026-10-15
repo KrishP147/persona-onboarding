@@ -2,6 +2,7 @@ import { z } from "zod";
 import { SessionBusyError, loadSession, newSession, saveSession, withSession } from "@/lib/store";
 import { handleEvent, usingMock } from "@/lib/engine";
 import { computeDirective } from "@/lib/policy";
+import { keysFrom, scrub, withKeys } from "@/lib/keys";
 
 // GET ?id=... → resume (or create) a session. POST → deliver a client event.
 export async function GET(req: Request) {
@@ -13,7 +14,9 @@ export async function GET(req: Request) {
   }
   const channel = s.call.active ? "voice" : "text";
   // metrics: per-session turns, $ and model latency (also at session.metrics), for the side panel.
-  return Response.json({ session: s, chips: computeDirective(s, channel).chips, mock: usingMock(), metrics: s.metrics ?? null });
+  // mock: no usable model key at all (the visitor's or the server's); the client asks for one.
+  const mock = await withKeys(keysFrom(req), async () => usingMock());
+  return Response.json({ session: s, chips: computeDirective(s, channel).chips, mock, metrics: s.metrics ?? null });
 }
 
 const Event = z.discriminatedUnion("type", [
@@ -38,13 +41,15 @@ const Body = z.object({ sessionId: z.string().regex(/^[A-Za-z0-9_-]{6,32}$/), ev
 export async function POST(req: Request) {
   const parsed = Body.safeParse(await req.json().catch(() => null));
   if (!parsed.success) return Response.json({ error: "bad request" }, { status: 400 });
+  const keys = keysFrom(req);
   try {
-    const result = await withSession(parsed.data.sessionId, (s) => handleEvent(s, parsed.data.event));
+    const result = await withKeys(keys, () => withSession(parsed.data.sessionId, (s) => handleEvent(s, parsed.data.event)));
     return Response.json(result);
   } catch (err) {
     // Another turn on this session is still running: a retryable conflict, not a server error.
     if (err instanceof SessionBusyError) return Response.json({ error: "busy" }, { status: 409 });
-    console.error("event failed", err);
+    console.error("event failed", scrub(err, keys));
+
     return Response.json({ error: "event failed" }, { status: 500 });
   }
 }

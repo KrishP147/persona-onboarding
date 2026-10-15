@@ -80,7 +80,7 @@ the current voice uses the browser's built in speech tools, which are free and g
 
 ## gmail without breaking the call
 
-the brief wants gmail attempted during the call, which creates an awkward problem: google sign in is a web page, and if it takes over the tab, it kills the call. so the connect link opens google in a small popup instead. the call keeps going in the main tab, and when the popup finishes it tells the main tab and closes itself.
+i wanted gmail attempted during the call, which creates an awkward problem: google sign in is a web page, and if it takes over the tab, it kills the call. so the connect link opens google in a small popup instead. the call keeps going in the main tab, and when the popup finishes it tells the main tab and closes itself.
 
 a few choices in there i care about:
 

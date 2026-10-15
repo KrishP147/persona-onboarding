@@ -2,11 +2,26 @@
 
 [![CI](https://github.com/KrishP147/persona-onboarding/actions/workflows/ci.yml/badge.svg)](https://github.com/KrishP147/persona-onboarding/actions/workflows/ci.yml)
 
-**live: https://persona-onboarding-gold.vercel.app** (chrome or edge for the voice call)
+**live: https://persona-onboarding-gold.vercel.app/chat** (chrome or edge for the voice call; bring your own keys, [below](#bring-your-own-keys))
 
 ![naming it, the contact card, the call offer, and the call picking up where the texts left off, with the reasoning map filling in beside it](docs/design/demo.gif)
 
-a text + voice onboarding for a persona style personal assistant, built as a phone in the browser. it collects the four things the brief asks for (a name for the agent, your name, what you need help with, your gmail), tries a call for everything but the agent's name, falls back to text, survives the ways people break onboardings, and lets you graduate early. the landing page says top and bottom that it's *"a trial demo by Krish for Persona, not the real product"*.
+a text + voice onboarding for a persona style personal assistant, built as a phone in the browser. it collects four things (a name for the agent, your name, what you need help with, your gmail; the full goals are in [docs/spec.md](docs/spec.md)), tries a call for everything but the agent's name, falls back to text, survives the ways people break onboardings, and lets you graduate early. it's my own project, not persona's real product, and the landing page says so top and bottom.
+
+## bring your own keys
+
+the public demo runs on your own keys; my paid keys are off. open [/chat](https://persona-onboarding-gold.vercel.app/chat), tap the key button (in the top bar on desktop, or in the phone's menu sheet), and paste whichever keys you have. they stay in this browser (localStorage), go out only with your own requests as headers (`x-anthropic-key`, `x-cartesia-key`, `x-browserbase-key`, `x-deepgram-key`), and are never stored or logged on the server.
+
+| key | where to get it | what it turns on | without it |
+|---|---|---|---|
+| anthropic | [console.anthropic.com/settings/keys](https://console.anthropic.com/settings/keys) | the agent itself, on claude (`claude-sonnet-5` by default, haiku for the small helpers). your requests skip the server's spend cap, since it's your money | scripted mock mode (below) |
+| cartesia | [play.cartesia.ai/keys](https://play.cartesia.ai/keys) | a natural voice on calls | calls use the browser's built-in speech |
+| browserbase | [browserbase.com/settings](https://www.browserbase.com/settings) | the `web_search` and `read_page` tools | the agent says it can't look things up and answers from memory |
+| deepgram (optional) | [console.deepgram.com](https://console.deepgram.com) | voice notes in the text thread, and sharper call transcription | calls use the browser's speech recognition (chrome or edge work best), and voice notes are off |
+
+**with zero keys nothing crashes.** the agent runs in scripted mock mode: deterministic replies that still walk the full onboarding flow. a banner asks you to add a key, calls work with browser speech in and out, the gmail step can use the labeled sample inbox, and web lookups are off.
+
+**self-hosting:** the server's env vars still work as defaults (see `.env.example` and [running it](#running-it)). a visitor's key always wins over the server's env key for that request. `CLAUDE_BUDGET_USD` caps only the server's own anthropic key, never a visitor's.
 
 ## summary
 
@@ -17,13 +32,13 @@ a text + voice onboarding for a persona style personal assistant, built as a pho
 **it serves before it sells.** the conversation moves come from research, chosen in code one per turn (*the mom test* for asking about a real recent moment, *to sell is human* for an easy yes and an easy no, *influence* for giving before asking). it helps with what you brought before it asks for anything, asks for gmail with a reason tied to your problem, takes "no" the first time, and treats "haha" as a laugh, not a yes. once gmail is in, it triages the inbox and interrupts for one thing that costs you if you wait, not a list of fourteen.
 
 **how i know it holds up.**
-- a harness of 20 simulated difficult users (hang-ups, refusals, rambling, spanish, prompt injection, call-me-back, drafting and sending), graded by claude sonnet 5 against the brief. i switched from a free grader to a strict one at the end on purpose: the same build dropped from 8.9 to 6.3, and the misses were real (claiming gmail was connected before it was, a silent rename under a prompt injection, a phone number invented from an inbox). three fix-and-regrade rounds took it to 7.45.
+- a harness of 20 simulated difficult users (hang-ups, refusals, rambling, spanish, prompt injection, call-me-back, drafting and sending), graded by claude sonnet 5 against [the spec](docs/spec.md). i switched from a free grader to a strict one at the end on purpose: the same build dropped from 8.9 to 6.3, and the misses were real (claiming gmail was connected before it was, a silent rename under a prompt injection, a phone number invented from an inbox). three fix-and-regrade rounds took it to 7.45.
 - the OWASP prompt injection families, 238 checks, hold against the real model.
-- 316 keyless smoke checks, 2000 fuzzed sessions and a generated stress matrix run in CI on every change.
+- 322 keyless smoke checks, 2000 fuzzed sessions and a generated stress matrix run in CI on every change.
 
 **what the data says, honestly.** the post-fix funnel is small (30 sessions) and mixed: more people get through naming, but fewer take the call now that texting is an equal yes. that's the first a/b test i'd run (call first vs after they say what they need), alongside the gmail ask on the call vs in the recap.
 
-**what i'd do first at persona** ([docs/first-30-days.md](docs/first-30-days.md)): put this engine behind imessage and real calls (the engine already treats the call as events, so the transport is the swap), instrument completion, gmail connect rate and time to first value, alert on guard fire rates as an early warning, and run the harness on every merge with a pinned rubric.
+**what i'd build next** ([docs/next.md](docs/next.md)): put this engine behind imessage and real calls (the engine already treats the call as events, so the transport is the swap), instrument completion, gmail connect rate and time to first value, alert on guard fire rates as an early warning, and run the harness on every merge with a pinned rubric.
 
 ## numbers
 
@@ -31,13 +46,13 @@ a text + voice onboarding for a persona style personal assistant, built as a pho
 |---|---|---|
 | final eval | **7.45 / 10** avg over 20 simulated difficult users, graded by claude sonnet 5 (6.30 in the first sonnet round) | [harness/ROUNDS.md](harness/ROUNDS.md) |
 | prompt injection, live | **238 / 238** checks hold against claude haiku 4.5, 26 payload runs | `pnpm injection --live` |
-| checks in CI | **316** smoke checks, 238 prompt injection checks, 2000 fuzzed sessions, stress matrix regenerated and diffed | `.github/workflows/ci.yml` |
+| checks in CI | **322** smoke checks, 238 prompt injection checks, 2000 fuzzed sessions, stress matrix regenerated and diffed | `.github/workflows/ci.yml` |
 | cost | **$0.0226 per onboarding**, $0.0013 per reply (every model call the product makes, over the final eval round) | `pnpm metrics` |
 | latency | **p95 3.6s** per model reply (many replies are written by code and go out instantly) | `pnpm metrics` |
 | funnel, before fixes | 126 sessions: 77% named the assistant, 38% took a call, median **50s** to first value (23 sessions got there) | [FUNNEL.md](FUNNEL.md) |
 | funnel, after fixes | 30 sessions: **87%** named the assistant, **17%** took a call, median 3.3 min to first value (4 sessions got there) | [FUNNEL-after-fixes.md](FUNNEL-after-fixes.md) |
 
-caveats: both funnels are small and mixed (my own testing, friends, reviewers), so read them as early signals. the eval is one run per persona, and a persona moves 2 to 3 points between runs of the same build, so read the average, not a single row.
+caveats: both funnels are small and mixed (my own testing and friends), so read them as early signals. the eval is one run per persona, and a persona moves 2 to 3 points between runs of the same build, so read the average, not a single row.
 
 ## try to break it
 
@@ -65,7 +80,7 @@ one page with the diagram, every guard, the failure modes and costs: [docs/archi
 
 the journal is how my understanding changed and why the agent behaves the way it does. short on time? read 03 (principles), 06 (what stress testing found), 07 (when to interrupt), 12 (the user leads) and 19 (a harder grader).
 
-- [01. reading the brief (and then reading it again)](docs/journal/01-reading-the-brief.md)
+- [01. what i set out to build (and then rethinking it)](docs/journal/01-what-i-set-out-to-build.md)
 - [02. trying their onboarding](docs/journal/02-trying-their-onboarding.md)
 - [03. principles: serve, don't sell](docs/journal/03-principles.md)
 - [04. voice, and all the ways people break things](docs/journal/04-voice-and-edge-cases.md)
@@ -94,9 +109,9 @@ i built this the way i'd want a small team to work, with ai agents as the team. 
 
 ```bash
 pnpm install
-cp .env.example .env.local   # ANTHROPIC_API_KEY + LLM_PROVIDER=anthropic (or GEMINI_API_KEY); with neither, a mock mode
+cp .env.example .env.local   # server defaults: ANTHROPIC_API_KEY + LLM_PROVIDER=anthropic (or GEMINI_API_KEY); with none, mock mode
 pnpm dev                      # http://localhost:3000
-pnpm smoke                    # 316 keyless checks
+pnpm smoke                    # 322 keyless checks
 pnpm injection                # 238 prompt injection checks (--live: against the real model)
 pnpm fuzz                     # 2000 seeded fuzzed sessions, invariants checked every step
 pnpm stress-matrix            # regenerates STRESS_TESTS.md from the source

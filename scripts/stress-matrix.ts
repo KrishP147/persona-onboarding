@@ -133,7 +133,7 @@ function smokeCell(claim: SmokeClaim): string {
 }
 
 // ---------------------------------------------------------------------------------------
-// 5. The matrix itself. One row per adversarial case a reviewer would try.
+// 5. The matrix itself. One row per adversarial case a tester would try.
 // ---------------------------------------------------------------------------------------
 interface Row {
   case: string;

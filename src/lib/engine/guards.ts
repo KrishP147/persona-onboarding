@@ -87,7 +87,7 @@ export function cutRepeatQuestions(s: Session, text: string): { text: string; la
 
 export async function noRepeatQuestions(s: Session, text: string): Promise<{ text: string; label?: string }> {
   const cut = cutRepeatQuestions(s, text);
-  if (!cut.label || !provider) return cut;
+  if (!cut.label || !provider()) return cut;
   // One cheap rewrite keeps the reply natural; if it still misses, the cut stands.
   try {
     const asked = (s.askedQuestions ?? []).slice(-6).map((q) => `- ${q}`).join("\n") || "(none)";

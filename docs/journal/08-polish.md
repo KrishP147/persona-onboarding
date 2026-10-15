@@ -2,7 +2,7 @@
 
 *sept 27, 2026, overnight*
 
-the brief says it should feel conversational and survive people who don't play by the rules. by tonight the big pieces worked. what was left was a long list of small things that each made it feel a little less like a person: a reply that took five seconds, a goodbye that was never spoken, a question asked twice in a row. this entry is about those.
+the spec says it should feel conversational and survive people who don't play by the rules. by tonight the big pieces worked. what was left was a long list of small things that each made it feel a little less like a person: a reply that took five seconds, a goodbye that was never spoken, a question asked twice in a row. this entry is about those.
 
 ## sounding like persona, not like a chatbot
 

@@ -2,7 +2,7 @@
 
 *sept 27, 2026*
 
-the brief says onboarding should "show how we can provide value." the easy mistake is to read that as a sales pitch: tell them what persona can do, then ask for their stuff. i think it's the opposite. the experience should be so helpful, so quickly, that handing over a name or connecting gmail feels like part of being helped. nobody should feel sold to.
+one of my goals for this onboarding (the [spec](../spec.md)) is that it should "show how we can provide value." the easy mistake is to read that as a sales pitch: tell them what persona can do, then ask for their stuff. i think it's the opposite. the experience should be so helpful, so quickly, that handing over a name or connecting gmail feels like part of being helped. nobody should feel sold to.
 
 this entry is where i collected the ideas that shaped the bot, where they come from, and where they live in the code. a principle only counts if it changes a behavior, so each one points at something real.
 

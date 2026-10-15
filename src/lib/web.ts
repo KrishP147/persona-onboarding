@@ -1,17 +1,21 @@
 // Live web access through Browserbase (search: titles + links, fetch: one page as markdown).
-// Browserbase has no spend cap of its own, so every call is counted in Redis and capped here.
+// Browserbase has no spend cap of its own, so every call on the server's key is counted in Redis and
+// capped here. A visitor's own key (x-browserbase-key) wins for their requests and isn't capped: their money.
 import { incrDaily, incrTotal } from "./store";
+import { scrub, userKeys } from "./keys";
 
-const KEY = process.env.BROWSERBASE_API_KEY || "";
+const ENV_KEY = process.env.BROWSERBASE_API_KEY || "";
+const key = () => userKeys().browserbase || ENV_KEY;
 const API = "https://api.browserbase.com/v1";
 const DAILY = Number(process.env.WEB_DAILY_CALLS ?? 20);
 const TOTAL = Number(process.env.WEB_TOTAL_CALLS ?? 100);
 const PAGE_CHARS = 4000;
 
-export const webEnabled = () => KEY !== "";
+export const webEnabled = () => key() !== "";
 
 // Search and fetch share one budget (each is one paid request).
 async function underCap(): Promise<boolean> {
+  if (userKeys().browserbase) return true;
   if ((await incrDaily("web").catch(() => Infinity)) > DAILY) return false;
   if ((await incrTotal("web").catch(() => Infinity)) > TOTAL) return false;
   return true;
@@ -20,7 +24,7 @@ async function underCap(): Promise<boolean> {
 async function bb<T>(path: string, body: object): Promise<T> {
   const res = await fetch(`${API}${path}`, {
     method: "POST",
-    headers: { "Content-Type": "application/json", "X-BB-API-Key": KEY },
+    headers: { "Content-Type": "application/json", "X-BB-API-Key": key() },
     body: JSON.stringify(body),
     signal: AbortSignal.timeout(12000),
   });
@@ -41,7 +45,7 @@ export async function webSearch(query: string, count: number): Promise<string> {
       "\n(titles and links only. to get the actual facts, call read_page on the best link.)"
     );
   } catch (e) {
-    console.error(String((e as Error).message ?? e).slice(0, 200));
+    console.error(scrub((e as Error).message ?? e).slice(0, 200));
     return "error: the search didn't go through. tell them honestly; don't make up results";
   }
 }
@@ -57,7 +61,8 @@ export async function readPage(url: string): Promise<string> {
     const clean = text.replace(/!\[[^\]]*\]\([^)]*\)/g, "").replace(/\n{3,}/g, "\n\n").trim();
     return clean.length > PAGE_CHARS ? `${clean.slice(0, PAGE_CHARS)}\n...(cut)` : clean;
   } catch (e) {
-    console.error(String((e as Error).message ?? e).slice(0, 200));
+    console.error(scrub((e as Error).message ?? e).slice(0, 200));
     return "error: that page didn't load. try another link or tell them honestly";
+
   }
 }

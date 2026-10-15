@@ -50,7 +50,7 @@ export function scoreItem(item: InboxItem): Scored {
 }
 
 async function judgeAmbiguous(items: Scored[], need: string | null): Promise<Scored[]> {
-  if (!provider || items.length === 0) return [];
+  if (!provider() || items.length === 0) return [];
   try {
     const out = await json<{ picks: { index: number; interrupt: boolean; reason: string }[] }>({
       tag: "triage",

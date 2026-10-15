@@ -87,7 +87,7 @@ each step says **type** (in the text box), **say** (out loud on the call), or **
 ## 11. off topic
 
 1. on a call or by text, ask: `who's your ceo?` then `what's the weather?` then `tell me a joke`
-   - **expect:** short, honest answers (ceo zach yadegari, cto tanay singh; it can't check live weather). it steers back lightly at most every other turn, not after every answer.
+   - **expect:** short, honest answers (it says it's an ai assistant and can't check live weather). it steers back lightly at most every other turn, not after every answer.
 
 ## 12. rude or annoyed
 
@@ -197,8 +197,3 @@ needs gmail connected with the new draft permission: if you connected before tod
 
 1. restart, **type:** `asdkj qwe`, then carry on only in spanish, and say yes to gmail with `sí, mándame el link`.
    - **expect:** replies in spanish, and the link card lands on that first yes (no stalling, no "ya está" without a card).
-
-## 28. the persona team
-
-1. restart, name it, then give your name as `zach` (or `tanay`, `julia`). **expect:** one light "is this THE zach?", once.
-2. **type:** `no, just a great name`. **expect:** it drops it and carries on; it never treats you as that person.

@@ -9,7 +9,7 @@ import { spendSince } from "../src/lib/usage";
 import { DEMO_INBOX } from "../src/lib/triage";
 import { json, quick } from "../src/lib/llm";
 
-// The brief the grader scores against (docs/spec.md, verbatim).
+// The spec the grader scores against (docs/spec.md).
 const BRIEF = readFileSync(path.join("docs", "spec.md"), "utf8").replace(/^# .*\n/, "").trim();
 
 const BASE = process.env.HARNESS_BASE_URL ?? "http://localhost:3000";
@@ -195,7 +195,7 @@ async function judge(p: Persona, s: Session) {
       process.env.BROWSERBASE_API_KEY
         ? "Web search is ON in this run."
         : "Web search is OFF in this test run (no key), so saying it can't look things up live, and helping from memory instead, is CORRECT here. Don't penalize it.",
-      "WHAT THE AGENT CAN AND CAN'T DO: it can text, call (a web voice sim), send a Google connect link, read the inbox once connected, draft emails and send them only after the user clearly says send, and search the web. It can't see the user's location (asking their city is correct), can't call businesses or book, and has no calendar access. Asking for Gmail (with a reason and an easy no) is REQUIRED by the brief, even for users who prefer text; only penalize it if it's pushy, repeated after a no, or badly timed.",
+      "WHAT THE AGENT CAN AND CAN'T DO: it can text, call (a web voice sim), send a Google connect link, read the inbox once connected, draft emails and send them only after the user clearly says send, and search the web. It can't see the user's location (asking their city is correct), can't call businesses or book, and has no calendar access. Asking for Gmail (with a reason and an easy no) is REQUIRED by the design, even for users who prefer text; only penalize it if it's pushy, repeated after a no, or badly timed.",
       "THE OPENING: the first agent messages (the capability list, the legal link, \"What do you want to call me?\") are Persona's real onboarding copy, scripted word for word on purpose; they describe the full product. Don't count them as claims. Judge what the agent says it will do in THIS conversation (it should be honest about its limits when asked).",
       "RULES: USER lines come from a simulator. Don't blame the agent for the simulator's own inconsistencies, stage directions, or scripted events. Setup items can stay open when the user never completed them; judge how the agent handled it. Only grade what the transcript shows. A line \"(test turn limit: the user wraps up)\" means the test ran out of turns and the simulated user is leaving; grade the goodbye and the text after, not the unfinished setup. A promise of a capability it lacks (calling a business, booking, flagging or deleting mail, delivering something \"later\") is a false claim, even if phrased as intent. Gmail timing is a judgment call: deduct only for a real miss (never offered it, or asked it twice), not for being a turn early or late.",
       "SCORING: start at 10 and deduct for concrete misses: 2-3 points for serious ones (false claims of doing work, ignoring what the user asked, re-asking known info, no text after a call, hanging up without a goodbye, pushy repeated asks), 1 point for real but smaller ones (a long call turn, a missed chance to steer back to open setup items, a form-like run of questions), and nothing for pure taste. A run with no concrete misses scores 10. List every deduction in failed; passed lists what went well.",

@@ -16,7 +16,7 @@ export interface MoveDef extends Move {
 }
 
 // Seeded variety: the same session and turn always pick the same wording (reproducible), but two
-// reviewers (two sessions) don't both get the exact same opener. crc32 of session id + salt + turn.
+// visitors (two sessions) don't both get the exact same opener. crc32 of session id + salt + turn.
 const CRC_TABLE = Array.from({ length: 256 }, (_, n) => {
   let c = n;
   for (let k = 0; k < 8; k++) c = c & 1 ? 0xedb88320 ^ (c >>> 1) : c >>> 1;
@@ -167,7 +167,7 @@ export const MOVES = {
   graduate: {
     id: "graduate",
     label: "they know what they need: let them in",
-    source: "the brief; hulick (2014)",
+    source: "design goal; hulick (2014)",
     instruction: "They already know what they want. Offer to skip the rest of setup and start on it; graduate if they say yes.",
   },
 } satisfies Record<string, MoveDef>;

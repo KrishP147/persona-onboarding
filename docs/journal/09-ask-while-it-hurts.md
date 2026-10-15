@@ -10,7 +10,7 @@ four questions, no offer, and the one thing that would have helped showed up aft
 
 the mom test (fitzpatrick, *the mom test*, 2013) is about learning whether a problem is real before you build anything. you ask about the past, not about hypotheticals, and you don't pitch. that's the right instinct for a founder talking to strangers.
 
-it's the wrong default here. this person already signed up. they aren't a research subject, they're a customer waiting to be helped. the questions exist for one reason: so the suggestion that follows feels earned instead of scripted. one or two good ones do that. a fifth one feels like a form with a friendly voice, which is exactly what the brief says not to build.
+it's the wrong default here. this person already signed up. they aren't a research subject, they're a customer waiting to be helped. the questions exist for one reason: so the suggestion that follows feels earned instead of scripted. one or two good ones do that. a fifth one feels like a form with a friendly voice, which is exactly what i set out not to build.
 
 so the rule became:
 

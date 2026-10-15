@@ -1,18 +1,18 @@
-# my first 30 days at persona
+# what i'd build next
 
 *sept 28, 2026*
 
-this sim is a web page, but everything that matters in it is the engine: the turn loop, the guards, the session shared by text and voice. none of that cares where the words come from. so the first month is mostly plugging the engine into the places persona already lives, measuring it honestly, and testing the few decisions i'm least sure about.
+this sim is a web page, but everything that matters in it is the engine: the turn loop, the guards, the session shared by text and voice. none of that cares where the words come from. so the next step is mostly plugging the engine into real channels, measuring it honestly, and testing the few decisions i'm least sure about.
 
-## week 1: plug it in
+## real channels
 
-- **imessage and rcs.** the text thread becomes persona's real messaging channel. the engine already works on events ("they texted", "they went quiet", "they connected gmail"), so the channel is an adapter: inbound message in, bubbles out, typing indicators and read receipts mapped to what each platform supports. the left-on-read double text runs on a server timer instead of a browser one.
-- **real calls.** the browser call becomes a phone call (twilio media streams or persona's current stack), with the same events: started, silence, hung up. the goodbye and the recap after every call already live in code, which is exactly the part persona's current flow drops.
-- **the screenless band.** voice-only onboarding is the hardest version, because there's no screen for a link, a contact card, or a draft. the engine already separates "said out loud" from "put in the chat", so on the band, "in the chat" becomes "in your texts on your phone", and the one thing that can't happen by voice (google sign-in) becomes a text with the link while the call keeps going. the name for the agent, which the brief keeps text-only, moves to the first text after the call.
+- **imessage and rcs.** the text thread becomes a real messaging channel. the engine already works on events ("they texted", "they went quiet", "they connected gmail"), so the channel is an adapter: inbound message in, bubbles out, typing indicators and read receipts mapped to what each platform supports. the left-on-read double text runs on a server timer instead of a browser one.
+- **real calls.** the browser call becomes a phone call (twilio media streams or similar), with the same events: started, silence, hung up. the goodbye and the recap after every call already live in code, which is exactly the part persona's current flow drops.
+- **a screenless wearable.** voice-only onboarding (think persona's band) is the hardest version, because there's no screen for a link, a contact card, or a draft. the engine already separates "said out loud" from "put in the chat", so on a wearable, "in the chat" becomes "in your texts on your phone", and the one thing that can't happen by voice (google sign-in) becomes a text with the link while the call keeps going. the name for the agent, which the spec keeps text-only, moves to the first text after the call.
 
 ## what i'd measure
 
-the dashboard i'd want on day one, from session events (the same ones `pnpm funnel` reads today):
+the dashboard i'd want from day one, from session events (the same ones `pnpm funnel` reads today):
 
 - **completion:** of people who send a first message, how many get through naming, the call, their name, their need, and gmail, and where each one drops. the development-period baseline is in [FUNNEL.md](../FUNNEL.md).
 - **gmail connect rate:** connected over asked, split by where the ask happened (on the call, over text, after a failed sign-in). this is the step that unlocks everything after onboarding.

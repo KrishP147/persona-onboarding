@@ -2,7 +2,7 @@
 
 *sept 28, 2026*
 
-by the last day the harness said 8.9 out of 10, and i didn't fully trust it. the simulated users and the grader were cohere's free trial, picked because it cost nothing, and a free grader that likes you is a comfortable place to stop. so for the final eval i swapped both for claude sonnet 5, kept the agent on haiku 4.5 (what prod runs), and added four personas for the things a reviewer would actually try: "call me back in a minute", "what can you do?", drafting and sending an email, and giving your name as zach.
+near the end the harness said 8.9 out of 10, and i didn't fully trust it. the simulated users and the grader were cohere's free trial, picked because it cost nothing, and a free grader that likes you is a comfortable place to stop. so for the final eval i swapped both for claude sonnet 5, kept the agent on haiku 4.5 (what prod runs), and added four personas for the things a curious first-time user would actually try: "call me back in a minute", "what can you do?", drafting and sending an email, and giving a name the agent half recognizes.
 
 the same build scored 6.3.
 
@@ -18,7 +18,7 @@ most of the drop was real. reading every transcript by hand, the misses sorted i
 
 ## what i didn't fix
 
-the most common remaining note is that a short run ended with the name or gmail never asked. with eight turns and a user who keeps changing the subject, the agent follows them instead of pulling back to setup. that's "the user leads" (journal 12) trading against the brief's "gentle steering", and i'd rather settle it with real users and an a/b test than by tuning to a grader. some deductions are the rig itself: a scripted "accept call" answering an offer the simulated user never said yes to, or the grader reading persona's own intro copy as the agent overclaiming (it's told now; it still sometimes does).
+the most common remaining note is that a short run ended with the name or gmail never asked. with eight turns and a user who keeps changing the subject, the agent follows them instead of pulling back to setup. that's "the user leads" (journal 12) trading against the spec's "gentle steering", and i'd rather settle it with real users and an a/b test than by tuning to a grader. some deductions are the rig itself: a scripted "accept call" answering an offer the simulated user never said yes to, or the grader reading persona's own intro copy as the agent overclaiming (it's told now; it still sometimes does).
 
 ## the numbers
 

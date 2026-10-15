@@ -9,6 +9,7 @@ import { useVoiceCall } from "./useVoiceCall";
 import { useIdleNudge } from "./useIdleNudge";
 import { useStuckHint } from "./useStuckHint";
 import { usePref } from "./usePref";
+import { keyHeaders, useKeys } from "./keys";
 
 const LS_KEY = "persona-onboarding-session";
 // event-handler clock (kept out of render so the purity lint rule stays quiet)
@@ -29,11 +30,13 @@ function storeId(id: string) {
 
 async function post<T>(url: string, body: unknown, keepalive = false): Promise<T> {
   // keepalive lets a hangup reach the server as the tab closes, but caps bodies at 64KB, so events only.
-  const res = await fetch(url, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body), keepalive });
+  // the visitor's own keys (if any) ride along as headers; they never go in the body or the session
+  const headers = { "Content-Type": "application/json", ...keyHeaders() };
+  const res = await fetch(url, { method: "POST", headers, body: JSON.stringify(body), keepalive });
   if (res.status === 409) {
     // the previous turn on this conversation is still finishing: wait a beat and try once more.
     await new Promise((r) => setTimeout(r, 1200));
-    const again = await fetch(url, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body), keepalive });
+    const again = await fetch(url, { method: "POST", headers, body: JSON.stringify(body), keepalive });
     if (!again.ok) throw new Error(`${again.status}`);
     return again.json();
   }
@@ -186,8 +189,9 @@ export function useChat() {
   const resync = useCallback(async () => {
     if (!idRef.current) return;
     try {
-      const res = await fetch(`/api/session?id=${encodeURIComponent(idRef.current)}`, { cache: "no-store" });
-      const data = (await res.json()) as { session: Session; chips: string[] };
+      const res = await fetch(`/api/session?id=${encodeURIComponent(idRef.current)}`, { cache: "no-store", headers: keyHeaders() });
+      const data = (await res.json()) as { session: Session; chips: string[]; mock: boolean };
+      setMock(data.mock);
       if (busyRef.current > 0) return; // a reply is on its way; it carries the fresh state
       setSession(data.session);
       setMessages((prev) => {
@@ -324,7 +328,7 @@ export function useChat() {
     bootedRef.current = true;
     (async () => {
       const stored = readStoredId();
-      const res = await fetch(`/api/session${stored ? `?id=${encodeURIComponent(stored)}` : ""}`);
+      const res = await fetch(`/api/session${stored ? `?id=${encodeURIComponent(stored)}` : ""}`, { headers: keyHeaders() });
       const data = (await res.json()) as { session: Session; chips: string[]; mock: boolean };
       idRef.current = data.session.id;
       storeId(data.session.id);
@@ -350,6 +354,13 @@ export function useChat() {
       }
     })().catch(() => setError("couldn't reach the server"));
   }, [sendEvent, resync]);
+
+  // keys added or cleared in settings: ask the server again whether there's a model to talk to (mock banner)
+  const [keys] = useKeys();
+  useEffect(() => {
+    if (bootedRef.current) void resync();
+  }, [keys, resync]);
+
 
   const send = async (text: string, extra?: { attachments: Attachment[] }) => {
     if (!idRef.current || (!text.trim() && pending.length === 0 && !extra)) return;
@@ -424,10 +435,15 @@ export function useChat() {
     const blob = new Blob(r.chunks, { type: r.rec.mimeType || "audio/webm" });
     setTranscribing(true);
     try {
-      const res = await fetch(`/api/voice/transcribe?s=${encodeURIComponent(idRef.current)}`, { method: "POST", headers: { "Content-Type": blob.type }, body: blob });
+      const res = await fetch(`/api/voice/transcribe?s=${encodeURIComponent(idRef.current)}`, { method: "POST", headers: { "Content-Type": blob.type, ...keyHeaders() }, body: blob });
       const data = (await res.json()) as { transcript?: string };
       const words = data.transcript?.trim();
+      if (res.status === 503) {
+        setError("voice notes need a Deepgram key: add one under Keys, or just type it");
+        return;
+      }
       if (!res.ok || !words) {
+
         setError(res.ok ? "couldn't make out any words in that one. try again?" : "that voice note didn't go through, try again?");
         return;
       }

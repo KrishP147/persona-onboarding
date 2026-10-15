@@ -16,6 +16,9 @@ import { keyterms } from "../src/lib/voice";
 import { applyExtracted, reconcileHooks } from "../src/lib/extract";
 import { costOf, metered, percentile, recordUsage } from "../src/lib/usage";
 import { GET as SessionGET } from "../src/app/api/session/route";
+import { keysFrom, scrub, withKeys } from "../src/lib/keys";
+import { provider } from "../src/lib/llm";
+import { webEnabled } from "../src/lib/web";
 
 delete process.env.ANTHROPIC_API_KEY;
 let fails = 0;
@@ -1123,7 +1126,22 @@ async function main() {
     check(`intent ${name}: ${d.means}`, !missed.length && !wrong.length, [...missed.map((x) => `missed "${x}"`), ...wrong.map((x) => `wrongly caught "${x}"`)].join(", "));
   }
 
+  // bring-your-own keys (no network: nothing here calls a provider)
+  const fakeKey = "sk-ant-test-0000000000";
+  const kreq = new Request("http://x/api/session", { headers: { "x-anthropic-key": fakeKey, "x-browserbase-key": "bb_test_00000000", "x-cartesia-key": "bad key with spaces" } });
+  const parsedKeys = keysFrom(kreq);
+  check("byo: keys read from headers, junk values dropped", parsedKeys.anthropic === fakeKey && parsedKeys.browserbase === "bb_test_00000000" && !parsedKeys.cartesia, JSON.stringify(Object.keys(parsedKeys)));
+  check("byo: no key anywhere = mock, web off", provider() === null && !webEnabled());
+  const inCtx = await withKeys(parsedKeys, async () => [provider(), webEnabled(), scrub(new Error(`401 bad key ${fakeKey}`))] as const);
+  check("byo: a visitor anthropic key switches this request to anthropic and enables web", inCtx[0] === "anthropic" && inCtx[1] === true);
+  check("byo: scrub takes the key out of logged errors", !inCtx[2].includes(fakeKey) && inCtx[2].includes("[key]"), inCtx[2]);
+  check("byo: outside the request, back to keyless", provider() === null && !webEnabled());
+  const mockRes = (await (await SessionGET(new Request("http://x/api/session", { headers: { "x-anthropic-key": fakeKey } }))).json()) as { mock: boolean };
+  const mockNo = (await (await SessionGET(new Request("http://x/api/session"))).json()) as { mock: boolean };
+  check("byo: session GET reports mock only without a key, never echoes it", mockRes.mock === false && mockNo.mock === true && !JSON.stringify(mockRes).includes(fakeKey));
+
   console.log(fails ? `\n${fails} failed` : "\nall passed");
+
   process.exit(fails ? 1 : 0);
 }
 main();
