@@ -97,10 +97,6 @@ export interface Session {
   nameCheck?: { value: string; as: "user" | "agent" | "confirm" | "same" }; // "same": they said their name is ours, asked "so we have the same name?" // a bare name answered two open name questions: we leaned one way and asked which
   agentNameDefaulted?: boolean; // they skipped naming it: goes by "Persona" until they pick one
   callbackAt?: number; // they asked us to hang up and call back: when (ms epoch)
-  teamGuess?: string; // easter egg: the last persona team name we asked about (src/lib/team.ts)
-  teamAsked?: string[]; // every team name we've asked about (zach -> julia -> zach asks twice, not three times)
-  teamYes?: string[]; // ...the ones they said yes to
-  teamGreetedFor?: string[]; // ...and got the code-written "no way, an honor!" for
   inboxToScan?: InboxItem[]; // gmail just connected over text: the inbox look happens in its own event (inbox_scan) so "connected" shows at once
   emailSeen?: string[]; // email text the agent has seen (subjects, snippets): slot values found only here are quarantined
   metrics?: SessionMetrics; // per-session cost and model latency (src/lib/usage.ts meter)
