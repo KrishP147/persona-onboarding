@@ -3,6 +3,7 @@
 import { useCallback, useMemo, useRef, useState } from "react";
 import { MenuSheet, TopBar } from "./chrome";
 import { Intro } from "./Intro";
+import { KeyBanner, KeysPanel } from "./KeysPanel";
 import { CallPhone, DeviceFrame, FRAMES, PhoneScreen, useFrameZoom } from "./Phone";
 import { SKINS, useSkin } from "./skins";
 import { Stage, StageItem, useMedia, useViewportWidth } from "./Stage";
@@ -35,6 +36,8 @@ export default function Home() {
     toastTimer.current = setTimeout(() => setToast(null), 1500);
   };
   const [menuOpen, setMenuOpen] = useState(false); // phone: picker, reasoning, restart
+  const [keysOpen, setKeysOpen] = useState(false); // bring-your-own keys
+  const closeKeys = useCallback(() => setKeysOpen(false), []);
   const [hoverId, setHoverRaw] = useState<string | null>(null);
   const [activeId, setActive] = useState<string | null>(null);
   const [seenN, setSeenN] = useState(0); // turns there were when the map was last open
@@ -122,7 +125,8 @@ export default function Home() {
 
   return (
     <main className="min-h-dvh bg-canvas text-ink flex flex-col overflow-x-clip">
-      <TopBar skin={picked?.id ?? null} setSkin={setSkin} pill={pill(vw < 768)} typingHints={typingHints} toggleTypingHints={() => setTypingHints(!typingHints)} onRestart={restart} mock={chat.mock} />
+      <TopBar skin={picked?.id ?? null} setSkin={setSkin} pill={pill(vw < 768)} typingHints={typingHints} toggleTypingHints={() => setTypingHints(!typingHints)} onRestart={restart} mock={chat.mock} onKeys={() => setKeysOpen(true)} />
+      {chat.mock && <KeyBanner onOpen={() => setKeysOpen(true)} />}
       {/* phones sit centered; a call adds a second phone and the map joins on the right, all gliding to share the middle (lg+) */}
       <Stage
         sig={[call ? "call" : "", showWhy && lg ? "map" : ""].join("|")}
@@ -172,11 +176,17 @@ export default function Home() {
           typingHints={typingHints}
           setTypingHints={setTypingHints}
           mock={chat.mock}
+          onKeys={() => {
+            setMenuOpen(false);
+            setKeysOpen(true);
+          }}
           onClose={() => setMenuOpen(false)}
           onRestart={restart}
         />
       )}
       <Intro />
+      {keysOpen && <KeysPanel onClose={closeKeys} />}
+
     </main>
   );
 }

@@ -6,6 +6,7 @@ import { SKIN_IDS, type SkinId } from "./skins/types";
 import { MapGlyph } from "./why/ReasoningMap";
 import { Mark } from "@/components/landing/svgs";
 import { ThemeToggle } from "@/components/ThemeToggle";
+import { KeyGlyph, KeysPill } from "./KeysPanel";
 
 const LABEL: Record<SkinId, string> = { iphone: "iPhone", pixel: "Pixel", galaxy: "Galaxy" };
 
@@ -124,7 +125,7 @@ function HintsPill({ on, onClick }: { on: boolean; onClick: () => void }) {
   );
 }
 
-export function TopBar({ skin, setSkin, pill, typingHints, toggleTypingHints, onRestart, mock }: { skin: SkinId | null; setSkin: (id: SkinId) => void; pill: ReactNode; typingHints: boolean; toggleTypingHints: () => void; onRestart: () => void; mock: boolean }) {
+export function TopBar({ skin, setSkin, pill, typingHints, toggleTypingHints, onRestart, mock, onKeys }: { skin: SkinId | null; setSkin: (id: SkinId) => void; pill: ReactNode; typingHints: boolean; toggleTypingHints: () => void; onRestart: () => void; mock: boolean; onKeys: () => void }) {
   return (
     <nav aria-label="Page" className="hidden sm:grid grid-cols-[1fr_auto_1fr] items-center h-16 px-6">
       <div className="flex items-center gap-3">
@@ -137,6 +138,7 @@ export function TopBar({ skin, setSkin, pill, typingHints, toggleTypingHints, on
           {pill}
         </span>
         <HintsPill on={typingHints} onClick={toggleTypingHints} />
+        <KeysPill onClick={onKeys} />
         <RestartPill onRestart={onRestart} />
         <ThemeToggle />
       </div>
@@ -145,7 +147,7 @@ export function TopBar({ skin, setSkin, pill, typingHints, toggleTypingHints, on
 }
 
 // phones: the menu is a bottom sheet with the phone picker, the reasoning switch, typing hints, appearance and restart
-export function MenuSheet({ skin, setSkin, canReason, onReasoning, typingHints, setTypingHints, onRestart, onClose, mock }: { skin: SkinId | null; setSkin: (id: SkinId) => void; canReason: boolean; onReasoning: () => void; typingHints: boolean; setTypingHints: (v: boolean) => void; onRestart: () => void; onClose: () => void; mock: boolean }) {
+export function MenuSheet({ skin, setSkin, canReason, onReasoning, typingHints, setTypingHints, onRestart, onClose, mock, onKeys }: { skin: SkinId | null; setSkin: (id: SkinId) => void; canReason: boolean; onReasoning: () => void; typingHints: boolean; setTypingHints: (v: boolean) => void; onRestart: () => void; onClose: () => void; mock: boolean; onKeys: () => void }) {
   const headRef = useRef<HTMLHeadingElement>(null);
   useEffect(() => {
     headRef.current?.focus();
@@ -183,7 +185,18 @@ export function MenuSheet({ skin, setSkin, canReason, onReasoning, typingHints, 
           </span>
           <span aria-hidden className="text-ink-mute">›</span>
         </button>
+        <button onClick={onKeys} className="mt-3 w-full min-h-11 flex items-center justify-between gap-4 text-left">
+          <span className="flex items-center gap-3">
+            <KeyGlyph size={18} />
+            <span>
+              <span className="block text-[15px] font-medium">Your API keys</span>
+              <span className="block text-[13px] text-ink-mute">{mock ? "none yet: scripted replies until you add one" : "kept in this browser only"}</span>
+            </span>
+          </span>
+          <span aria-hidden className="text-ink-mute">â€º</span>
+        </button>
         <label className="mt-3 flex items-center justify-between gap-4 min-h-11">
+
           <span>
             <span className="block text-[15px] font-medium">Typing hints <span className={typingHints ? "text-pgreen" : "text-ink-mute"}>· {typingHints ? "On" : "Off"}</span></span>
             <span className="block text-[13px] text-ink-mute">an example while you wait to reply</span>

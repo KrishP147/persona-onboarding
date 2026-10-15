@@ -2,9 +2,11 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { VoiceStyle } from "@/lib/types";
 import { turnEndDelay } from "./turnEnd";
+import { keyHeaders } from "./keys";
 
 // Voice layer. Speech in: Deepgram streaming (short-lived token from /api/voice/token), else
 // browser Web Speech. Speech out: Cartesia via /api/voice/tts, else browser speechSynthesis.
+// The visitor's own Deepgram / Cartesia keys (settings) ride along as headers; with none, it's all browser speech.
 // Either way the server contract is the same: text in, text + actions out.
 //
 // Turn-taking rules (see docs/journal/04-voice-and-edge-cases.md):
@@ -89,7 +91,7 @@ async function lockVoice(style: VoiceStyle): Promise<SpeechSynthesisVoice | unde
 
 async function fetchClip(sessionId: string, text: string, style: VoiceStyle, signal: AbortSignal): Promise<string | null> {
   try {
-    const r = await fetch("/api/voice/tts", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ sessionId, text, style }), signal });
+    const r = await fetch("/api/voice/tts", { method: "POST", headers: { "Content-Type": "application/json", ...keyHeaders() }, body: JSON.stringify({ sessionId, text, style }), signal });
     if (!r.ok) return null;
     return URL.createObjectURL(await r.blob());
   } catch {
@@ -207,7 +209,8 @@ type Deepgram = { stop: () => void; pause: (on: boolean) => void };
 // a fresh session: one socket carries one recording (one container header, one clock).
 async function startDeepgram(sessionId: string, stream: MediaStream, onHeard: Heard, onDrop: () => void, onSpeechStart: () => void): Promise<Deepgram | null> {
   try {
-    const r = await fetch(`/api/voice/token?s=${encodeURIComponent(sessionId)}`, { cache: "no-store" });
+    const r = await fetch(`/api/voice/token?s=${encodeURIComponent(sessionId)}`, { cache: "no-store", headers: keyHeaders() });
+
     if (!r.ok) return null;
     const j = (await r.json()) as { token: string; keyterms?: unknown };
     const token = j.token;
