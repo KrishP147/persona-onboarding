@@ -1,10 +1,10 @@
 # harness rounds (claude haiku 4.5 agent, local dev server, never prod)
 
-every round runs simulated difficult users against a local dev server with its own in-memory store (it never touches prod). the agent under test is claude haiku 4.5, the model prod runs. the grader starts at 10 and takes points off for concrete misses against `docs/spec.md`. transcripts live in `harness/runs/<folder>/` (gitignored, local only).
+every round runs simulated difficult users against a local dev server with its own in-memory store (it never touches prod). the agent under test is claude haiku 4.5, the model prod runs. the grader starts at 10 and takes points off for concrete misses against the spec in `docs/spec.md`. transcripts live in `harness/runs/<folder>/` (gitignored, local only).
 
 ## the final eval: claude sonnet 5 as the simulated user and the grader
 
-for the last three rounds the simulated users and the grader moved from cohere's free trial to claude sonnet 5, and four personas were added for flows a reviewer would try (call me back, "what can you do?", drafting and sending an email, the persona-team easter egg). sonnet grades much harder than cohere did: the same build that averaged 8.9 under cohere scored 6.3 in its first sonnet round. that was the point. each round's misses were read by hand, the real ones fixed (with a keyless smoke check for each), and the next round run on the fixed build.
+for the last three rounds the simulated users and the grader moved from cohere's free trial to claude sonnet 5, and four personas were added for flows a curious first-time user would try (call me back, "what can you do?", drafting and sending an email, a familiar-name easter egg). sonnet grades much harder than cohere did: the same build that averaged 8.9 under cohere scored 6.3 in its first sonnet round. that was the point. each round's misses were read by hand, the real ones fixed (with a keyless smoke check for each), and the next round run on the fixed build.
 
 | persona | r5 | r6 | r7 |
 |---|---|---|---|
@@ -41,7 +41,7 @@ folders: r5 `2026-09-28T18-08-24-686Z`, r6 `2026-09-28T18-20-52-581Z`, r7 `2026-
 
 ### what's left, honestly
 
-- the grader's most common remaining note is that a short run ended with setup items open (name or gmail never asked). with 6 to 10 turns and a user who keeps changing the subject, the agent follows them rather than pulling back to setup, which is the brief's "gentle steering" trading off against "the user leads". it's the next thing i'd tune, with a/b data rather than a grader.
+- the grader's most common remaining note is that a short run ended with setup items open (name or gmail never asked). with 6 to 10 turns and a user who keeps changing the subject, the agent follows them rather than pulling back to setup, which is the spec's "gentle steering" trading off against "the user leads". it's the next thing i'd tune, with a/b data rather than a grader.
 - some deductions are the rig, not the agent: a scripted "accept call" answers an offer the simulated user never said yes to (laugher), and the grader sometimes reads the scripted persona intro as the agent overclaiming.
 - a single run per persona is noisy: the same build moves a persona 2 to 3 points between rounds.
 

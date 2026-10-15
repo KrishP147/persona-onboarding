@@ -27,7 +27,7 @@ people who tried persona talk most about one thing: it makes calls for you. it c
 
 ## sources
 
-- the interruption rule is my own answer to "how would you decide that something in a user's data deserves interrupting them", written for this trial
+- the interruption rule is my own answer to a question i kept coming back to: how do you decide that something in a user's data deserves interrupting them
 - praxic: https://www.krishpunjabi.com/projects/praxic
 - rudy arora (@rudybuild) on x, sept 15, 2026, on persona calling a restaurant for a reservation, and the quote post listing hold times and parallel hotel calls
 - gmail api, messages.list and messages.get with format=metadata: https://developers.google.com/gmail/api/reference/rest/v1/users.messages

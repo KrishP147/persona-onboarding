@@ -1,6 +1,6 @@
 # persona site teardown
 
-pulled apart yourpersona.com on 2026-09-27 so our landing page and the chrome around the sim can speak the same language. everything below came from their shipped css bundle, the page html, computed styles in headless chrome at 1440 and 390, and pixel samples from screenshots. values marked "est" are eyeballed.
+pulled apart yourpersona.com on 2026-09-27 so our landing page and the chrome around the sim look like a persona style product. everything below came from their shipped css bundle, the page html, computed styles in headless chrome at 1440 and 390, and pixel samples from screenshots. values marked "est" are eyeballed.
 
 ## the feel in one line
 
