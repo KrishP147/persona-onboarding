@@ -443,15 +443,15 @@ async function main() {
   check("connect over text: instant line + inbox_scan next", cx1.actions.some((a) => a.type === "inbox_scan") && /no real email ever leaves it/.test(said(cx1)) && !!cx.inboxToScan, said(cx1));
   await handleEvent(cx, { type: "inbox_scan" });
   check("...inbox_scan looks once", !cx.inboxToScan && (await handleEvent(cx, { type: "inbox_scan" })).newMessages.length === 0);
-  // demo drafts: an inbox sender by first name, anyone else gets a made-up @persona.com; unsigned asks their name
+  // demo drafts: an inbox sender by first name, anyone else gets a made-up @example.com; unsigned asks their name
   cx.transcript.push({ id: "u-cx1", role: "user", channel: "text", text: "yes send an email to maya saying im free friday at noon", ts: Date.now() });
   const cxCtx = { s: cx, channel: "text" as const, actions: [], newMessages: [] };
   const cxOut = await runTool(cxCtx, "save_draft", { to: "", subject: "Re: final round", body: "Hi Maya,\n\nI'm free Friday at noon.\n\nBest" });
-  check("demo draft to 'maya' uses her inbox address", cx.draft?.to === "maya.chen@persona.com", String(cx.draft?.to));
+  check("demo draft to 'maya' uses her inbox address", cx.draft?.to === "maya.chen@example.com", String(cx.draft?.to));
   check("unsigned draft with no known name: ask what name to sign it with", /ask what name to sign it with/.test(cxOut), cxOut);
   cx.transcript.push({ id: "u-cx2", role: "user", channel: "text", text: "email jordan that i'm running late", ts: Date.now() });
   await runTool(cxCtx, "save_draft", { to: "", subject: "running late", body: "Hi Jordan,\n\nRunning late.\n\nKrish" });
-  check("demo draft to someone not in the inbox: made-up @persona.com", cx.draft?.to === "jordan@persona.com", String(cx.draft?.to));
+  check("demo draft to someone not in the inbox: made-up @example.com", cx.draft?.to === "jordan@example.com", String(cx.draft?.to));
   cx.transcript.push({ id: "u-cx3", role: "user", channel: "text", text: "yes send it", ts: Date.now() });
   const cxSent = await runTool(cxCtx, "send_email", {});
   check("demo send plays it straight: 'sent'", /^sent to jordan@persona\.com/.test(cxSent) && !!cx.draft?.sent, cxSent);

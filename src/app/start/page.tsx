@@ -11,7 +11,7 @@ export const metadata: Metadata = {
 };
 
 // the real number + prefilled first text from yourpersona.com/start
-const SMS_HREF = "sms:+12138656308?&body=Hey%2C%20what%27s%20a%20persona%3F";
+const SMS_HREF = "sms:+16505550142?&body=Hey%2C%20what%27s%20a%20persona%3F";
 const EASE = "ease-[cubic-bezier(.32,.72,0,1)]";
 
 function Arrow() {
@@ -62,7 +62,7 @@ export default function Start() {
           </span>
           <span className="flex min-w-0 flex-auto flex-col gap-px">
             <span className="text-[14px] font-medium text-[#3a3a3c] dark:text-[#d1d1d6]">Continue with iMessage</span>
-            <span className="text-[12.5px] text-[#86868b] dark:text-ink-faint">Text +1 (213) 865-6308</span>
+            <span className="text-[12.5px] text-[#86868b] dark:text-ink-faint">Text +1 (650) 555-0142</span>
           </span>
         </a>
       </div>
