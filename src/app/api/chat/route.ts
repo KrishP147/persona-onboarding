@@ -1,6 +1,7 @@
 import { z } from "zod";
 import { SessionBusyError, withSession } from "@/lib/store";
 import { handleUserMessage } from "@/lib/engine";
+import { keysFrom, scrub, withKeys } from "@/lib/keys";
 
 const Body = z.object({
   sessionId: z.string().regex(/^[A-Za-z0-9_-]{6,32}$/),
@@ -30,16 +31,21 @@ export async function POST(req: Request) {
   if (!parsed.success) return Response.json({ error: "bad request" }, { status: 400 });
   const { sessionId, channel, text, attachments, interrupted, clientId, heardBefore, tz, replyTo } = parsed.data;
   if (!text.trim() && !attachments?.length) return Response.json({ error: "empty message" }, { status: 400 });
+  // the visitor's own keys (if any) apply to this turn only
+  const keys = keysFrom(req);
   try {
-    const result = await withSession(sessionId, (s) => {
-      if (tz && validTz(tz)) s.tz = tz;
-      return handleUserMessage(s, channel, text, attachments, interrupted, clientId, heardBefore, replyTo);
-    });
+    const result = await withKeys(keys, () =>
+      withSession(sessionId, (s) => {
+        if (tz && validTz(tz)) s.tz = tz;
+        return handleUserMessage(s, channel, text, attachments, interrupted, clientId, heardBefore, replyTo);
+      }),
+    );
     return Response.json(result);
   } catch (err) {
     // Another turn on this session is still running: a retryable conflict, not a server error.
     if (err instanceof SessionBusyError) return Response.json({ error: "busy" }, { status: 409 });
-    console.error("chat turn failed", err);
+    console.error("chat turn failed", scrub(err, keys));
+
     return Response.json({ error: "turn failed" }, { status: 500 });
   }
 }

@@ -156,7 +156,7 @@ export const guessVoice = (name: string): VoiceStyle => {
 };
 
 export async function classifyVoice(name: string): Promise<VoiceStyle> {
-  if (!provider) return guessVoice(name);
+  if (!provider()) return guessVoice(name);
   try {
     const t = (
       await quick({

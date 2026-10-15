@@ -1,9 +1,11 @@
 import { incrDaily, loadSession } from "@/lib/store";
+import { keysFrom } from "@/lib/keys";
 
 // Voice notes in the text thread: the browser records, we transcribe with Deepgram (pre-recorded),
 // and the transcript goes to the agent like any typed message. The audio itself isn't stored.
 export async function POST(req: Request) {
-  const key = process.env.DEEPGRAM_API_KEY;
+  // the visitor's own key wins; with none at all, voice notes are off (the client says so)
+  const key = keysFrom(req).deepgram || process.env.DEEPGRAM_API_KEY;
   if (!key) return Response.json({ error: "not configured" }, { status: 503 });
   const id = new URL(req.url).searchParams.get("s") ?? "";
   if (!/^[A-Za-z0-9_-]{6,32}$/.test(id) || !(await loadSession(id).catch(() => null))) {
@@ -22,7 +24,8 @@ export async function POST(req: Request) {
     signal: AbortSignal.timeout(20000),
   });
   if (!res.ok) {
-    console.error("deepgram transcribe failed", res.status, await res.text().catch(() => ""));
+    console.error("deepgram transcribe failed", res.status);
+
     return Response.json({ error: "transcription failed" }, { status: 502 });
   }
   const data = (await res.json()) as {

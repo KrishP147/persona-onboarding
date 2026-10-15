@@ -14,7 +14,7 @@ export interface Extracted {
 const EMPTY: Extracted = { agentName: null, userName: null, helpNeed: null, declined: [] };
 
 export async function extract(s: Session, userText: string): Promise<Extracted> {
-  if (!provider || !userText.trim()) return EMPTY;
+  if (!provider() || !userText.trim()) return EMPTY;
   // Every call counts against a small free quota: skip when there's nothing it could find.
   const open = s.slots.userName.status !== "filled" || s.slots.helpNeed.status !== "filled" || s.slots.agentName.status !== "filled";
   const renaming = /\b(call (me|you|yourself)|my name|rename|actually)\b/i.test(userText);
@@ -114,7 +114,7 @@ export async function reconcileCall(s: Session): Promise<Reconciled> {
   const start = s.call.startedAt ?? 0;
   const lines = s.transcript.filter((m) => m.role === "user" && m.channel === "voice" && m.ts >= start).map((m) => m.text).filter((t) => t.trim());
   const open = (["userName", "helpNeed"] as const).filter((k) => s.slots[k].status === "missing");
-  if (!lines.length || !open.length || (!provider && reconcileHooks.run === defaultRun)) return {};
+  if (!lines.length || !open.length || (!provider() && reconcileHooks.run === defaultRun)) return {};
   let got: Reconciled;
   try {
     got = await reconcileHooks.run(lines, [...open]);

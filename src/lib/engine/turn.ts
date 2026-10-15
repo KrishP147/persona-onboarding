@@ -8,6 +8,7 @@ import { connectDemo } from "../google";
 import { EVENT_MOVES, chooseMove, markUsed, pick, withAngle } from "../moves";
 import { applyExtracted, extract } from "../extract";
 import { webEnabled } from "../web";
+import { scrub } from "../keys";
 import { teamActive, teamLine, teamLineVoice, teamMatch, teamNote, teamYes, teamYesVoice } from "../team";
 
 import { currentMeter, metered, percentile, recordTurn, type Meter } from "../usage";
@@ -20,7 +21,7 @@ import { handleEvent } from "./events";
 
 export const HISTORY_LIMIT = 16; // recent context is what matters; slots and STATE carry the rest (and it keeps each call small)
 
-export const usingMock = () => provider === null;
+export const usingMock = () => provider() === null;
 
 export function attachmentText(a: Attachment) {
   return `[${a.kind}: ${a.name}${a.summary ? ` | ${a.summary}` : ""}]`;
@@ -62,7 +63,7 @@ export function toTurns(s: Session): Turn[] {
 
 export async function generate(ctx: Ctx, extraInstruction?: string): Promise<string> {
   const { s, channel } = ctx;
-  if (!provider) return extraInstruction ? "" : mockReply(ctx, runTool);
+  if (!provider()) return extraInstruction ? "" : mockReply(ctx, runTool);
   // The directive is computed once per turn; tool effects show up in the next turn's STATE.
   const d = computeDirective(s, channel);
   let state = directiveText(s, d, channel, !extraInstruction);
@@ -142,19 +143,20 @@ export async function turn(
     for (const h of hits) guard(ctx, h);
   } catch (err) {
     // Provider down or overloaded: fall through to the scripted line rather than go quiet.
-    console.error("llm turn failed", err);
+    console.error("llm turn failed", scrub(err));
     failed = true;
   }
   // An empty reply (no words, nothing shown) gets one retry before the scripted "say that again?": a run asked
   // "yeah send her an email" and got "sorry, i lost my train of thought" (the model had gone quiet, not down).
-  if (!failed && provider && !text.trim() && !ctx.newMessages.some((m) => m.kind !== "contact_card") && ctx.actions.length === 0) {
+  if (!failed && provider() && !text.trim() && !ctx.newMessages.some((m) => m.kind !== "contact_card") && ctx.actions.length === 0) {
     try {
       const again = "Your last reply came out empty. Answer their last message now in one or two short sentences. If you need a detail to do what they asked (a time, an address, what to say), ask for just that.";
       const raw = await generate(ctx, [extraInstruction, again].filter(Boolean).join(" "));
       text = cleanModelText(raw, s.slots.userName.value);
       guard(ctx, "empty reply: retried once");
     } catch (err) {
-      console.error("llm retry failed", err);
+      console.error("llm retry failed", scrub(err));
+
     }
   }
   s.llmFailures = failed ? (s.llmFailures ?? 0) + 1 : 0;
@@ -498,7 +500,7 @@ export function noteMetrics(s: Session, m: Meter) {
     x.latencies = [...x.latencies, m.latencyMs].slice(-100);
     x.p50 = percentile(x.latencies, 50);
     x.p95 = percentile(x.latencies, 95);
-    const model = m.model ?? (provider ? `${provider} (unmetered)` : "mock");
+    const model = m.model ?? (provider() ? `${provider()} (unmetered)` : "mock");
     x.models[model] = (x.models[model] ?? 0) + 1;
     x.last = { model, latencyMs: m.latencyMs, cost: m.cost };
     void recordTurn({ ts: Date.now(), session: s.id, model, latencyMs: m.latencyMs, cost: m.cost, calls: m.calls });

@@ -6,9 +6,11 @@ import { GoogleGenAI, HarmBlockThreshold, HarmCategory, ThinkingLevel, type Cont
 import { recordUsage } from "./usage";
 import { addFloat, getFloat, incrDaily, incrTotal } from "./store";
 import { costOf } from "./usage";
+import { scrub, userKeys } from "./keys";
 
 // Hard dollar cap on Claude, shared across every server instance. When it's spent, calls stop
 // (the conversation falls back to its scripted lines) instead of running up a bill.
+// It only covers the server's own key: a visitor's own key (x-anthropic-key) is their money, uncapped here.
 const CLAUDE_BUDGET_USD = Number(process.env.CLAUDE_BUDGET_USD ?? 1.75);
 async function assertClaudeBudget() {
   const spent = await getFloat("claude-spend").catch(() => 0);
@@ -39,19 +41,21 @@ export interface ToolCall {
 
 const hasGemini = !!(process.env.GEMINI_API_KEY || process.env.GOOGLE_API_KEY);
 const hasAnthropic = !!(process.env.ANTHROPIC_API_KEY || process.env.ANTHROPIC_AUTH_TOKEN);
-export const provider: "gemini" | "anthropic" | null =
+const envProvider: "gemini" | "anthropic" | null =
   process.env.LLM_PROVIDER === "anthropic" && hasAnthropic ? "anthropic" : hasGemini ? "gemini" : hasAnthropic ? "anthropic" : null;
+// Per request: a visitor's own Anthropic key wins over whatever the server has (null = no key at all: mock mode).
+export const provider = (): "gemini" | "anthropic" | null => (userKeys().anthropic ? "anthropic" : envProvider);
 
 const MODELS = {
   gemini: { agent: process.env.GEMINI_MODEL ?? "gemini-3.5-flash-lite", fast: process.env.GEMINI_FAST_MODEL ?? "gemini-3.5-flash-lite" },
   anthropic: { agent: process.env.AGENT_MODEL ?? "claude-sonnet-5", fast: process.env.FAST_MODEL ?? "claude-haiku-4-5" },
 };
-export const models = () => (provider ? MODELS[provider] : MODELS.gemini);
+export const models = () => MODELS[provider() ?? "gemini"];
 
 // Local dev and test runs use a key from a separate Google project (its own free quota), so testing
 // can never use up the live demo's quota. Production only ever sees GEMINI_API_KEY.
 const geminiKey = (process.env.NODE_ENV !== "production" && process.env.GEMINI_API_KEY_TWO) || process.env.GEMINI_API_KEY || process.env.GOOGLE_API_KEY;
-const gemini = provider === "gemini" ? new GoogleGenAI({ apiKey: geminiKey }) : null;
+const gemini = envProvider === "gemini" ? new GoogleGenAI({ apiKey: geminiKey }) : null;
 // Cloudflare Workers AI: a free daily allowance, used as the second tier when gemini is out.
 // Any OpenAI-style chat completions endpoint (cloudflare workers ai, cohere's compatibility api).
 type Oai = { name: string; url: string; token: string; model: string };
@@ -71,7 +75,12 @@ const TEST_COHERE: Oai | null =
     ? { name: "cohere", url: "https://api.cohere.ai/compatibility/v1/chat/completions", token: process.env.COHERE_API_KEY, model: process.env.COHERE_MODEL ?? "command-a-03-2025" }
     : null;
 const anthropicClient = hasAnthropic ? new Anthropic() : null;
-const anthropic = provider === "anthropic" ? anthropicClient : null;
+const anthropic = envProvider === "anthropic" ? anthropicClient : null;
+// A client on the visitor's own key, for this request only (never cached, never logged).
+function visitorClaude(): Anthropic | null {
+  const apiKey = userKeys().anthropic;
+  return apiKey ? new Anthropic({ apiKey, authToken: null, maxRetries: 1 }) : null;
+}
 const fallback = process.env.LLM_FALLBACK === "anthropic" ? anthropicClient : null;
 type Via = "anthropic" | "cohere" | undefined;
 
@@ -148,7 +157,7 @@ async function geminiUsage(model: string, tag: string, u?: { promptTokenCount?: 
   });
 }
 
-async function anthropicUsage(model: string, tag: string, u: Anthropic.Usage) {
+async function anthropicUsage(model: string, tag: string, u: Anthropic.Usage, visitor = false) {
   const cost = costOf(model, { input: u.input_tokens, cacheRead: u.cache_read_input_tokens ?? 0, cacheWrite: u.cache_creation_input_tokens ?? 0, output: u.output_tokens });
   // Recorded first: its turn-meter update is synchronous, and the agent loop doesn't await this.
   const rec = recordUsage(model, tag, {
@@ -157,7 +166,8 @@ async function anthropicUsage(model: string, tag: string, u: Anthropic.Usage) {
     cacheWrite: u.cache_creation_input_tokens ?? 0,
     output: u.output_tokens,
   });
-  await addFloat("claude-spend", cost).catch(() => {});
+  // The server's budget only counts the server's own key.
+  if (!visitor) await addFloat("claude-spend", cost).catch(() => {});
   await rec;
 }
 
@@ -178,6 +188,8 @@ type Exec = (c: ToolCall) => Promise<string>;
 // Model/tool loop. Stops after the first round that produced text (more rounds only add
 // filler) unless a tool errored and the model needs to see why.
 export async function runToolLoop(o: LoopOpts, exec: Exec): Promise<LoopResult> {
+  const own = visitorClaude();
+  if (own) return anthropicLoop(own, o, exec, true);
   if (TEST_COHERE) return oaiLoop(TEST_COHERE, o, exec);
   if (gemini) {
     try {
@@ -189,7 +201,7 @@ export async function runToolLoop(o: LoopOpts, exec: Exec): Promise<LoopResult> 
         try {
           return await oaiLoop(CF, o, exec);
         } catch (cfErr) {
-          console.error("cloudflare failed:", String((cfErr as Error).message ?? cfErr).slice(0, 160));
+          console.error("cloudflare failed:", scrub((cfErr as Error).message ?? cfErr).slice(0, 160));
           err = cfErr;
         }
       }
@@ -198,7 +210,7 @@ export async function runToolLoop(o: LoopOpts, exec: Exec): Promise<LoopResult> 
       if (!fallback) throw err;
       if ((await incrDaily("anthropic-fallback").catch(() => Infinity)) > FALLBACK_DAILY_TURNS) throw err;
       if ((await incrTotal("anthropic-fallback").catch(() => Infinity)) > FALLBACK_TOTAL_TURNS) throw err;
-      console.error("gemini failed, falling back to anthropic:", String((err as Error).message ?? err).slice(0, 120));
+      console.error("gemini failed, falling back to anthropic:", scrub((err as Error).message ?? err).slice(0, 120));
       return anthropicLoop(fallback, o, exec);
     }
   }
@@ -342,7 +354,7 @@ async function geminiLoop(o: LoopOpts, exec: Exec): Promise<LoopResult> {
   return { text: out.get() };
 }
 
-async function anthropicLoop(client: Anthropic, o: LoopOpts, exec: Exec): Promise<LoopResult> {
+async function anthropicLoop(client: Anthropic, o: LoopOpts, exec: Exec, visitor = false): Promise<LoopResult> {
   const out = collector();
   const model = MODELS.anthropic.agent;
   const messages: Anthropic.MessageParam[] = o.turns.map((t) => ({
@@ -352,7 +364,7 @@ async function anthropicLoop(client: Anthropic, o: LoopOpts, exec: Exec): Promis
     ),
   }));
   for (let round = 0; round < o.maxRounds; round++) {
-    await assertClaudeBudget();
+    if (!visitor) await assertClaudeBudget();
     const response = await client.messages.create(
       {
       model,
@@ -367,7 +379,7 @@ async function anthropicLoop(client: Anthropic, o: LoopOpts, exec: Exec): Promis
       },
       { timeout: 20000 },
     );
-    void anthropicUsage(model, "agent", response.usage);
+    void anthropicUsage(model, "agent", response.usage, visitor);
     if (response.stop_reason === "refusal") return { text: "", refused: true };
     const roundText = response.content.filter((b): b is Anthropic.TextBlock => b.type === "text").map((b) => b.text).join("\n\n");
     const uses = response.content.filter((b): b is Anthropic.ToolUseBlock => b.type === "tool_use");
@@ -390,6 +402,13 @@ async function anthropicLoop(client: Anthropic, o: LoopOpts, exec: Exec): Promis
 }
 
 const claudeFor = (via: Via) => (via === "anthropic" ? anthropicClient : anthropic);
+
+// One-shot calls on the visitor's own key: fast model for helpers, agent model for the rest. No server budget.
+async function visitorOnce(client: Anthropic, model: string, tag: string, params: Omit<Anthropic.MessageCreateParamsNonStreaming, "model">) {
+  const r = await client.messages.create({ ...params, model });
+  await anthropicUsage(model, tag, r.usage, true);
+  return (r.content.find((b): b is Anthropic.TextBlock => b.type === "text")?.text ?? "").trim();
+}
 
 // Cohere (free trial key): used for testing only, as the harness's simulated users and grader.
 // Trial keys are rate limited and not meant for production traffic, so the demo never uses it.
@@ -425,6 +444,8 @@ async function cohereChat(system: string, user: string, maxTokens: number, schem
 // One-shot plain text (classifiers, simulated users).
 export async function quick(o: { system: string; user: string; maxTokens: number; tag: string; model?: string; via?: Via }): Promise<string> {
   if ((o.via === "cohere" || TEST_COHERE) && process.env.COHERE_API_KEY) return cohereChat(o.system, o.user, o.maxTokens);
+  const own = visitorClaude();
+  if (own) return visitorOnce(own, MODELS.anthropic.fast, o.tag, { max_tokens: o.maxTokens, system: o.system, messages: [{ role: "user", content: o.user }] });
   const claude = claudeFor(o.via);
   if (gemini && !(o.via === "anthropic" && claude)) {
     const chain = o.model ? [o.model] : FAST_CHAIN;
@@ -450,7 +471,19 @@ export async function quick(o: { system: string; user: string; maxTokens: number
 // One-shot structured output against a JSON schema.
 export async function json<T>(o: { system: string; user: string; schema: Record<string, unknown>; tag: string; via?: Via; fast?: boolean }): Promise<T> {
   if ((o.via === "cohere" || TEST_COHERE) && process.env.COHERE_API_KEY) return JSON.parse((await cohereChat(o.system, o.user, 1500, o.schema)) || "{}") as T;
+  const own = visitorClaude();
+  if (own) {
+    const model = o.fast ? MODELS.anthropic.fast : MODELS.anthropic.agent;
+    const text = await visitorOnce(own, model, o.tag, {
+      max_tokens: 1500,
+      output_config: { ...effortFor(model), format: { type: "json_schema", schema: o.schema } },
+      system: o.system,
+      messages: [{ role: "user", content: o.user }],
+    });
+    return JSON.parse(text || "{}") as T;
+  }
   const claude = claudeFor(o.via);
+
   if (gemini && !(o.via === "anthropic" && claude)) {
     // Background helpers (fast) only use the light model's quota, never the agent's.
     const chain = o.fast ? FAST_CHAIN : AGENT_CHAIN;

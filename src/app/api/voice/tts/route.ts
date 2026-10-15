@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { getSecret, incrDaily, loadSession, setSecret } from "@/lib/store";
+import { keysFrom } from "@/lib/keys";
 import { AURA_VOICES, CARTESIA_MODEL, CARTESIA_VERSION, CARTESIA_VOICES, ELEVEN_MODEL, ELEVEN_VOICES } from "@/lib/voice";
 
 const Body = z.object({
@@ -9,7 +10,7 @@ const Body = z.object({
 });
 
 type Style = z.infer<typeof Body>["style"];
-type Provider = { name: string; key: string | undefined; call: (key: string, text: string, style: Style) => Promise<Response> };
+type Provider = { name: string; key: string | undefined; call: (key: string, text: string, style: Style) => Promise<Response>; visitor?: boolean };
 
 // Voices in order of preference. A provider that's out of credits (or rejects the key) is skipped
 // for a while, so a call never switches voices sentence to sentence.
@@ -32,13 +33,25 @@ export async function POST(req: Request) {
   // Plenty for real calls, not enough to use this as a free text to speech service.
   if ((await incrDaily(`tts:${sessionId}`).catch(() => 0)) > 300) return Response.json({ error: "too many" }, { status: 429 });
 
-  for (const p of PROVIDERS) {
+  // The visitor's own keys go first; the server's (if any) after. Without any, the client uses browser speech.
+  const keys = keysFrom(req);
+  const mine: Provider[] = [
+    { name: "cartesia", key: keys.cartesia, call: cartesia, visitor: true },
+    { name: "deepgram", key: keys.deepgram, call: aura, visitor: true },
+  ];
+  for (const p of [...mine, ...PROVIDERS]) {
     if (!p.key) continue;
-    if ((await getSecret(`tts:${p.name}-out`).catch(() => null)) === "1") continue;
+    if (!p.visitor && (await getSecret(`tts:${p.name}-out`).catch(() => null)) === "1") continue;
     const res = await p.call(p.key, text, style).catch(() => null);
     if (res?.ok && res.body) return new Response(res.body, { headers: { "Content-Type": "audio/mpeg", "Cache-Control": "no-store" } });
     const status = res?.status ?? 0;
+    // a visitor's key failing says nothing about the server's own: log the status only, mark nothing
+    if (p.visitor) {
+      console.error(`${p.name} tts failed (visitor key)`, status);
+      continue;
+    }
     console.error(`${p.name} tts failed`, status, (await res?.text().catch(() => "")) ?? "");
+
     // Out of credits or a bad key won't fix itself mid-call: skip this provider for 6 hours.
     if (status === 401 || status === 402 || (p.name === "elevenlabs" && status === 429)) await setSecret(`tts:${p.name}-out`, "1", 6 * 3600).catch(() => {});
   }
