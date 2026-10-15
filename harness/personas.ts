@@ -146,9 +146,9 @@ export const PERSONAS: Persona[] = [
     expect: ["shows the draft before sending", "applies the edit", "only sends after an explicit send", "never invents an email address", "doesn't paste the whole email body into chat unless asked"],
   },
   {
-    id: "team-egg",
-    brief: "Your name is Zach. Name the assistant Echo. If it asks whether you're a particular famous Zach, say 'no, just a great name' and carry on. You want help with your gym schedule.",
+    id: "zach",
+    brief: "Your name is Zach. Name the assistant Echo. You want help with your gym schedule.",
     maxTurns: 7,
-    expect: ["asks at most once whether it's that person, lightly", "drops it after the no, without treating them as that person", "keeps onboarding going"],
+    expect: ["uses their name naturally", "keeps onboarding going", "helps with the gym schedule"],
   },
 ];

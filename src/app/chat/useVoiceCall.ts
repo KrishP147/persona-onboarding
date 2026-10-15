@@ -821,7 +821,7 @@ export function useVoiceCall(opts: {
     // Thinking out loud, like a person: a short "hmm" if the reply takes over ~1s, and "let me think
     // that through" if it's still coming at ~3s (clark & fox tree 2002: uh/um mark short vs long
     // delays; shiwa et al. 2008: fillers soften slow replies). Never on fast replies, never stacked twice.
-    // Which pause fits depends on what they said: nobody says "let me think" to "i'm zach". A simple answer
+    // Which pause fits depends on what they said: nobody says "let me think" to "i'm sam". A simple answer
     // (a name, a yes, a few words) gets silence, and only a plain "one sec." if the reply is really slow; a real
     // question or request can get a "hmm", then "let me think about that" once it's clearly taking a while.
     clear(fillerTimer);

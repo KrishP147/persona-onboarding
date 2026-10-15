@@ -130,8 +130,7 @@ export function emitAgentText(ctx: Ctx, raw: string) {
     ctx.newMessages.push(m);
     ctx.s.transcript.push(m);
   }
-  // emphasis only the voice needs: a capitalized "THE" ("is this THE zach?") is said "thee"
-  if (ctx.channel === "voice" && spoken) ctx.actions.push({ type: "speak", text: spoken.replace(/\bTHE\b/g, "thee") });
+  if (ctx.channel === "voice" && spoken) ctx.actions.push({ type: "speak", text: spoken });
 }
 
 export function eventMsg(s: Session, text: string): Msg {

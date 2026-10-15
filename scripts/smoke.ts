@@ -552,16 +552,6 @@ async function main() {
   await handleEvent(aio, { type: "open" });
   const aioR = await handleUserMessage(aio, "text", "call you nova, i need help sorting my inbox, send me the gmail link, and call me");
   check("all in one message: card, gmail link and the call", aioR.newMessages.some((m) => m.kind === "contact_card") && aioR.newMessages.some((m) => m.kind === "gmail_link") && aioR.actions.some((a) => a.type === "start_call"), said(aioR));
-  // easter egg: a persona team name gets "is this THE zach?", a yes gives the model their public bio, then normal
-  const egg = newSession();
-  await handleEvent(egg, { type: "open" });
-  await handleUserMessage(egg, "text", "luna");
-  egg.transcript.push({ id: "a-egg", role: "agent", channel: "text", text: "and what's your name?", ts: Date.now() });
-  const egg1 = await handleUserMessage(egg, "text", "i'm zach");
-  check("team name: 'woah, is this THE zach, founder of persona?'", /is this THE zach, founder of persona\?/.test(said(egg1)) && egg.teamGuess === "zach", said(egg1));
-  await handleUserMessage(egg, "text", "haha yes");
-  check("...a yes: they're recognized (bio goes to the model), asked only once", (egg.teamYes ?? []).includes("zach") && !/is this THE/.test(said(await handleUserMessage(egg, "text", "anyway i need help with email"))));
-  check("...the yes gets a code-written 'no way, an honor!'", egg.transcript.some((m) => m.role === "agent" && m.text === "no way, an honor!"));
   // "can you call my dentist?" is a call for someone else, never a ring to them; "can you call?" is
   const dent = newSession();
   await handleEvent(dent, { type: "open" });
@@ -574,14 +564,6 @@ async function main() {
   await handleUserMessage(cq, "text", "nova");
   const cqR = await handleUserMessage(cq, "text", "can you call?");
   check("...'can you call?' does", cqR.actions.some((a) => a.type === "start_call"), said(cqR));
-  // (keyless: no extractor to re-read the name, so set it as prod's extractor would)
-  egg.slots.userName = { ...egg.slots.userName, value: "Julia" };
-  const eggJ = await handleUserMessage(egg, "text", "actually im julia");
-  check("...switching to another team name asks again ('is this THE julia?')", /is this THE julia, from talent at persona\?/.test(said(eggJ)) && egg.teamGuess === "julia" && !(egg.teamYes ?? []).includes("julia"), said(eggJ));
-  // ...and back to zach: no third ask (a repeat would have been blocked into "i'm here."), the earlier yes still counts
-  egg.slots.userName = { ...egg.slots.userName, value: "Zach" };
-  const eggZ = await handleUserMessage(egg, "text", "jk i'm zach");
-  check("zach -> julia -> zach: no re-ask, still recognized as zach", !/is this THE|i'm here/.test(said(eggZ)) && (egg.teamAsked ?? []).join() === "zach,julia" && (egg.teamYes ?? []).includes("zach"), said(eggZ));
   // replay of a real call: "hang up and call me back in a minute" -> goodbye, hang up, ring back; the text says when
   const hb = newSession();
   await handleEvent(hb, { type: "open" });
@@ -670,21 +652,8 @@ async function main() {
   await handleUserMessage(ph, "text", "nova");
   const phR = await handleUserMessage(ph, "text", "can you call a pharmacy for me");
   check("'can you call a pharmacy for me' doesn't ring them", !phR.actions.some((a) => a.type === "start_call"), said(phR));
-  // on a call, the egg is spoken with its own emphasis; "THE" is said "thee" while the caption keeps THE
-  const ev = newSession();
-  await handleEvent(ev, { type: "open" });
-  await handleUserMessage(ev, "text", "aarav");
-  await handleEvent(ev, { type: "call_started" });
-  const evR = await handleUserMessage(ev, "voice", "hey aarav, i'm zach");
-  ev.slots.userName = { ...ev.slots.userName, value: "Zach", status: "filled" };
-  const evR2 = evR.newMessages.some((m) => /THE zach/.test(m.text)) ? evR : await handleUserMessage(ev, "voice", "hey, i'm zach");
-  const spokenEgg = evR2.actions.filter((a) => a.type === "speak").map((a) => ("text" in a ? a.text : "")).join(" ");
-  check("egg on a call: spoken as 'thee zach', caption keeps THE", /thee zach/.test(spokenEgg) && evR2.newMessages.some((m) => m.channel === "voice" && /THE zach/.test(m.text)), spokenEgg);
   const saidOut = await import("../src/lib/engine/context").then((c) => c.speakable("ok rn idk, lol. btw u can text me w/ questions"));
   check("texting shorthand becomes words on a call", saidOut === "ok right now i don't know, by the way you can text me with questions", saidOut);
-  const egg2 = newSession();
-  egg2.slots.userName = { value: "Sam", status: "filled", asks: 1, source: "text", updatedAt: Date.now() };
-  check("...other names: nothing", !/is this THE/.test(said(await handleUserMessage(egg2, "text", "hey"))) && !egg2.teamGuess);
   const yo = newSession();
   await handleEvent(yo, { type: "open" });
   await handleUserMessage(yo, "text", "yo");

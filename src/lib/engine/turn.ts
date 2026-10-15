@@ -9,7 +9,6 @@ import { EVENT_MOVES, chooseMove, markUsed, pick, withAngle } from "../moves";
 import { applyExtracted, extract } from "../extract";
 import { webEnabled } from "../web";
 import { scrub } from "../keys";
-import { teamActive, teamLine, teamLineVoice, teamMatch, teamNote, teamYes, teamYesVoice } from "../team";
 
 import { currentMeter, metered, percentile, recordTurn, type Meter } from "../usage";
 import { type Ctx, cardLine, emitAgentText, ensureCard, goodbyeLine, guard, msg, outageLine } from "./context";
@@ -78,8 +77,6 @@ export async function generate(ctx: Ctx, extraInstruction?: string): Promise<str
   const typed = s.transcript.filter((m) => m.role === "user" && m.channel === "text");
   const keep = [...new Set([...typed.filter((m) => /https?:\/\/|www\.|\S@\S/.test(m.text)).slice(-4), ...(s.call.active ? typed.slice(-3) : [])])];
   if (keep.length) state += `\nTHEY TYPED IN THE CHAT (recent; "the link i sent" means these): ${keep.map((m) => JSON.stringify(m.text.slice(0, 240))).join(", ")}`;
-  const member = teamActive(s);
-  if (member) state += `\n${teamNote(member)}`;
   if (extraInstruction) state += `\n\nINSTRUCTION: ${extraInstruction}`;
   if (!extraInstruction || ctx.softInstruction) {
     // One research-backed move per turn, chosen in code, so the principles actually get applied.
@@ -414,46 +411,10 @@ export async function nameAmbiguity(s: Session, channel: Channel, text: string, 
 
 export async function handleUserMessage(...args: Parameters<typeof handleUserMessageInner>): Promise<TurnResult> {
   const [s, channel, text] = args;
-  // easter egg follow up: a yes to "is this THE zach?" (anything else just moves on)
-  const guess = s.teamGuess;
-  if (guess && !(s.teamYes ?? []).includes(guess) && s.transcript.findLast((m) => m.role === "agent" && (!m.kind || m.kind === "text"))?.move?.id === "team") {
-    if (YES.test(text.replace(LAUGH_LEAD, "")) || /\b(it'?s me|that'?s me|the one|in the flesh|guilty)\b/i.test(text)) (s.teamYes ??= []).push(guess);
-  }
-  const justMet = !!guess && (s.teamYes ?? []).includes(guess) && !(s.teamGreetedFor ?? []).includes(guess);
-  if (justMet) (s.teamGreetedFor ??= []).push(guess);
   const [r, meter] = await metered(async () => sealGoodbye(s, await asTurnBy(s, "user", () => handleUserMessageInner(...args))));
   noteMetrics(s, meter);
-  // their name is on the persona team: "woah, is this THE zach?" in place of this turn's words (cards, links,
-  // a ringing call or a send stay; then it's back to normal)
-  // a yes to "is this THE zach?": a code-written "no way" first (a run's model skipped straight to the call offer)
-  if (justMet && guess) {
-    const ctx: Ctx = { s, channel: s.call.active ? "voice" : channel, actions: [], newMessages: [], move: { id: "team", label: "a familiar name", source: "easter egg" } };
-    emitAgentText(ctx, ctx.channel === "voice" ? teamYesVoice(guess) : teamYes(guess));
-    const [m] = ctx.newMessages;
-    const first = r.newMessages.findIndex((x) => x.role === "agent");
-    s.transcript.splice(s.transcript.indexOf(m), 1);
-    const at = first >= 0 ? s.transcript.indexOf(r.newMessages[first]) : -1;
-    s.transcript.splice(at >= 0 ? at : s.transcript.length, 0, m);
-    r.newMessages.splice(first >= 0 ? first : r.newMessages.length, 0, m);
-    r.actions.unshift(...ctx.actions);
-  }
-  const key = teamMatch(s);
-  if (key) {
-    // a new name ("actually i'm julia") is a new ask; a yes stays with its name (back to zach: still zach)
-    (s.teamAsked ??= []).push(key);
-    s.teamGuess = key;
-    const busy = r.actions.some((a) => a.type === "start_call" || a.type === "end_call") || !!s.lastSent;
-    const words = busy ? [] : r.newMessages.filter((m) => m.role === "agent" && (!m.kind || m.kind === "text") && !m.move?.id?.startsWith("default"));
-    s.transcript = s.transcript.filter((m) => !words.includes(m));
-    r.newMessages = r.newMessages.filter((m) => !words.includes(m));
-    if (words.length) r.actions = r.actions.filter((a) => a.type !== "speak");
-    const ctx: Ctx = { s, channel: s.call.active ? "voice" : channel, actions: [], newMessages: [], move: { id: "team", label: "a familiar name", source: "easter egg" } };
-    emitAgentText(ctx, ctx.channel === "voice" ? teamLineVoice(key) : teamLine(key));
-    r.newMessages.push(...ctx.newMessages);
-    r.actions.push(...ctx.actions);
-  }
   // "what do you know about me": the what-i-know card answers it (it's never shown unasked after setup).
-  if (args[1] === "text" && KNOW_ASK.test(args[2])) r.actions = [...(r.actions ?? []), { type: "show_know" }];
+  if (channel === "text" && KNOW_ASK.test(text)) r.actions = [...(r.actions ?? []), { type: "show_know" }];
   return r;
 }
 

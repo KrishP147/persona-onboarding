@@ -19,12 +19,12 @@ const MOVE_SLOT: Partial<Record<string, SlotKey>> = {
 // same preference order as src/lib/policy.ts ORDER.text (that file doesn't export it; duplicated here)
 const ORDER_TEXT: SlotKey[] = ["agentName", "helpNeed", "userName", "gmail"];
 
-// name ideas: the persona team (one per session, so it doesn't change under them)
-const NAME_IDEAS = ["zach", "tanay", "julia", "aarav", "mac", "jason", "yasser"];
+// name ideas (one per session, so it doesn't change under them)
+const NAME_IDEAS = ["nova", "max", "luna", "echo", "ivy", "milo", "sage"];
 const nameIdea = (id = "") => NAME_IDEAS[[...id].reduce((h, c) => (h * 31 + c.charCodeAt(0)) >>> 0, 7) % NAME_IDEAS.length];
 
 const EXAMPLE: Record<SlotKey, string> = {
-  agentName: "e.g. call you zach",
+  agentName: "e.g. call you nova",
   userName: "e.g. call me sam",
   helpNeed: "e.g. my inbox is a mess",
   gmail: "e.g. sure, send the link",
