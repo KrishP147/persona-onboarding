@@ -451,7 +451,7 @@ export async function saveDraftTool(ctx: Ctx, input: Record<string, unknown>): P
 }
 
 // Who "maya" is: an inbox sender whose first name they used (or the draft greets). On the demo inbox, anyone
-// else gets a made-up <name>@persona.com, so a sample send never stalls on "what's her email?".
+// else gets a made-up <name>@example.com, so a sample send never stalls on "what's her email?".
 export function recipientFor(s: Session, text: string): string {
   const words = new Set(text.toLowerCase().match(/\p{L}+/gu) ?? []);
   for (const seen of s.emailSeen ?? []) {
@@ -460,7 +460,7 @@ export function recipientFor(s: Session, text: string): string {
   }
   if (!isDemo(s)) return "";
   const name = text.match(/\b(?:to|email|message|text|tell|reply to|write to|hi|hey|hello|dear)\s+(\p{Lu}?\p{Ll}{1,19})\b/u)?.[1]?.toLowerCase();
-  return name && !/^(him|her|them|me|you|it|the|my|a|an|say|saying|back|there|everyone|all)$/.test(name) ? `${name}@persona.com` : "";
+  return name && !/^(him|her|them|me|you|it|the|my|a|an|say|saying|back|there|everyone|all)$/.test(name) ? `${name}@example.com` : "";
 }
 const isDemo = (s: Session) => s.gmailEmail === DEMO_EMAIL;
 
