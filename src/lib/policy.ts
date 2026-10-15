@@ -32,7 +32,7 @@ const SLOT_LABEL: Record<SlotKey, string> = {
   helpNeed: "something they could use help with",
 };
 
-// Preferred order per channel. Agent name is text-only (per the brief).
+// Preferred order per channel. Agent name is text-only (by design).
 const ORDER: Record<Channel, SlotKey[]> = {
   text: ["agentName", "helpNeed", "userName", "gmail"],
   voice: ["userName", "helpNeed", "gmail"],
@@ -75,7 +75,7 @@ export function computeDirective(s: Session, channel: Channel): Directive {
   const nextSlot = ORDER[channel].find((k) => isOpen(s, k)) ?? null;
 
   // They called us: their topic first. Setup can come back only after a few turns of theirs
-  // (the brief still wants it kept on track when something's missing).
+  // (it should still be kept on track when something's missing).
   const theirTurn = channel === "voice" && s.call.byUser && userTurnsThisCall(s) < INBOUND_OWN_TURNS;
   const mayAsk = nextSlot !== null && s.consecutiveAsks < MAX_CONSECUTIVE_ASKS && !theirTurn;
   if (!mayAsk && nextSlot) {

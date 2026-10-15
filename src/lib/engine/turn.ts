@@ -741,7 +741,7 @@ export async function handleUserMessageInner(
   if (s.slots.gmail.status === "missing" && !s.demoOffered && GMAIL_TROUBLE.test(clean) && s.transcript.some((m) => m.kind === "gmail_link")) {
     s.demoOffered = true;
     const ctx: Ctx = { s, channel: s.call.active ? "voice" : channel, actions: [], newMessages: [], move: EVENT_MOVES.honest };
-    emitAgentText(ctx, `ah, google only lets approved test accounts in during this trial, that's on us. ${DEMO_ASK}`);
+    emitAgentText(ctx, `ah, google only lets approved test accounts in for now, that's on us. ${DEMO_ASK}`);
     recordAsk(s, null, true);
     return { session: s, newMessages: [userMsg, ...(early?.msgs ?? []), ...ctx.newMessages], chips: computeDirective(s, channel).chips, actions: ctx.actions };
   }
@@ -930,6 +930,6 @@ export function defaultAgentName(s: Session) {
   s.agentNameDefaulted = true;
   if (s.lastAskedSlot === "agentName") s.lastAskedSlot = undefined;
 }
-// The sample inbox, for anyone google's sign-in won't let in (only approved test accounts during the trial).
+// The sample inbox, for anyone google's sign-in won't let in (only approved test accounts while the app is in testing).
 export const DEMO_MARK = "demo inbox";
 export const DEMO_ASK = `want to try it with a ${DEMO_MARK} instead? sample emails, same idea`;

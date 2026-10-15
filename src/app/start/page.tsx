@@ -5,7 +5,7 @@ import { Mark } from "@/components/landing/svgs";
 import { ThemeToggle } from "@/components/ThemeToggle";
 
 export const metadata: Metadata = {
-  title: "Persona (trial demo)",
+  title: "Persona onboarding (a project by Krish)",
   description: "Start texting your Persona.",
   robots: { index: false, follow: false },
 };
@@ -69,7 +69,7 @@ export default function Start() {
       <Link href="/" className="mt-[22px] text-[13px] text-[#86868b] no-underline dark:text-ink-faint">
         Back
       </Link>
-      <p className="text-[12.5px] text-[#86868b] dark:text-ink-faint">A trial demo by <a href="https://krishpunjabi.com" target="_blank" rel="noopener noreferrer" className="underline underline-offset-2 hover:text-ink">Krish</a> for Persona, not the real product.</p>
+      <p className="text-[12.5px] text-[#86868b] dark:text-ink-faint">A project by <a href="https://krishpunjabi.com" target="_blank" rel="noopener noreferrer" className="underline underline-offset-2 hover:text-ink">Krish</a>: an onboarding for a Persona-style assistant, not the real product.</p>
     </main>
   );
 }

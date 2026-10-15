@@ -9,7 +9,7 @@ const inter = Inter({ variable: "--font-inter", subsets: ["latin"] });
 const roboto = Roboto_Flex({ variable: "--font-roboto-flex", subsets: ["latin"] });
 
 export const metadata: Metadata = {
-  title: "Persona (trial demo)",
+  title: "Persona onboarding (a project by Krish)",
   description: "Your personal intelligence. A web build of the Persona onboarding.",
   icons: { icon: "/brand/persona-mark.svg", apple: "/brand/apple-icon.png" },
 };

@@ -2,8 +2,8 @@ import { withSession } from "@/lib/store";
 import { popupPage } from "../popup";
 import { connectDemo } from "@/lib/google";
 
-// A clearly labeled sample inbox. Always available: during the trial, real Google sign-in only works for
-// approved test accounts, and a reviewer who isn't one should still get to see the gmail step work.
+// A clearly labeled sample inbox. Always available: while the google app is in testing, real sign-in only works for
+// approved test accounts, and a visitor who isn't one should still get to see the gmail step work.
 export async function POST(req: Request) {
   const form = await req.formData();
   const sessionId = String(form.get("s") ?? "");

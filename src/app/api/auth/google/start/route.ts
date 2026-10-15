@@ -25,7 +25,7 @@ ${demoForm(sessionId, "Connect a demo account", false)}
     return popupPage({
       title: "Connect your Gmail",
       body: `<p><a class="btn" href="/api/auth/google/start?s=${sessionId}&go=1">Sign in with Google</a></p>
-<p class="small">Read-only inbox, drafts only with your ok. During this trial, Google sign-in works for approved test accounts only.</p>
+<p class="small">Read-only inbox, drafts only with your ok. For now, Google sign-in works for approved test accounts only.</p>
 ${demoForm(sessionId, "Use a demo inbox instead")}
 <p><a href="#" onclick="window.close()">Cancel</a></p>`,
     });
