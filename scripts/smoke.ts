@@ -454,7 +454,7 @@ async function main() {
   check("demo draft to someone not in the inbox: made-up @example.com", cx.draft?.to === "jordan@example.com", String(cx.draft?.to));
   cx.transcript.push({ id: "u-cx3", role: "user", channel: "text", text: "yes send it", ts: Date.now() });
   const cxSent = await runTool(cxCtx, "send_email", {});
-  check("demo send plays it straight: 'sent'", /^sent to jordan@persona\.com/.test(cxSent) && !!cx.draft?.sent, cxSent);
+  check("demo send plays it straight: 'sent'", /^sent to jordan@example\.com/.test(cxSent) && !!cx.draft?.sent, cxSent);
   // going by persona is a name like any other: its card goes out with it; "persona" then isn't a rename; "yo" is a greeting
   const pc = newSession();
   await handleEvent(pc, { type: "open" });
